@@ -1,0 +1,25 @@
+{
+  "title": "itemGroup.rusty_factory.main",
+  "icon": "rusty_factory:electric_crusher",
+  "items": [
+    "rusty_factory:wrench",
+    "rusty_factory:machine_casing",
+    "rusty_factory:coal_generator",
+    "rusty_factory:copper_cable",
+    "rusty_factory:electric_crusher",
+    "rusty_factory:electric_furnace",
+    "rusty_factory:mechanical_press",
+    "rusty_factory:conveyor_belt",
+    "rusty_factory:speed_upgrade",
+    "rusty_factory:energy_battery",
+    "rusty_factory:electronic_circuit",
+    "rusty_factory:steel_ingot",
+    "rusty_factory:steel_gear",
+    "rusty_factory:iron_plate",
+    "rusty_factory:copper_plate",
+    "rusty_factory:gold_plate",
+    "rusty_factory:iron_dust",
+    "rusty_factory:copper_dust",
+    "rusty_factory:gold_dust"
+  ]
+}

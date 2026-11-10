@@ -1,0 +1,9 @@
+id = "rusty_factory"
+name = "Rusty Factory"
+version = "0.1.0"
+description = "Industrial automation mod for Horizon: generators, copper cables, crusher, electric furnace, mechanical press, conveyor belts, and custom components."
+authors = ["Chinis"]
+api = "0.2"
+side = "both"
+capabilities = ["registries"]
+namespaces = []

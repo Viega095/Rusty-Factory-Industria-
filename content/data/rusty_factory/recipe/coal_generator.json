@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "III",
+    "IFI",
+    "CBC"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "F": "minecraft:furnace",
+    "C": "rusty_factory:copper_cable",
+    "B": "rusty_factory:machine_casing"
+  },
+  "result": {
+    "id": "rusty_factory:coal_generator",
+    "count": 1
+  }
+}

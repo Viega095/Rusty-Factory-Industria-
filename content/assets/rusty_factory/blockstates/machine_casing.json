@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "rusty_factory:block/machine_casing"
+    }
+  }
+}

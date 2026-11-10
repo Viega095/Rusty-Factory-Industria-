@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " I ",
+    "ISI",
+    " I "
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "S": "rusty_factory:steel_ingot"
+  },
+  "result": {
+    "id": "rusty_factory:steel_gear",
+    "count": 2
+  }
+}

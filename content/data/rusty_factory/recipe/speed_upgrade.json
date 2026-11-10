@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "RGR",
+    "GEG",
+    "RGR"
+  ],
+  "key": {
+    "R": "minecraft:sugar",
+    "G": "minecraft:gold_ingot",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:speed_upgrade",
+    "count": 1
+  }
+}

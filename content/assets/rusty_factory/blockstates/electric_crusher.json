@@ -1,0 +1,19 @@
+{
+  "variants": {
+    "facing=north": {
+      "model": "rusty_factory:block/electric_crusher"
+    },
+    "facing=east": {
+      "model": "rusty_factory:block/electric_crusher",
+      "y": 90
+    },
+    "facing=south": {
+      "model": "rusty_factory:block/electric_crusher",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "rusty_factory:block/electric_crusher",
+      "y": 270
+    }
+  }
+}

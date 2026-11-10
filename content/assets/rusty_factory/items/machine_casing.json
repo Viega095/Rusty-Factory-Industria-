@@ -1,0 +1,6 @@
+{
+  "model": {
+    "type": "minecraft:model",
+    "model": "rusty_factory:block/machine_casing"
+  }
+}

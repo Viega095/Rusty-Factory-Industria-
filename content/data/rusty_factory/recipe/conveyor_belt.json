@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "LLL",
+    "IRI",
+    "III"
+  ],
+  "key": {
+    "L": "minecraft:dried_kelp",
+    "I": "minecraft:iron_ingot",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rusty_factory:conveyor_belt",
+    "count": 4
+  }
+}

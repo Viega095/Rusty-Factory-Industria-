@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "CCC",
+    "FBF",
+    "CEC"
+  ],
+  "key": {
+    "C": "rusty_factory:copper_cable",
+    "F": "minecraft:furnace",
+    "B": "rusty_factory:machine_casing",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:electric_furnace",
+    "count": 1
+  }
+}

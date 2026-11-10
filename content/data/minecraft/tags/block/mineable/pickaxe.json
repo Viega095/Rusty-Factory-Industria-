@@ -1,0 +1,12 @@
+{
+  "replace": false,
+  "values": [
+    "rusty_factory:machine_casing",
+    "rusty_factory:coal_generator",
+    "rusty_factory:copper_cable",
+    "rusty_factory:electric_crusher",
+    "rusty_factory:electric_furnace",
+    "rusty_factory:mechanical_press",
+    "rusty_factory:conveyor_belt"
+  ]
+}

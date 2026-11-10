@@ -1,0 +1,7 @@
+fn rusty_factory_block_entity_tick(
+    game: &mut crate::game::Game<'_>,
+    pos: [i32; 3],
+    entity: &mut horizon_client::containers::ModBlockEntity,
+) {
+    crate::game::rusty_factory_glue::tick(game, pos, entity);
+}

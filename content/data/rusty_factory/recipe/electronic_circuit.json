@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "RRR",
+    "CGC",
+    "III"
+  ],
+  "key": {
+    "R": "minecraft:redstone",
+    "C": "minecraft:copper_ingot",
+    "G": "minecraft:gold_ingot",
+    "I": "minecraft:iron_ingot"
+  },
+  "result": {
+    "id": "rusty_factory:electronic_circuit",
+    "count": 2
+  }
+}
