@@ -1,10 +1,9 @@
 [package]
-name = "horizon-mod-rusty-factory"
-version = "0.1.0"
+name = "rusty_factory"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 publish = false
-description = "Rusty Factory for Horizon: industrial machines, copper energy cables, crusher, electric furnace, mechanical press, and conveyor belts."
 
 [lib]
 path = "mixins/rusty_factory/runtime.rs"

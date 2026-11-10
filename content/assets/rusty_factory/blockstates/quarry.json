@@ -1,0 +1,34 @@
+{
+  "variants": {
+    "facing=north,lit=false": {
+      "model": "rusty_factory:block/quarry"
+    },
+    "facing=east,lit=false": {
+      "model": "rusty_factory:block/quarry",
+      "y": 90
+    },
+    "facing=south,lit=false": {
+      "model": "rusty_factory:block/quarry",
+      "y": 180
+    },
+    "facing=west,lit=false": {
+      "model": "rusty_factory:block/quarry",
+      "y": 270
+    },
+    "facing=north,lit=true": {
+      "model": "rusty_factory:block/quarry_on"
+    },
+    "facing=east,lit=true": {
+      "model": "rusty_factory:block/quarry_on",
+      "y": 90
+    },
+    "facing=south,lit=true": {
+      "model": "rusty_factory:block/quarry_on",
+      "y": 180
+    },
+    "facing=west,lit=true": {
+      "model": "rusty_factory:block/quarry_on",
+      "y": 270
+    }
+  }
+}

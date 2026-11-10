@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "GDG",
+    "EBE",
+    "CPC"
+  ],
+  "key": {
+    "G": "rusty_factory:steel_gear",
+    "D": "minecraft:diamond_pickaxe",
+    "E": "rusty_factory:electronic_circuit",
+    "B": "rusty_factory:machine_casing",
+    "C": "rusty_factory:copper_cable",
+    "P": "rusty_factory:item_pipe"
+  },
+  "result": {
+    "id": "rusty_factory:quarry",
+    "count": 1
+  }
+}

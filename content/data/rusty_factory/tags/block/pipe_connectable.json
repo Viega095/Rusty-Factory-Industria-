@@ -1,0 +1,21 @@
+{
+  "replace": false,
+  "values": [
+    "rusty_factory:item_pipe",
+    "rusty_factory:quarry",
+    "rusty_factory:coal_generator",
+    "rusty_factory:electric_crusher",
+    "rusty_factory:electric_furnace",
+    "rusty_factory:mechanical_press",
+    "rusty_factory:conveyor_belt",
+    "minecraft:chest",
+    "minecraft:trapped_chest",
+    "minecraft:barrel",
+    "minecraft:hopper",
+    "minecraft:furnace",
+    "minecraft:blast_furnace",
+    "minecraft:smoker",
+    "minecraft:dropper",
+    "minecraft:dispenser"
+  ]
+}

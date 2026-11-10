@@ -1,0 +1,12 @@
+{
+  "parent": "minecraft:block/cube",
+  "textures": {
+    "particle": "rusty_factory:block/quarry_side",
+    "down": "rusty_factory:block/quarry_side",
+    "up": "rusty_factory:block/quarry_top",
+    "north": "rusty_factory:block/quarry_front",
+    "south": "rusty_factory:block/quarry_side",
+    "west": "rusty_factory:block/quarry_side",
+    "east": "rusty_factory:block/quarry_side"
+  }
+}

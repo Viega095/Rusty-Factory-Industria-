@@ -5,6 +5,7 @@
     "rusty_factory:electric_crusher",
     "rusty_factory:electric_furnace",
     "rusty_factory:mechanical_press",
+    "rusty_factory:quarry",
     "rusty_factory:copper_cable"
   ]
 }
