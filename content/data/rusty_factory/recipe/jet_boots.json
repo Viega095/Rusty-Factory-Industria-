@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "S S",
+    "B B",
+    "EFE"
+  ],
+  "key": {
+    "S": "rusty_factory:steel_ingot",
+    "B": "rusty_factory:energy_battery",
+    "E": "rusty_factory:electronic_circuit",
+    "F": "minecraft:feather"
+  },
+  "result": {
+    "id": "rusty_factory:jet_boots",
+    "count": 1
+  }
+}

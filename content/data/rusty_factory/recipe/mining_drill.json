@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "  H",
+    " GB",
+    "S E"
+  ],
+  "key": {
+    "H": "rusty_factory:diamond_drill_head",
+    "G": "rusty_factory:steel_gear",
+    "B": "rusty_factory:energy_battery",
+    "S": "rusty_factory:steel_ingot",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:mining_drill",
+    "count": 1
+  }
+}

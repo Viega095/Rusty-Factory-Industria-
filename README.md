@@ -1,68 +1,57 @@
-# ⚙️ Rusty Factory — Mod de Automatización Industrial para Horizon (Rust)
+# ⚙️ Rusty Factory v0.3.0 — Mod de Automatización Industrial para Horizon (Rust)
 
-Un mod completo de máquinas, energía eléctrica y logística industrial diseñado nativamente para **Horizon (Minecraft: Rust Edition 26.3)**.
+Un mod completo de máquinas, energía eléctrica, excavación 3D, agricultura automatizada y logística industrial diseñado nativamente para **Horizon (Minecraft: Rust Edition 26.3)**.
 
-Incluye tanto la parte de **Contenido (`.hmod`)** con bloques, ítems, modelos 3D, pestaña creativa, recetas y texturas pixel-art propias, como el **Módulo Nativo en Rust (`.hnmod`)** con simulación de redes eléctricas por grafos (BFS), procesamiento en cada *tick* e interfaz gráfica (GUI).
+Incluye tanto el paquete de **Contenido (`.hmod`)** con **16 bloques**, **18 ítems**, modelos 3D personalizados, animaciones `.png.mcmeta`, 4 interfaces gráficas (GUI), pestaña creativa y recetas, como el **Módulo Nativo en Rust (`.hnmod`)** con simulación de redes eléctricas y neumáticas por grafos (BFS), renderizado 3D en mundo (`world_primitives` y `block_entity_submit`) y controles interactivos.
 
 ---
 
-## 🧱 Bloques Incluidos (`rusty_factory:*`)
+## 🧱 Bloques Incluidos (16 Bloques — `rusty_factory:*`)
 
-| ID del Bloque | Nombre | Función |
+| ID del Bloque | Nombre | Función Principal |
 | :--- | :--- | :--- |
+| `quarry` | **Excavadora Industrial (Quarry 3D)** | Construye un marco 3D estilo BuildCraft detrás de la máquina (`5x5`, `7x7` o `9x9`) con puente grúa móvil, láser de minería animado y holograma 3D. Excava hasta Bedrock y envía todo por tuberías o cofres. |
+| `auto_harvester` | **Cosechadora y Taladora 3D** | Escanea un área configurable (`5x5`, `7x7` o `9x9`) con marco láser verde 3D. Cosecha cultivos maduros (`trigo`, `zanahorias`, `papas`, `remolacha`, `bayas`) replantándolos automáticamente (`age=0`), además de caña, bambú, melones, calabazas y troncos. |
+| `coal_generator` | **Generador Industrial a Carbón** | Quema carbón/combustible y genera **40+ FE/t** (hasta `20,000 FE`), distribuyendo energía por cables de cobre. |
+| `solar_generator` | **Panel Solar Fotovoltaico (3D)** | Bloque de media altura (`0.375` de alto) con celdas solares animadas. Genera energía limpia durante el día según la luz solar (`native_light`) y el clima (`native_weather`). |
+| `energy_bank` | **Banco de Capacitores (100k FE)** | Almacena hasta **100,000 FE**, muestra un holograma 3D flotante con su porcentaje de carga y distribuye hasta `400 FE/t` a las máquinas conectadas. |
+| `copper_cable` | **Cable de Energía de Cobre** | Tubería eléctrica 6-direcciones (`PipeBlock`) animada que conecta generadores, paneles solares, bancos de energía y máquinas. |
+| `item_pipe` | **Tubería Neumática de Ítems** | Tubería neumática 6-direcciones (`PipeBlock`) que se conecta a todas las máquinas, cintas y contenedores vanilla (`cofres`, `barriles`, `tolvas`, `hornos`). |
+| `item_extractor` | **Extractor Neumático de Ítems** | Bomba neumática que extrae ítems automáticamente de cofres, barriles u hornos adyacentes y los inyecta en la red de `item_pipe`. Permite poner un ítem en la ranura 0 como **Filtro Inteligente**. |
+| `conveyor_belt` | **Cinta Transportadora 3D** | Bloque mediano (`0.5` de altura) con rieles laterales 3D, rodillos, textura animada (8 frames) y renderizado 3D del ítem deslizándose sobre la cinta. Recoge ítems tirados encima y auto-extrae de contenedores traseros. |
+| `electric_crusher` | **Trituradora Eléctrica** | Duplica menas en **2x Polvos Minerales** (`iron_dust`, `copper_dust`, `gold_dust`), tritura cuarzo/arena en **Silicio** (`silicon`), y multiplica diamantes, esmeraldas y redstone. Compatible con `fortune_upgrade`. |
+| `electric_furnace` | **Horno Eléctrico de Inducción** | Funde polvos, menas, lingotes de hierro en **Acero** (`steel_ingot`), vidrio y comida a alta velocidad usando solo `FE`. |
+| `mechanical_press` | **Prensa Mecánica Hidráulica** | Prensa lingotes en placas (`iron_plate`, `copper_plate`, `gold_plate`), acero en engranajes (`steel_gear`), y fabrica cables y tuberías con mayor rendimiento. |
+| `industrial_assembler` | **Ensambladora Industrial Automática** | Aserradero y ensambladora robótica: corta troncos en **6 tablones**, y fabrica automáticamente circuitos, celdas solares, chasis, cintas, mejoras y cabezales de diamante. |
+| `block_breaker` | **Perforadora Rompe-Bloques** | Rompe automáticamente el bloque situado frente a ella (ideal para generadores de adoquín, basalto u obsidiana) y expulsa los drops a tuberías o cofres. |
+| `block_placer` | **Colocador Automático de Bloques** | Coloca automáticamente en el mundo los bloques que reciba en su ranura de entrada frente a su cara frontal. |
 | `machine_casing` | **Chasis de Máquina Industrial** | Bloque estructural base para fabricar todas las máquinas. |
-| `coal_generator` | **Generador Industrial a Carbón** | Quema carbón/combustible y genera **40 FE/t** (hasta `50,000 FE`), distribuyendo energía por cables conectados. |
-| `copper_cable` | **Cable de Energía de Cobre** | Bloque tipo tubería (`PipeBlock`) que se conecta automáticamente en las 6 direcciones con máquinas y otros cables. |
-| `electric_crusher` | **Trituradora Eléctrica** | Usa **20 FE/t** para duplicar menas en **2x Polvos Minerales** (`iron_dust`, `copper_dust`, `gold_dust`), diamantes, carbón o grava/arena. |
-| `electric_furnace` | **Horno Eléctrico de Inducción** | Usa **15 FE/t** para fundir polvos, menas, acero y comida al doble de velocidad sin usar carbón. |
-| `mechanical_press` | **Prensa Mecánica Hidráulica** | Usa **25 FE/t** para prensar lingotes en placas (`iron_plate`, `copper_plate`, `gold_plate`) y `steel_ingot` en `steel_gear`. |
-| `conveyor_belt` | **Cinta Transportadora Industrial** | Mueve ítems automáticamente hacia el contenedor o máquina que tiene enfrente. |
 
 ---
 
-## 🔧 Ítems y Componentes (`rusty_factory:*`)
+## 🔧 Ítems, Herramientas y Componentes (18 Ítems — `rusty_factory:*`)
 
-* **`wrench` (Llave Inglesa Industrial):** Haz clic derecho sobre cualquier máquina o cable de cobre para inspeccionar su energía almacenada (`FE`), estado de la red y progreso.
-* **`speed_upgrade` (Mejora de Velocidad Overclock):** Se coloca en la ranura de mejora de cualquier máquina para acelerar su velocidad de trabajo.
-* **`energy_battery` (Celda de Batería Industrial):** Batería portátil que puede colocarse en la ranura de energía de una máquina para cargarla instantáneamente (`+2000 FE`).
-* **`electronic_circuit` (Circuito de Control Electrónico):** Componente avanzado para máquinas eléctricas.
-* **`steel_ingot` y `steel_gear`:** Lingote y engranaje de acero templado.
-* **`iron_plate`, `copper_plate`, `gold_plate`:** Placas metálicas prensadas.
-* **`iron_dust`, `copper_dust`, `gold_dust`:** Polvos minerales obtenidos en la trituradora (se funden en lingotes).
+* **`wrench` (Llave Inglesa Industrial):** Haz clic derecho sobre cables de cobre o tuberías de ítems para inspeccionar la red o impulsar extracción manual.
+* **`mining_drill` (Taladro Minero Eléctrico de Diamante):** Herramienta de minería avanzada de nivel Netherite/Diamante.
+* **`jet_boots` (Exo-Botas Industriales de Titanio):** Botas industriales reforzadas de nivel épico.
+* **`speed_upgrade` (Mejora de Velocidad Overclock):** Acelera hasta un `+80%` la velocidad de cualquier máquina, cinta, extractor o generador.
+* **`fortune_upgrade` (Mejora de Fortuna Industrial):** Aumenta el rendimiento de minerales, polvos y cultivos en la **Quarry**, **Trituradora**, **Cosechadora** y **Rompe-Bloques**.
+* **`energy_battery` (Celda de Batería Industrial):** Recarga máquinas y bancos de energía al colocarse en la ranura de combustible.
+* **`electronic_circuit`, `solar_cell`, `silicon`, `diamond_drill_head`:** Componentes electrónicos y de perforación avanzada.
+* **`steel_ingot`, `steel_gear`, `iron_plate`, `copper_plate`, `gold_plate`, `iron_dust`, `copper_dust`, `gold_dust`:** Materiales metalúrgicos del árbol tecnológico.
 
 ---
 
-## 🎨 Cómo reemplazar mis texturas y modelos por los tuyos
+## 🚀 Cómo instalar o importar en Horizon
 
-Todas las texturas generadas son archivos PNG estándar de `16x16` píxeles (y `176x166` para la GUI). Puedes editarlas con **Blockbench**, **Aseprite** o cualquier editor de imágenes en:
+### Opción 1: Desde GitHub en Horizon Launcher
+Importa directamente el repositorio:
+`https://github.com/Viega095/Rusty-Factory-Industria-.git`
 
-* **Texturas de Bloques (`16x16`):** `content/assets/rusty_factory/textures/block/`
-  * `machine_casing.png`, `machine_side.png`, `machine_top.png`
-  * `coal_generator_front.png`, `electric_crusher_front.png`, `electric_furnace_front.png`, `mechanical_press_front.png`
-  * `conveyor_belt_top.png`, `conveyor_belt_front.png`, `copper_cable.png`
-* **Texturas de Ítems (`16x16`):** `content/assets/rusty_factory/textures/item/`
-  * `wrench.png`, `speed_upgrade.png`, `energy_battery.png`, `electronic_circuit.png`
-  * `steel_ingot.png`, `steel_gear.png`, `iron_plate.png`, `copper_plate.png`, `gold_plate.png`
-  * `iron_dust.png`, `copper_dust.png`, `gold_dust.png`
-* **Textura de Interfaz GUI (`176x166`):** `content/assets/rusty_factory/textures/gui/machine.png`
-
-Una vez que reemplaces tus texturas o edites recetas/modelos, ejecuta:
-
+### Opción 2: Instalación automática local
+Ejecuta en PowerShell:
 ```powershell
-python tools/package.py
+python tools/make_textures.py
+python tools/install_to_horizon.py
 ```
-
-Esto actualizará automáticamente los paquetes listos para instalar en la carpeta `dist/`:
-* `dist/rusty_factory-0.1.0.hmod`
-* `dist/rusty_factory_native-0.1.0.hnmod`
-
----
-
-## 🚀 Cómo probarlo en Horizon
-
-1. **Para probar los bloques, ítems, recetas y modelos al instante (Content Mod):**
-   * Copia `dist/rusty_factory-0.1.0.hmod` (o la carpeta `content/`) dentro de la carpeta `horizon-mods/` de tu instancia de Horizon.
-   * Encontrarás todos los bloques e ítems en la pestaña creativa **"Rusty Factory (Industria)"**.
-2. **Para compilar con la lógica nativa en Rust (`.hnmod`):**
-   * Importa `dist/rusty_factory_native-0.1.0.hnmod` en la pestaña **Mods** de **Horizon Launcher** y presiona **Build**.
-   * Dentro del juego también puedes usar el comando de operador `/rustyfactory kit` para recibir un kit completo de máquinas y cables.
+Dentro del juego puedes usar la pestaña creativa **"Rusty Factory (Industria)"** o ejecutar el comando `/rustyfactory kit` para recibir todas las máquinas, paneles solares, quarry, cosechadora y herramientas.

@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "GCG",
+    "EBE",
+    "CPC"
+  ],
+  "key": {
+    "G": "rusty_factory:steel_gear",
+    "C": "minecraft:crafting_table",
+    "E": "rusty_factory:electronic_circuit",
+    "B": "rusty_factory:machine_casing",
+    "P": "rusty_factory:copper_cable"
+  },
+  "result": {
+    "id": "rusty_factory:industrial_assembler",
+    "count": 1
+  }
+}

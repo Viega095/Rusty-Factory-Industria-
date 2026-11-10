@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "IDI",
+    "PBP",
+    "CEC"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "D": "minecraft:dispenser",
+    "P": "minecraft:piston",
+    "B": "rusty_factory:machine_casing",
+    "C": "rusty_factory:copper_cable",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:block_placer",
+    "count": 1
+  }
+}

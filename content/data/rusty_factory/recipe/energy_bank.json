@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "ABA",
+    "BCB",
+    "AEA"
+  ],
+  "key": {
+    "A": "rusty_factory:steel_ingot",
+    "B": "rusty_factory:energy_battery",
+    "C": "rusty_factory:machine_casing",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:energy_bank",
+    "count": 1
+  }
+}

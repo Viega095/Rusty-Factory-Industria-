@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "SSS",
+    "CEC",
+    "IBI"
+  ],
+  "key": {
+    "S": "rusty_factory:solar_cell",
+    "C": "rusty_factory:copper_cable",
+    "E": "rusty_factory:electronic_circuit",
+    "I": "rusty_factory:iron_plate",
+    "B": "rusty_factory:machine_casing"
+  },
+  "result": {
+    "id": "rusty_factory:solar_generator",
+    "count": 1
+  }
+}

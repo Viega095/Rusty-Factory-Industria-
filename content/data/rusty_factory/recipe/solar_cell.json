@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "GGG",
+    "LLL",
+    "SCS"
+  ],
+  "key": {
+    "G": "minecraft:glass",
+    "L": "minecraft:lapis_lazuli",
+    "S": "rusty_factory:silicon",
+    "C": "rusty_factory:copper_plate"
+  },
+  "result": {
+    "id": "rusty_factory:solar_cell",
+    "count": 2
+  }
+}

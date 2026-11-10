@@ -2,10 +2,16 @@
   "replace": false,
   "values": [
     "rusty_factory:coal_generator",
+    "rusty_factory:solar_generator",
+    "rusty_factory:energy_bank",
     "rusty_factory:electric_crusher",
     "rusty_factory:electric_furnace",
     "rusty_factory:mechanical_press",
+    "rusty_factory:industrial_assembler",
     "rusty_factory:quarry",
+    "rusty_factory:auto_harvester",
+    "rusty_factory:block_breaker",
+    "rusty_factory:block_placer",
     "rusty_factory:copper_cable"
   ]
 }

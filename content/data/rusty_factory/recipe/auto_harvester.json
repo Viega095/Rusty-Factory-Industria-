@@ -1,0 +1,22 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "GAG",
+    "HBI",
+    "CEC"
+  ],
+  "key": {
+    "G": "rusty_factory:steel_gear",
+    "A": "minecraft:iron_axe",
+    "H": "minecraft:iron_hoe",
+    "B": "rusty_factory:machine_casing",
+    "I": "rusty_factory:item_pipe",
+    "C": "rusty_factory:copper_cable",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:auto_harvester",
+    "count": 1
+  }
+}

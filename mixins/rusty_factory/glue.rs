@@ -138,6 +138,8 @@ fn is_item_container_block(block_id: &str) -> bool {
             | rules::BLOCK_CRUSHER
             | rules::BLOCK_FURNACE
             | rules::BLOCK_PRESS
+            | rules::BLOCK_ASSEMBLER
+            | rules::BLOCK_PLACER
             | rules::BLOCK_CONVEYOR
             | rules::BLOCK_GENERATOR
     )
@@ -198,8 +200,14 @@ fn try_auto_eject_output(
     }
 }
 
-/// Distributes generated FE from a Coal Generator across connected copper cables and adjacent machines.
-fn distribute_energy(game: &mut Game<'_>, gen_pos: [i32; 3], available: i32) -> i32 {
+/// Distributes FE from a Generator, Solar Panel, or Energy Bank across connected copper cables and adjacent machines.
+/// If `source_is_bank` is true, it will not send energy into another Energy Bank (preventing loops).
+fn distribute_energy(
+    game: &mut Game<'_>,
+    gen_pos: [i32; 3],
+    available: i32,
+    source_is_bank: bool,
+) -> i32 {
     if available <= 0 {
         return 0;
     }
@@ -207,15 +215,13 @@ fn distribute_energy(game: &mut Game<'_>, gen_pos: [i32; 3], available: i32) -> 
         gen_pos,
         |p| game.native_block(p) == rules::BLOCK_CABLE,
         |p| {
-            matches!(
-                MachineKind::from_block_id(&game.native_block(p)),
-                Some(
-                    MachineKind::ElectricCrusher
-                        | MachineKind::ElectricFurnace
-                        | MachineKind::MechanicalPress
-                        | MachineKind::Quarry
-                )
-            )
+            let Some(k) = MachineKind::from_block_id(&game.native_block(p)) else {
+                return false;
+            };
+            if source_is_bank && k == MachineKind::EnergyBank {
+                return false;
+            }
+            k.is_energy_consumer()
         },
     );
 
@@ -231,7 +237,7 @@ fn distribute_energy(game: &mut Game<'_>, gen_pos: [i32; 3], available: i32) -> 
         game.native_with_mod_block_entity(target_pos, |target_entity| {
             let mut st = load_state(target_entity).unwrap_or_else(|| MachineState::new(kind));
             let space = (kind.max_energy() - st.energy).max(0);
-            let send = remaining.min(space).min(200);
+            let send = remaining.min(space).min(300);
             if send > 0 {
                 st.energy += send;
                 transferred = send;
@@ -365,6 +371,7 @@ fn tick_quarry(
     state: &mut MachineState,
     fuel_ticks: Option<i32>,
     speed_upgrades: u32,
+    fortune_upgrades: u32,
 ) -> (StepStatus, i32) {
     let outcome = rules::step_machine(state, None, fuel_ticks, None, speed_upgrades);
     if outcome.consume_fuel {
@@ -423,38 +430,26 @@ fn tick_quarry(
             }
 
             let block_id = game.native_block(target_pos);
-            if let Some((drop_item, drop_count)) = rules::quarry_drop_for_block(&block_id) {
+            if let Some((drop_item, base_count)) = rules::quarry_drop_for_block(&block_id) {
                 if let Some(air_state) = game.native_default_state("minecraft:air") {
                     game.native_set_block(dim, target_pos, air_state, 3);
                 }
                 state.quarry_mined += 1;
                 state.last_target = target_pos;
 
+                let bonus = if block_id.ends_with("_ore") || block_id == "minecraft:ancient_debris" {
+                    fortune_upgrades.min(4)
+                } else {
+                    0
+                };
                 let produced = ItemStack {
                     item: drop_item.into(),
-                    count: drop_count,
+                    count: base_count + bonus,
                     damage: 0,
                     extra: None,
                 };
 
-                // Put into output slot or route directly into pipes/chests
-                let mut rest = Some(produced);
-                if state.auto_io {
-                    rest = route_item_from(game, pos, rest.take().unwrap());
-                }
-                if let Some(leftover) = rest {
-                    match entity.items[rules::SLOT_OUTPUT].as_mut() {
-                        Some(existing) if &*existing.item == &*leftover.item => {
-                            let max_s = game.native_max_stack_size(&existing.item).unwrap_or(64);
-                            existing.count = (existing.count + leftover.count).min(max_s);
-                        }
-                        None => {
-                            entity.items[rules::SLOT_OUTPUT] = Some(leftover);
-                        }
-                        _ => {}
-                    }
-                }
-
+                store_or_route_output(game, pos, entity, state.auto_io, produced);
                 store_state(entity, state);
                 game.native_block_entity_sync(pos);
                 break;
@@ -464,6 +459,331 @@ fn tick_quarry(
 
     if state.auto_io && entity.items[rules::SLOT_OUTPUT].is_some() {
         try_auto_eject_output(game, pos, entity, 4);
+    }
+
+    (StepStatus::Working, -cost)
+}
+
+/// Inserts `produced` into connected pipes/containers (if `auto_io`) or `SLOT_OUTPUT`.
+fn store_or_route_output(
+    game: &mut Game<'_>,
+    pos: [i32; 3],
+    entity: &mut ModBlockEntity,
+    auto_io: bool,
+    produced: ItemStack,
+) {
+    let mut rest = Some(produced);
+    if auto_io {
+        rest = route_item_from(game, pos, rest.take().unwrap());
+    }
+    if let Some(leftover) = rest {
+        match entity.items[rules::SLOT_OUTPUT].as_mut() {
+            Some(existing) if &*existing.item == &*leftover.item => {
+                let max_s = game.native_max_stack_size(&existing.item).unwrap_or(64);
+                existing.count = (existing.count + leftover.count).min(max_s);
+            }
+            None => {
+                entity.items[rules::SLOT_OUTPUT] = Some(leftover);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Simulates the 3D Automated Crop & Tree Harvester (`rusty_factory:auto_harvester`):
+/// Scans a configurable `5x5`, `7x7`, or `9x9` area behind it, replants mature crops (`age=0`),
+/// harvests sugar cane / bamboo / melons / pumpkins / wood logs, and routes drops into pipes/chests!
+fn tick_harvester(
+    game: &mut Game<'_>,
+    pos: [i32; 3],
+    entity: &mut ModBlockEntity,
+    state: &mut MachineState,
+    fuel_ticks: Option<i32>,
+    speed_upgrades: u32,
+    fortune_upgrades: u32,
+) -> (StepStatus, i32) {
+    let outcome = rules::step_machine(state, None, fuel_ticks, None, speed_upgrades);
+    if outcome.consume_fuel {
+        consume_one_fuel(entity);
+    }
+    if outcome.status != StepStatus::Working {
+        return (outcome.status, 0);
+    }
+
+    let cost = rules::effective_energy_cost(MachineKind::AutoHarvester, speed_upgrades);
+    let needed = rules::effective_work_ticks(MachineKind::AutoHarvester, speed_upgrades);
+
+    state.energy -= cost;
+    state.progress += 1;
+
+    if state.progress >= needed {
+        state.progress = 0;
+        let facing = game
+            .native_block_property(pos, "facing")
+            .unwrap_or_else(|| "north".to_owned());
+        let side = state.quarry_side_len();
+        let layer_area = side * side;
+        let dim = game.native_dimension();
+
+        for _ in 0..8 {
+            let target_pos = rules::harvester_target_pos(pos, &facing, state);
+            state.quarry_cursor += 1;
+            if state.quarry_cursor >= layer_area {
+                state.quarry_cursor = 0;
+                state.quarry_y_offset = (state.quarry_y_offset + 1) % 2;
+            }
+
+            let block_id = game.native_block(target_pos);
+            let age_prop = game.native_block_property(target_pos, "age");
+            if let Some((drop_item, base_count, replant)) =
+                rules::harvester_drop_for_block(&block_id, age_prop.as_deref())
+            {
+                // For sugar cane / bamboo / cactus at base Y, only break if there is another one above or we are at Y+1
+                if matches!(
+                    block_id.as_str(),
+                    "minecraft:sugar_cane" | "minecraft:bamboo" | "minecraft:cactus"
+                ) && target_pos[1] == pos[1]
+                {
+                    let above = [target_pos[0], target_pos[1] + 1, target_pos[2]];
+                    if game.native_block(above) == block_id {
+                        if let Some(air_state) = game.native_default_state("minecraft:air") {
+                            game.native_set_block(dim, above, air_state, 3);
+                        }
+                        state.last_target = above;
+                    } else {
+                        continue;
+                    }
+                } else if replant {
+                    // Replant mature crop back to growth stage 0 (or stage 1 for sweet berry bushes)
+                    let reset_age = if block_id == "minecraft:sweet_berry_bush" {
+                        "1"
+                    } else {
+                        "0"
+                    };
+                    game.native_set_block_property(target_pos, "age", reset_age);
+                    state.last_target = target_pos;
+                } else {
+                    if let Some(air_state) = game.native_default_state("minecraft:air") {
+                        game.native_set_block(dim, target_pos, air_state, 3);
+                    }
+                    state.last_target = target_pos;
+                }
+
+                state.quarry_mined += 1;
+                let produced = ItemStack {
+                    item: drop_item.into(),
+                    count: base_count + fortune_upgrades.min(4),
+                    damage: 0,
+                    extra: None,
+                };
+                store_or_route_output(game, pos, entity, state.auto_io, produced);
+                store_state(entity, state);
+                game.native_block_entity_sync(pos);
+                break;
+            }
+        }
+    }
+
+    if state.auto_io && entity.items[rules::SLOT_OUTPUT].is_some() {
+        try_auto_eject_output(game, pos, entity, 4);
+    }
+
+    (StepStatus::Working, -cost)
+}
+
+/// Simulates the Automated Pneumatic Pipe Extractor (`rusty_factory:item_extractor`):
+/// Automatically pulls items from adjacent Chests/Barrels/Furnaces/Hoppers and routes them
+/// through connected `rusty_factory:item_pipe` networks or `conveyor_belt`s!
+/// If `SLOT_INPUT` contains an item, it acts as a Smart Filter (only extracting matching items).
+fn tick_extractor(
+    game: &mut Game<'_>,
+    pos: [i32; 3],
+    entity: &mut ModBlockEntity,
+    state: &mut MachineState,
+    speed_upgrades: u32,
+) -> StepStatus {
+    let outcome = rules::step_machine(state, None, None, None, speed_upgrades);
+    if outcome.status != StepStatus::Working {
+        return outcome.status;
+    }
+
+    if state.progress == 0 {
+        let dim = game.native_dimension();
+        let filter_item = entity.items[rules::SLOT_INPUT]
+            .as_ref()
+            .map(|s| s.item.to_string());
+        let batch_size = (2 + speed_upgrades.min(8) * 2).min(16);
+
+        let targets = rules::find_connected_item_targets(
+            pos,
+            |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
+            |p| is_item_container_block(&game.native_block(p)),
+        );
+
+        for [dx, dy, dz] in rules::NEIGHBORS_6 {
+            let adj = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
+            let adj_block = game.native_block(adj);
+            if matches!(
+                adj_block.as_str(),
+                "minecraft:chest"
+                    | "minecraft:trapped_chest"
+                    | "minecraft:barrel"
+                    | "minecraft:hopper"
+                    | "minecraft:furnace"
+                    | "minecraft:blast_furnace"
+                    | "minecraft:smoker"
+                    | "minecraft:shulker_box"
+            ) {
+                for &dest in &targets {
+                    if dest == adj {
+                        continue;
+                    }
+                    let moved = game.native_move_items(
+                        dim,
+                        adj,
+                        Direction::Down,
+                        dest,
+                        Direction::Up,
+                        filter_item.as_deref(),
+                        batch_size,
+                    );
+                    if moved > 0 {
+                        state.quarry_mined += moved as i32;
+                        return StepStatus::Working;
+                    }
+                }
+            }
+        }
+    }
+
+    StepStatus::Working
+}
+
+/// Simulates the Directional Block Breaker (`rusty_factory:block_breaker`):
+/// Mines the block directly in front of its `facing` face (ideal for cobblestone/obsidian generators).
+fn tick_breaker(
+    game: &mut Game<'_>,
+    pos: [i32; 3],
+    entity: &mut ModBlockEntity,
+    state: &mut MachineState,
+    fuel_ticks: Option<i32>,
+    speed_upgrades: u32,
+    fortune_upgrades: u32,
+) -> (StepStatus, i32) {
+    let outcome = rules::step_machine(state, None, fuel_ticks, None, speed_upgrades);
+    if outcome.consume_fuel {
+        consume_one_fuel(entity);
+    }
+    if outcome.status != StepStatus::Working {
+        return (outcome.status, 0);
+    }
+
+    let facing = game
+        .native_block_property(pos, "facing")
+        .unwrap_or_else(|| "north".to_owned());
+    let (front_off, _) = rules::conveyor_offsets(&facing);
+    let target_pos = [
+        pos[0] + front_off[0],
+        pos[1] + front_off[1],
+        pos[2] + front_off[2],
+    ];
+    let block_id = game.native_block(target_pos);
+    let Some((drop_item, base_count)) = rules::quarry_drop_for_block(&block_id) else {
+        state.progress = 0;
+        return (StepStatus::Idle, 0);
+    };
+
+    let cost = rules::effective_energy_cost(MachineKind::BlockBreaker, speed_upgrades);
+    let needed = rules::effective_work_ticks(MachineKind::BlockBreaker, speed_upgrades);
+    state.energy -= cost;
+    state.progress += 1;
+
+    if state.progress >= needed {
+        state.progress = 0;
+        let dim = game.native_dimension();
+        if let Some(air_state) = game.native_default_state("minecraft:air") {
+            game.native_set_block(dim, target_pos, air_state, 3);
+        }
+        state.quarry_mined += 1;
+        let produced = ItemStack {
+            item: drop_item.into(),
+            count: base_count + fortune_upgrades.min(4),
+            damage: 0,
+            extra: None,
+        };
+        store_or_route_output(game, pos, entity, state.auto_io, produced);
+    }
+
+    if state.auto_io && entity.items[rules::SLOT_OUTPUT].is_some() {
+        try_auto_eject_output(game, pos, entity, 4);
+    }
+
+    (StepStatus::Working, -cost)
+}
+
+/// Simulates the Automated Block Placer (`rusty_factory:block_placer`):
+/// Places block items from `SLOT_INPUT` into the world directly in front of its `facing` face when air.
+fn tick_placer(
+    game: &mut Game<'_>,
+    pos: [i32; 3],
+    entity: &mut ModBlockEntity,
+    state: &mut MachineState,
+    fuel_ticks: Option<i32>,
+    speed_upgrades: u32,
+) -> (StepStatus, i32) {
+    let outcome = rules::step_machine(state, None, fuel_ticks, None, speed_upgrades);
+    if outcome.consume_fuel {
+        consume_one_fuel(entity);
+    }
+    if outcome.status != StepStatus::Working {
+        return (outcome.status, 0);
+    }
+
+    let Some(in_stack) = entity.items[rules::SLOT_INPUT].clone() else {
+        state.progress = 0;
+        return (StepStatus::Idle, 0);
+    };
+    let Some(place_state) = game.native_default_state(&in_stack.item) else {
+        state.progress = 0;
+        return (StepStatus::Idle, 0);
+    };
+
+    let facing = game
+        .native_block_property(pos, "facing")
+        .unwrap_or_else(|| "north".to_owned());
+    let (front_off, _) = rules::conveyor_offsets(&facing);
+    let target_pos = [
+        pos[0] + front_off[0],
+        pos[1] + front_off[1],
+        pos[2] + front_off[2],
+    ];
+    let current_block = game.native_block(target_pos);
+    if !matches!(
+        current_block.as_str(),
+        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" | "minecraft:water"
+    ) {
+        state.progress = 0;
+        return (StepStatus::Idle, 0);
+    }
+
+    let cost = rules::effective_energy_cost(MachineKind::BlockPlacer, speed_upgrades);
+    let needed = rules::effective_work_ticks(MachineKind::BlockPlacer, speed_upgrades);
+    state.energy -= cost;
+    state.progress += 1;
+
+    if state.progress >= needed {
+        state.progress = 0;
+        let dim = game.native_dimension();
+        if game.native_set_block(dim, target_pos, place_state, 3) {
+            state.quarry_mined += 1;
+            if let Some(s) = entity.items[rules::SLOT_INPUT].as_mut() {
+                if s.count > 1 {
+                    s.count -= 1;
+                } else {
+                    entity.items[rules::SLOT_INPUT] = None;
+                }
+            }
+        }
     }
 
     (StepStatus::Working, -cost)
@@ -501,6 +821,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         .as_ref()
         .filter(|s| &*s.item == rules::ITEM_SPEED_UPGRADE)
         .map_or(0, |s| s.count);
+    let fortune_upgrades = entity.items[rules::SLOT_UPGRADE]
+        .as_ref()
+        .filter(|s| &*s.item == rules::ITEM_FORTUNE_UPGRADE)
+        .map_or(0, |s| s.count);
 
     if kind == MachineKind::ConveyorBelt {
         let outcome = rules::step_machine(&mut state, None, None, None, speed_upgrades);
@@ -525,16 +849,152 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         return;
     }
 
+    if kind == MachineKind::ItemExtractor {
+        let status = tick_extractor(game, pos, entity, &mut state, speed_upgrades);
+        update_lit_state(game, pos, status == StepStatus::Working);
+        let period = rules::effective_work_ticks(kind, speed_upgrades).max(1);
+        let pct = ((state.progress * 100) / period).clamp(0, 100);
+        entity.data = vec![
+            status as i32,
+            0,
+            1,
+            pct,
+            0,
+            i32::from(state.enabled),
+            i32::from(state.auto_io),
+            0,
+            0,
+            state.quarry_mined,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
     let fuel_ticks = entity.items[rules::SLOT_FUEL]
         .as_ref()
         .and_then(fuel_burn_ticks);
 
-    if kind == MachineKind::Quarry {
-        let (status, rate) = tick_quarry(game, pos, entity, &mut state, fuel_ticks, speed_upgrades);
+    if kind == MachineKind::SolarGenerator {
+        let mut net_rate = 0;
+        let status = if !state.enabled {
+            StepStatus::Paused
+        } else {
+            let (_block_light, sky_light) = game.native_light([pos[0], pos[1] + 1, pos[2]]);
+            let day_time = game.native_day_time();
+            let (rain, _thunder) = game.native_weather();
+            let gen = rules::solar_generation_rate(day_time, sky_light, rain, speed_upgrades);
+            if gen > 0 {
+                state.energy = (state.energy + gen).min(kind.max_energy());
+                net_rate = gen;
+            }
+            if state.energy > 0 {
+                let sent = distribute_energy(game, pos, state.energy.min(240), false);
+                state.energy -= sent;
+            }
+            if gen > 0 {
+                StepStatus::Working
+            } else {
+                StepStatus::Idle
+            }
+        };
+        update_lit_state(game, pos, status == StepStatus::Working);
+        let pct = ((state.energy * 100) / kind.max_energy().max(1)).clamp(0, 100);
+        entity.data = vec![
+            status as i32,
+            state.energy,
+            kind.max_energy(),
+            pct,
+            net_rate,
+            i32::from(state.enabled),
+            i32::from(state.auto_io),
+            0,
+            0,
+            0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
+    if kind == MachineKind::EnergyBank {
+        let prev_energy = state.energy;
+        let outcome = rules::step_machine(&mut state, None, fuel_ticks, None, speed_upgrades);
+        if outcome.consume_fuel {
+            consume_one_fuel(entity);
+        }
+        let mut net_rate = state.energy - prev_energy;
+        if state.enabled && state.auto_io && state.energy > 0 {
+            let sent = distribute_energy(game, pos, state.energy.min(400), true);
+            state.energy -= sent;
+            if sent > 0 {
+                net_rate = -sent;
+            }
+        }
+        update_lit_state(game, pos, state.enabled && state.energy > 0);
+        let pct = ((state.energy * 100) / kind.max_energy().max(1)).clamp(0, 100);
+        entity.data = vec![
+            outcome.status as i32,
+            state.energy,
+            kind.max_energy(),
+            pct,
+            net_rate,
+            i32::from(state.enabled),
+            i32::from(state.auto_io),
+            0,
+            0,
+            0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
+    if matches!(
+        kind,
+        MachineKind::Quarry
+            | MachineKind::AutoHarvester
+            | MachineKind::BlockBreaker
+            | MachineKind::BlockPlacer
+    ) {
+        let (status, rate) = match kind {
+            MachineKind::Quarry => tick_quarry(
+                game,
+                pos,
+                entity,
+                &mut state,
+                fuel_ticks,
+                speed_upgrades,
+                fortune_upgrades,
+            ),
+            MachineKind::AutoHarvester => tick_harvester(
+                game,
+                pos,
+                entity,
+                &mut state,
+                fuel_ticks,
+                speed_upgrades,
+                fortune_upgrades,
+            ),
+            MachineKind::BlockBreaker => tick_breaker(
+                game,
+                pos,
+                entity,
+                &mut state,
+                fuel_ticks,
+                speed_upgrades,
+                fortune_upgrades,
+            ),
+            MachineKind::BlockPlacer => {
+                tick_placer(game, pos, entity, &mut state, fuel_ticks, speed_upgrades)
+            }
+            _ => unreachable!(),
+        };
         update_lit_state(game, pos, status == StepStatus::Working);
         let needed = rules::effective_work_ticks(kind, speed_upgrades).max(1);
         let pct = ((state.progress * 100) / needed).clamp(0, 100);
-        let cur_y = (pos[1] - 1 - state.quarry_y_offset).max(-60);
+        let cur_y = if kind == MachineKind::Quarry {
+            (pos[1] - 1 - state.quarry_y_offset).max(-60)
+        } else {
+            pos[1]
+        };
         entity.data = vec![
             status as i32,
             state.energy,
@@ -584,14 +1044,21 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     }
 
     if let Some(prod) = outcome.produced {
+        let extra_yield = if kind == MachineKind::ElectricCrusher {
+            fortune_upgrades.min(4)
+        } else {
+            0
+        };
+        let total_count = prod.count + extra_yield;
         match entity.items[rules::SLOT_OUTPUT].as_mut() {
             Some(existing) if &*existing.item == prod.item => {
-                existing.count += prod.count;
+                let max_s = game.native_max_stack_size(&existing.item).unwrap_or(64);
+                existing.count = (existing.count + total_count).min(max_s);
             }
             None => {
                 entity.items[rules::SLOT_OUTPUT] = Some(ItemStack {
                     item: prod.item.into(),
-                    count: prod.count,
+                    count: total_count,
                     damage: 0,
                     extra: None,
                 });
@@ -605,7 +1072,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     }
 
     if kind == MachineKind::CoalGenerator && state.energy > 0 {
-        let sent = distribute_energy(game, pos, state.energy.min(240));
+        let sent = distribute_energy(game, pos, state.energy.min(240), false);
         state.energy -= sent;
     }
 
@@ -706,13 +1173,75 @@ pub(in crate::game) fn world_primitives(
         let BlockEntity::Mod(entity) = be else {
             continue;
         };
-        if entity.id != rules::BLOCK_QUARRY {
-            continue;
-        }
         let dx = x as f64 + 0.5 - camera[0];
         let dy = y as f64 + 0.5 - camera[1];
         let dz = z as f64 + 0.5 - camera[2];
         if dx * dx + dy * dy + dz * dz > 64.0 * 64.0 {
+            continue;
+        }
+
+        if entity.id == rules::BLOCK_ENERGY_BANK {
+            let st = load_state(entity)
+                .unwrap_or_else(|| MachineState::new(MachineKind::EnergyBank));
+            let pct = (st.energy * 100) / MachineKind::EnergyBank.max_energy().max(1);
+            let label = format!("BANCO FE: {} / 100k ({pct}%)", st.energy);
+            primitives
+                .text(
+                    [x as f64 + 0.5, y as f64 + 1.35, z as f64 + 0.5],
+                    label,
+                    0xFF38_F2FF,
+                    0.8,
+                )
+                .background();
+            continue;
+        }
+
+        if entity.id == rules::BLOCK_HARVESTER {
+            let st = load_state(entity)
+                .unwrap_or_else(|| MachineState::new(MachineKind::AutoHarvester));
+            let pos = [x, y, z];
+            let facing = game
+                .native_block_property(pos, "facing")
+                .unwrap_or_else(|| "north".to_owned());
+            let (min_x, max_x, min_z, max_z) =
+                rules::quarry_area_bounds(pos, &facing, st.quarry_radius);
+            let x0 = min_x as f64;
+            let x1 = (max_x + 1) as f64;
+            let z0 = min_z as f64;
+            let z1 = (max_z + 1) as f64;
+            let base_y = y as f64;
+            let top_y = y as f64 + 2.0;
+
+            // Green agricultural perimeter frame
+            primitives.box_outline([x0, base_y, z0], [x1, top_y, z1], 0xFF55_FF66, 2.5);
+            if st.enabled && st.last_target != [0, 0, 0] {
+                let tx = st.last_target[0] as f64 + 0.5;
+                let ty = st.last_target[1] as f64 + 0.5;
+                let tz = st.last_target[2] as f64 + 0.5;
+                primitives.line(
+                    [x as f64 + 0.5, y as f64 + 0.75, z as f64 + 0.5],
+                    [tx, ty, tz],
+                    0xFF55_FF88,
+                    2.2,
+                );
+            }
+            let side = st.quarry_side_len();
+            let label = format!(
+                "COSECHADORA {side}x{side} | {} FE | Cosechados: {}",
+                st.energy, st.quarry_mined
+            );
+            primitives
+                .text(
+                    [x as f64 + 0.5, y as f64 + 1.4, z as f64 + 0.5],
+                    label,
+                    0xFF66_FF88,
+                    0.8,
+                )
+                .background();
+            continue;
+        }
+
+        if entity.id != rules::BLOCK_QUARRY {
             continue;
         }
 
@@ -911,8 +1440,8 @@ pub(in crate::game) fn menu_button(entity: &mut ModBlockEntity, id: i32) {
                 state.enabled = !state.enabled;
             }
             BTN_MODE_OR_SIZE => {
-                if kind == MachineKind::Quarry {
-                    // Cycle Quarry mining area: 5x5 (2) -> 7x7 (3) -> 9x9 (4) -> 5x5 (2)
+                if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
+                    // Cycle Quarry/Harvester area: 5x5 (2) -> 7x7 (3) -> 9x9 (4) -> 5x5 (2)
                     state.quarry_radius = match state.quarry_radius {
                         2 => 3,
                         3 => 4,
@@ -1032,18 +1561,22 @@ pub(in crate::game) fn screen_draw(
     game.native_text(batch, &status_text, [x + 8.0, y + 20.0], status_color, false);
 
     // 3. Progress Bar / Radar Monitor between slots [44, 35] and [106, 35]
-    if kind == MachineKind::Quarry {
+    if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
         // Radar monitor display inside [64, 28]..[102, 54]
         let side = quarry_radius * 2 + 1;
         let area_txt = format!("{side}x{side}");
-        let y_txt = format!("Y:{quarry_y}");
+        let y_txt = if kind == MachineKind::Quarry {
+            format!("Y:{quarry_y}")
+        } else {
+            format!("#{quarry_mined}")
+        };
         game.native_text(batch, &area_txt, [x + 68.0, y + 31.0], 0x55_FFAA, false);
         game.native_text(batch, &y_txt, [x + 68.0, y + 42.0], 0x38_F2FF, false);
     } else {
         game.native_fill(batch, [x + 66.0, y + 39.0, 34.0, 8.0], 0xFF3A_3F48);
         let bar_w = (34.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 34.0);
         if bar_w > 0.0 {
-            let bar_col = if kind == MachineKind::ConveyorBelt {
+            let bar_col = if matches!(kind, MachineKind::ConveyorBelt | MachineKind::ItemExtractor) {
                 0xFFFF_B820
             } else {
                 0xFF38_D6FF
@@ -1053,7 +1586,7 @@ pub(in crate::game) fn screen_draw(
     }
 
     // 4. Vertical Energy Bar on left edge `[8, 30, 6, 24]`
-    if kind != MachineKind::ConveyorBelt {
+    if !matches!(kind, MachineKind::ConveyorBelt | MachineKind::ItemExtractor) {
         game.native_fill(batch, [x + 8.0, y + 31.0, 6.0, 24.0], 0xFF26_2A30);
         let e_ratio = (energy as f32 / max_energy as f32).clamp(0.0, 1.0);
         let e_h = 24.0 * e_ratio;
@@ -1072,6 +1605,11 @@ pub(in crate::game) fn screen_draw(
         let line2 = format!("Minados: {quarry_mined} blq | Prof: Y={quarry_y}");
         game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
         game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF_D166, false);
+    } else if kind == MachineKind::AutoHarvester {
+        let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
+        let line2 = format!("Cosechados: {quarry_mined} cultivos/troncos");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x66_FF88, false);
     } else if kind == MachineKind::ConveyorBelt {
         let line1 = format!("Velocidad Cinta: {}%", 100 + progress_pct / 2);
         let line2 = if auto_io {
@@ -1079,6 +1617,11 @@ pub(in crate::game) fn screen_draw(
         } else {
             "Auto-Extraer (Atrás): MANUAL"
         };
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF_D166, false);
+        game.native_text(batch, line2, [x + 10.0, y + 70.0], 0x90_E0EF, false);
+    } else if kind == MachineKind::ItemExtractor {
+        let line1 = format!("Extraídos a Tubería: {quarry_mined} ítems");
+        let line2 = "Slot 0 = Filtro (Vacío = Todo)";
         game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF_D166, false);
         game.native_text(batch, line2, [x + 10.0, y + 70.0], 0x90_E0EF, false);
     } else {
@@ -1100,12 +1643,14 @@ pub(in crate::game) fn screen_draw(
     let pwr_bg = if enabled { 0xFF2B_8A3E } else { 0xFFA6_1E22 };
     draw_button(game, batch, origin, POWER_BTN_RECT, &pwr_label, pwr_bg);
 
-    if kind == MachineKind::Quarry {
+    if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
         let side = quarry_radius * 2 + 1;
         let size_label = format!("{side}x{side}");
         draw_button(game, batch, origin, MODE_BTN_RECT, &size_label, 0xFF3B_5B92);
-        draw_button(game, batch, origin, RESET_BTN_RECT, "TOP", 0xFF6C_584C);
-    } else if kind != MachineKind::CoalGenerator {
+        if kind == MachineKind::Quarry {
+            draw_button(game, batch, origin, RESET_BTN_RECT, "TOP", 0xFF6C_584C);
+        }
+    } else if !matches!(kind, MachineKind::CoalGenerator | MachineKind::SolarGenerator) {
         let auto_label = lang::get(if auto_io {
             "rusty_factory.screen.auto_on"
         } else {
@@ -1132,10 +1677,12 @@ pub(in crate::game) fn screen_click(
     };
     if right {
         return;
-    }
+    };
     if in_rect(at, POWER_BTN_RECT) {
         *button = Some(BTN_TOGGLE_POWER);
-    } else if in_rect(at, MODE_BTN_RECT) && kind != MachineKind::CoalGenerator {
+    } else if in_rect(at, MODE_BTN_RECT)
+        && !matches!(kind, MachineKind::CoalGenerator | MachineKind::SolarGenerator)
+    {
         *button = Some(BTN_MODE_OR_SIZE);
     } else if in_rect(at, RESET_BTN_RECT) && kind == MachineKind::Quarry {
         *button = Some(BTN_QUARRY_RESET);
@@ -1158,23 +1705,27 @@ pub(in crate::game) fn screen_tooltip(
     let auto_io = get(6) != 0;
     let quarry_radius = get(7).clamp(2, 4);
 
-    if in_rect(at, [6.0, 29.0, 10.0, 28.0]) && kind != MachineKind::ConveyorBelt {
+    if in_rect(at, [6.0, 29.0, 10.0, 28.0])
+        && !matches!(kind, MachineKind::ConveyorBelt | MachineKind::ItemExtractor)
+    {
         lines.push(format!("§bAlmacenamiento: {energy} / {max_energy} FE"));
         lines.push("§7Conecta Cables de Cobre o usa una Batería".into());
     } else if in_rect(at, [64.0, 28.0, 38.0, 26.0]) {
-        if kind == MachineKind::Quarry {
+        if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
             let side = quarry_radius * 2 + 1;
-            lines.push(format!("§eExcavación 3D activa: área {side}x{side}"));
-            lines.push(format!("§7Progreso del bloque actual: {progress}%"));
+            lines.push(format!("§eÁrea 3D activa: {side}x{side}"));
+            lines.push(format!("§7Progreso del ciclo actual: {progress}%"));
         } else {
             lines.push(format!("§aProgreso: {progress}%"));
         }
     } else if in_rect(at, POWER_BTN_RECT) {
         lines.push("§fAlternar Encendido / Pausa de la máquina".into());
-    } else if in_rect(at, MODE_BTN_RECT) && kind != MachineKind::CoalGenerator {
-        if kind == MachineKind::Quarry {
+    } else if in_rect(at, MODE_BTN_RECT)
+        && !matches!(kind, MachineKind::CoalGenerator | MachineKind::SolarGenerator)
+    {
+        if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
             let side = quarry_radius * 2 + 1;
-            lines.push(format!("§eTamaño de Quarry: {side}x{side}"));
+            lines.push(format!("§eTamaño de Área: {side}x{side}"));
             lines.push("§7Clic para cambiar entre 5x5, 7x7 y 9x9".into());
         } else if kind == MachineKind::ConveyorBelt {
             lines.push(if auto_io {
@@ -1205,20 +1756,30 @@ pub(in crate::game) fn perform(game: &mut Game<'_>, line: &str, ran: &mut bool) 
     *ran = true;
     for item in [
         "rusty_factory:wrench 1",
+        "rusty_factory:mining_drill 1",
+        "rusty_factory:jet_boots 1",
         "rusty_factory:quarry 1",
+        "rusty_factory:auto_harvester 1",
         "rusty_factory:coal_generator 2",
+        "rusty_factory:solar_generator 4",
+        "rusty_factory:energy_bank 1",
         "rusty_factory:copper_cable 32",
         "rusty_factory:item_pipe 32",
+        "rusty_factory:item_extractor 4",
         "rusty_factory:conveyor_belt 32",
         "rusty_factory:electric_crusher 1",
         "rusty_factory:electric_furnace 1",
         "rusty_factory:mechanical_press 1",
+        "rusty_factory:industrial_assembler 1",
+        "rusty_factory:block_breaker 2",
+        "rusty_factory:block_placer 2",
         "rusty_factory:speed_upgrade 8",
+        "rusty_factory:fortune_upgrade 8",
         "rusty_factory:energy_battery 4",
     ] {
         game.native_run_command(&format!("give @s {item}"));
     }
     game.native_feedback(Text::literal(
-        "[Rusty Factory] ¡Kit industrial completo entregado (Quarry 3D, Tuberías, Cintas, Generadores y Máquinas)!",
+        "[Rusty Factory v0.3.0] ¡Kit industrial completo entregado (Quarry 3D, Cosechadora 3D, Paneles Solares, Banco 100k FE, Extractores, Tuberías, Cintas y Máquinas)!",
     ));
 }

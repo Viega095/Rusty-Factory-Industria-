@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "LGL",
+    "GEG",
+    "LGL"
+  ],
+  "key": {
+    "L": "minecraft:lapis_lazuli",
+    "G": "minecraft:diamond",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:fortune_upgrade",
+    "count": 1
+  }
+}

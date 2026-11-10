@@ -1,7 +1,7 @@
 id = "rusty_factory"
 name = "Rusty Factory"
-version = "0.2.0"
-description = "Industrial automation mod for Horizon: 3D Quarry, Pneumatic Item Pipes, Copper Energy Cables, 3D Animated Conveyor Belts, Crusher, Electric Furnace, Mechanical Press, and custom GUIs."
+version = "0.3.0"
+description = "Full industrial automation mod for Horizon: 3D Quarry, 3D Auto Harvester, Solar Generators, Capacitor Energy Banks, Pneumatic Item Pipes & Extractors, Copper Energy Cables, 3D Animated Conveyor Belts, Crusher, Electric Furnace, Press, Industrial Assembler, Block Breaker/Placer, and custom GUIs."
 authors = ["Chinis"]
 api = "0.2"
 side = "both"
