@@ -162,7 +162,7 @@ fn is_item_container_block(block_id: &str) -> bool {
 /// Grows a full Rubber Tree (`rubber_log`, `rubber_sap_log` with golden sap cavities, and `rubber_leaves`) at `pos`.
 fn grow_rubber_tree(game: &mut Game<'_>, pos: [i32; 3]) {
     let dim = game.native_dimension();
-    let seed = game.world.game_time ^ ((pos[0] as u64).wrapping_mul(31) ^ (pos[2] as u64));
+    let seed = game.world.game_time ^ ((pos[0] as i64).wrapping_mul(31) ^ (pos[2] as i64));
     for (p, block_id, opt_prop) in rules::rubber_tree_blocks(pos, seed) {
         let cur = game.native_block(p);
         let can_place = p == pos
@@ -1042,16 +1042,16 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             let (_block_light, sky_light) = game.native_light([pos[0], pos[1] + 1, pos[2]]);
             let day_time = game.native_day_time();
             let (rain, _thunder) = game.native_weather();
-            let gen = rules::solar_generation_rate(day_time, sky_light, rain, speed_upgrades);
-            if gen > 0 {
-                state.energy = (state.energy + gen).min(kind.max_energy());
-                net_rate = gen;
+            let solar_gen = rules::solar_generation_rate(day_time, sky_light, rain, speed_upgrades);
+            if solar_gen > 0 {
+                state.energy = (state.energy + solar_gen).min(kind.max_energy());
+                net_rate = solar_gen;
             }
             if state.energy > 0 {
                 let sent = distribute_energy(game, pos, state.energy.min(240), false);
                 state.energy -= sent;
             }
-            if gen > 0 {
+            if solar_gen > 0 {
                 StepStatus::Working
             } else {
                 StepStatus::Idle

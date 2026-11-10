@@ -823,14 +823,14 @@ pub fn rubber_tree_blocks(base_pos: [i32; 3], seed: i64) -> Vec<([i32; 3], &'sta
         ^ seed.wrapping_mul(31);
 
     // 1. Leaves canopy first so trunk overwrites center
-    for dy in 3..=5 {
-        let radius = if dy == 5 { 1 } else { 2 };
+    for dy in 3i32..=5i32 {
+        let radius: i32 = if dy == 5 { 1 } else { 2 };
         for dx in -radius..=radius {
             for dz in -radius..=radius {
                 if dx == 0 && dz == 0 && dy < 5 {
                     continue;
                 }
-                if dx.abs() == radius && dz.abs() == radius && dy == 3 {
+                if i32::abs(dx) == radius && i32::abs(dz) == radius && dy == 3 {
                     continue;
                 }
                 blocks.push((
@@ -849,7 +849,7 @@ pub fn rubber_tree_blocks(base_pos: [i32; 3], seed: i64) -> Vec<([i32; 3], &'sta
 
     // 2. Trunk (5 blocks tall, with 1-2 Sap Cavity blocks at y+1 / y+2 / y+3)
     let faces = ["north", "south", "east", "west"];
-    for dy in 0..5 {
+    for dy in 0i32..5i32 {
         let p = [base_pos[0], base_pos[1] + dy, base_pos[2]];
         let is_sap_cavity = dy == 1 || (dy == 3 && (hash.rem_euclid(100) < 65));
         if is_sap_cavity {
