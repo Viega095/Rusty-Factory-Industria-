@@ -1,0 +1,7 @@
+{
+  "parent": "minecraft:block/cube_column",
+  "textures": {
+    "end": "rusty_factory:block/rubber_log_top",
+    "side": "rusty_factory:block/rubber_log_side"
+  }
+}

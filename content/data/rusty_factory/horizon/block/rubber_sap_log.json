@@ -1,0 +1,16 @@
+{
+  "template": "minecraft:furnace",
+  "destroy_time": 2.0,
+  "explosion_resistance": 2.5,
+  "requires_correct_tool_for_drops": false,
+  "sounds": "minecraft:oak_log",
+  "map_color": 13,
+  "light_emission": {
+    "property": "lit",
+    "values": {
+      "false": 0,
+      "true": 4
+    },
+    "default": 0
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "variants": {
+    "axis=y": {
+      "model": "rusty_factory:block/rubber_log"
+    },
+    "axis=z": {
+      "model": "rusty_factory:block/rubber_log",
+      "x": 90
+    },
+    "axis=x": {
+      "model": "rusty_factory:block/rubber_log",
+      "x": 90,
+      "y": 90
+    }
+  }
+}

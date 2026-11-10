@@ -5,12 +5,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
 pub const ID: &str = "rusty_factory";
-pub const VERSION: &str = "0.3.0";
+pub const VERSION: &str = "0.4.0";
 pub const MENU: &str = "rusty_factory:machine";
 
-// Block IDs (16 blocks)
+// Block IDs (24 blocks)
 pub const BLOCK_CASING: &str = "rusty_factory:machine_casing";
 pub const BLOCK_GENERATOR: &str = "rusty_factory:coal_generator";
+pub const BLOCK_BIO_GENERATOR: &str = "rusty_factory:bio_generator";
 pub const BLOCK_SOLAR: &str = "rusty_factory:solar_generator";
 pub const BLOCK_ENERGY_BANK: &str = "rusty_factory:energy_bank";
 pub const BLOCK_CABLE: &str = "rusty_factory:copper_cable";
@@ -20,14 +21,28 @@ pub const BLOCK_CRUSHER: &str = "rusty_factory:electric_crusher";
 pub const BLOCK_FURNACE: &str = "rusty_factory:electric_furnace";
 pub const BLOCK_PRESS: &str = "rusty_factory:mechanical_press";
 pub const BLOCK_ASSEMBLER: &str = "rusty_factory:industrial_assembler";
+pub const BLOCK_VULCANIZER: &str = "rusty_factory:vulcanizer";
+pub const BLOCK_SAP_EXTRACTOR: &str = "rusty_factory:sap_extractor";
 pub const BLOCK_QUARRY: &str = "rusty_factory:quarry";
 pub const BLOCK_HARVESTER: &str = "rusty_factory:auto_harvester";
 pub const BLOCK_BREAKER: &str = "rusty_factory:block_breaker";
 pub const BLOCK_PLACER: &str = "rusty_factory:block_placer";
 pub const BLOCK_CONVEYOR: &str = "rusty_factory:conveyor_belt";
+pub const BLOCK_RUBBER_LOG: &str = "rusty_factory:rubber_log";
+pub const BLOCK_RUBBER_SAP_LOG: &str = "rusty_factory:rubber_sap_log";
+pub const BLOCK_RUBBER_LEAVES: &str = "rusty_factory:rubber_leaves";
+pub const BLOCK_RUBBER_SAPLING: &str = "rusty_factory:rubber_sapling";
+pub const BLOCK_RUBBER_PLANKS: &str = "rusty_factory:rubber_planks";
 
-// Item IDs (18 items)
+// Item IDs (25 items)
 pub const ITEM_WRENCH: &str = "rusty_factory:wrench";
+pub const ITEM_TREETAP: &str = "rusty_factory:treetap";
+pub const ITEM_RAW_SAP: &str = "rusty_factory:raw_sap";
+pub const ITEM_RUBBER_BAR: &str = "rusty_factory:rubber_bar";
+pub const ITEM_RUBBER_SHEET: &str = "rusty_factory:rubber_sheet";
+pub const ITEM_INSULATED_CABLE: &str = "rusty_factory:insulated_copper_cable";
+pub const ITEM_SULFUR_DUST: &str = "rusty_factory:sulfur_dust";
+pub const ITEM_BIO_FUEL: &str = "rusty_factory:bio_fuel";
 pub const ITEM_MINING_DRILL: &str = "rusty_factory:mining_drill";
 pub const ITEM_JET_BOOTS: &str = "rusty_factory:jet_boots";
 pub const ITEM_SPEED_UPGRADE: &str = "rusty_factory:speed_upgrade";
@@ -56,6 +71,7 @@ pub const SLOT_UPGRADE: usize = 3;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MachineKind {
     CoalGenerator,
+    BioGenerator,
     SolarGenerator,
     EnergyBank,
     ItemExtractor,
@@ -63,6 +79,8 @@ pub enum MachineKind {
     ElectricFurnace,
     MechanicalPress,
     IndustrialAssembler,
+    Vulcanizer,
+    SapExtractor,
     Quarry,
     AutoHarvester,
     BlockBreaker,
@@ -74,6 +92,7 @@ impl MachineKind {
     pub fn from_block_id(block: &str) -> Option<Self> {
         match block {
             BLOCK_GENERATOR => Some(Self::CoalGenerator),
+            BLOCK_BIO_GENERATOR => Some(Self::BioGenerator),
             BLOCK_SOLAR => Some(Self::SolarGenerator),
             BLOCK_ENERGY_BANK => Some(Self::EnergyBank),
             BLOCK_EXTRACTOR => Some(Self::ItemExtractor),
@@ -81,6 +100,8 @@ impl MachineKind {
             BLOCK_FURNACE => Some(Self::ElectricFurnace),
             BLOCK_PRESS => Some(Self::MechanicalPress),
             BLOCK_ASSEMBLER => Some(Self::IndustrialAssembler),
+            BLOCK_VULCANIZER => Some(Self::Vulcanizer),
+            BLOCK_SAP_EXTRACTOR => Some(Self::SapExtractor),
             BLOCK_QUARRY => Some(Self::Quarry),
             BLOCK_HARVESTER => Some(Self::AutoHarvester),
             BLOCK_BREAKER => Some(Self::BlockBreaker),
@@ -93,6 +114,7 @@ impl MachineKind {
     pub const fn max_energy(self) -> i32 {
         match self {
             Self::CoalGenerator => 20_000,
+            Self::BioGenerator => 20_000,
             Self::SolarGenerator => 15_000,
             Self::EnergyBank => 100_000,
             Self::ItemExtractor => 0,
@@ -100,6 +122,8 @@ impl MachineKind {
             Self::ElectricFurnace => 12_000,
             Self::MechanicalPress => 12_000,
             Self::IndustrialAssembler => 16_000,
+            Self::Vulcanizer => 14_000,
+            Self::SapExtractor => 10_000,
             Self::Quarry => 25_000,
             Self::AutoHarvester => 18_000,
             Self::BlockBreaker => 10_000,
@@ -110,12 +134,14 @@ impl MachineKind {
 
     pub const fn base_work_ticks(self) -> i32 {
         match self {
-            Self::CoalGenerator | Self::SolarGenerator | Self::EnergyBank => 1,
+            Self::CoalGenerator | Self::BioGenerator | Self::SolarGenerator | Self::EnergyBank => 1,
             Self::ItemExtractor => 10,
             Self::ElectricCrusher => 70,
             Self::ElectricFurnace => 50,
             Self::MechanicalPress => 60,
             Self::IndustrialAssembler => 55,
+            Self::Vulcanizer => 45,
+            Self::SapExtractor => 30,
             Self::Quarry => 16,
             Self::AutoHarvester => 14,
             Self::BlockBreaker => 18,
@@ -127,12 +153,15 @@ impl MachineKind {
     pub const fn energy_per_tick(self) -> i32 {
         match self {
             Self::CoalGenerator => 40, // Generates +40 FE/t
+            Self::BioGenerator => 36,  // Generates +36 FE/t from organic/sap fuels
             Self::SolarGenerator => 24, // Base daytime generation +24 FE/t
             Self::EnergyBank | Self::ItemExtractor | Self::ConveyorBelt => 0,
             Self::ElectricCrusher => 20,
             Self::ElectricFurnace => 16,
             Self::MechanicalPress => 18,
             Self::IndustrialAssembler => 22,
+            Self::Vulcanizer => 18,
+            Self::SapExtractor => 12,
             Self::Quarry => 28,
             Self::AutoHarvester => 18,
             Self::BlockBreaker => 15,
@@ -148,6 +177,8 @@ impl MachineKind {
                 | Self::ElectricFurnace
                 | Self::MechanicalPress
                 | Self::IndustrialAssembler
+                | Self::Vulcanizer
+                | Self::SapExtractor
                 | Self::Quarry
                 | Self::AutoHarvester
                 | Self::BlockBreaker
@@ -158,6 +189,7 @@ impl MachineKind {
     pub const fn title_key(self) -> &'static str {
         match self {
             Self::CoalGenerator => "block.rusty_factory.coal_generator",
+            Self::BioGenerator => "block.rusty_factory.bio_generator",
             Self::SolarGenerator => "block.rusty_factory.solar_generator",
             Self::EnergyBank => "block.rusty_factory.energy_bank",
             Self::ItemExtractor => "block.rusty_factory.item_extractor",
@@ -165,6 +197,8 @@ impl MachineKind {
             Self::ElectricFurnace => "block.rusty_factory.electric_furnace",
             Self::MechanicalPress => "block.rusty_factory.mechanical_press",
             Self::IndustrialAssembler => "block.rusty_factory.industrial_assembler",
+            Self::Vulcanizer => "block.rusty_factory.vulcanizer",
+            Self::SapExtractor => "block.rusty_factory.sap_extractor",
             Self::Quarry => "block.rusty_factory.quarry",
             Self::AutoHarvester => "block.rusty_factory.auto_harvester",
             Self::BlockBreaker => "block.rusty_factory.block_breaker",
@@ -175,15 +209,18 @@ impl MachineKind {
 
     pub const fn gui_sprite(self) -> &'static str {
         match self {
-            Self::CoalGenerator | Self::SolarGenerator | Self::EnergyBank => {
-                "rusty_factory:gui/generator"
-            }
+            Self::CoalGenerator
+            | Self::BioGenerator
+            | Self::SolarGenerator
+            | Self::EnergyBank => "rusty_factory:gui/generator",
             Self::Quarry | Self::AutoHarvester => "rusty_factory:gui/quarry",
             Self::ConveyorBelt | Self::ItemExtractor => "rusty_factory:gui/conveyor",
             Self::ElectricCrusher
             | Self::ElectricFurnace
             | Self::MechanicalPress
             | Self::IndustrialAssembler
+            | Self::Vulcanizer
+            | Self::SapExtractor
             | Self::BlockBreaker
             | Self::BlockPlacer => "rusty_factory:gui/machine",
         }
@@ -334,10 +371,23 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
                 item: ITEM_SILICON,
                 count: 2,
             }),
+            "minecraft:netherrack" | "minecraft:coal" | "minecraft:gunpowder" => Some(RecipeOutput {
+                item: ITEM_SULFUR_DUST,
+                count: 2,
+            }),
+            BLOCK_RUBBER_SAP_LOG | BLOCK_RUBBER_LOG => Some(RecipeOutput {
+                item: ITEM_RAW_SAP,
+                count: 2,
+            }),
             _ => None,
         },
 
         MachineKind::ElectricFurnace => match input {
+            // Raw Sap -> Vulcanized Rubber Bar!
+            ITEM_RAW_SAP => Some(RecipeOutput {
+                item: ITEM_RUBBER_BAR,
+                count: 2,
+            }),
             // Mod dusts -> ingots
             ITEM_IRON_DUST | "minecraft:raw_iron" | "minecraft:iron_ore" | "minecraft:deepslate_iron_ore" => {
                 Some(RecipeOutput {
@@ -394,7 +444,8 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
             | "minecraft:jungle_log"
             | "minecraft:acacia_log"
             | "minecraft:dark_oak_log"
-            | "minecraft:cherry_log" => Some(RecipeOutput {
+            | "minecraft:cherry_log"
+            | BLOCK_RUBBER_LOG => Some(RecipeOutput {
                 item: "minecraft:charcoal",
                 count: 1,
             }),
@@ -446,11 +497,23 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
                 item: "minecraft:paper",
                 count: 2,
             }),
+            ITEM_RUBBER_BAR => Some(RecipeOutput {
+                item: ITEM_RUBBER_SHEET,
+                count: 2,
+            }),
+            ITEM_RAW_SAP => Some(RecipeOutput {
+                item: ITEM_RUBBER_BAR,
+                count: 1,
+            }),
             _ => None,
         },
 
         MachineKind::IndustrialAssembler => match input {
             // Automated Sawmill & Industrial Component Crafting
+            BLOCK_RUBBER_LOG | BLOCK_RUBBER_SAP_LOG => Some(RecipeOutput {
+                item: BLOCK_RUBBER_PLANKS,
+                count: 6,
+            }),
             "minecraft:oak_log" => Some(RecipeOutput {
                 item: "minecraft:oak_planks",
                 count: 6,
@@ -484,8 +547,21 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
             | "minecraft:birch_planks"
             | "minecraft:jungle_planks"
             | "minecraft:acacia_planks"
-            | "minecraft:dark_oak_planks" => Some(RecipeOutput {
+            | "minecraft:dark_oak_planks"
+            | BLOCK_RUBBER_PLANKS => Some(RecipeOutput {
                 item: "minecraft:stick",
+                count: 4,
+            }),
+            ITEM_RUBBER_BAR => Some(RecipeOutput {
+                item: ITEM_INSULATED_CABLE,
+                count: 4,
+            }),
+            ITEM_INSULATED_CABLE => Some(RecipeOutput {
+                item: BLOCK_CABLE,
+                count: 4,
+            }),
+            ITEM_RUBBER_SHEET => Some(RecipeOutput {
+                item: BLOCK_CONVEYOR,
                 count: 4,
             }),
             ITEM_IRON_PLATE => Some(RecipeOutput {
@@ -519,10 +595,52 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
             _ => None,
         },
 
+        MachineKind::Vulcanizer => match input {
+            // High-efficiency rubber vulcanization & chemical processing
+            ITEM_RAW_SAP => Some(RecipeOutput {
+                item: ITEM_RUBBER_BAR,
+                count: 3,
+            }),
+            ITEM_RUBBER_BAR => Some(RecipeOutput {
+                item: ITEM_RUBBER_SHEET,
+                count: 2,
+            }),
+            "minecraft:copper_ingot" | ITEM_COPPER_PLATE => Some(RecipeOutput {
+                item: ITEM_INSULATED_CABLE,
+                count: 4,
+            }),
+            ITEM_SULFUR_DUST => Some(RecipeOutput {
+                item: ITEM_RUBBER_BAR,
+                count: 2,
+            }),
+            BLOCK_RUBBER_SAPLING
+            | BLOCK_RUBBER_LEAVES
+            | "minecraft:wheat_seeds"
+            | "minecraft:sugar_cane"
+            | "minecraft:kelp"
+            | "minecraft:sweet_berries"
+            | "minecraft:potato"
+            | "minecraft:carrot" => Some(RecipeOutput {
+                item: ITEM_BIO_FUEL,
+                count: 2,
+            }),
+            "minecraft:rotten_flesh" => Some(RecipeOutput {
+                item: "minecraft:leather",
+                count: 1,
+            }),
+            "minecraft:Magma_cream" | "minecraft:magma_cream" => Some(RecipeOutput {
+                item: "minecraft:slime_ball",
+                count: 2,
+            }),
+            _ => None,
+        },
+
         MachineKind::CoalGenerator
+        | MachineKind::BioGenerator
         | MachineKind::SolarGenerator
         | MachineKind::EnergyBank
         | MachineKind::ItemExtractor
+        | MachineKind::SapExtractor
         | MachineKind::Quarry
         | MachineKind::AutoHarvester
         | MachineKind::BlockBreaker
@@ -687,8 +805,62 @@ pub fn harvester_drop_for_block(block_id: &str, age_prop: Option<&str>) -> Optio
         "minecraft:dark_oak_log" => Some(("minecraft:dark_oak_log", 1, false)),
         "minecraft:cherry_log" => Some(("minecraft:cherry_log", 1, false)),
         "minecraft:mangrove_log" => Some(("minecraft:mangrove_log", 1, false)),
+        BLOCK_RUBBER_LOG => Some((BLOCK_RUBBER_LOG, 1, false)),
+        BLOCK_RUBBER_LEAVES => Some((BLOCK_RUBBER_SAPLING, 1, false)),
         _ => None,
     }
+}
+
+/// Deterministic layout for a grown Rubber Tree rooted at `base_pos`:
+/// - A 5-block vertical trunk (`y = 0..5`), where `y = 1` and `y = 3` have a percentage chance
+///   to become `BLOCK_RUBBER_SAP_LOG` (a rubber-oak trunk with an active Sap Cavity `lit=true`),
+///   and the remaining trunk blocks are `BLOCK_RUBBER_LOG`.
+/// - A lush 2-layer canopy of `BLOCK_RUBBER_LEAVES` around the top (`y = 3..=6`).
+pub fn rubber_tree_blocks(base_pos: [i32; 3], seed: i64) -> Vec<([i32; 3], &'static str, Option<(&'static str, &'static str)>)> {
+    let mut blocks = Vec::new();
+    let hash = (base_pos[0] as i64 * 734287)
+        ^ (base_pos[2] as i64 * 912931)
+        ^ seed.wrapping_mul(31);
+
+    // 1. Leaves canopy first so trunk overwrites center
+    for dy in 3..=5 {
+        let radius = if dy == 5 { 1 } else { 2 };
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                if dx == 0 && dz == 0 && dy < 5 {
+                    continue;
+                }
+                if dx.abs() == radius && dz.abs() == radius && dy == 3 {
+                    continue;
+                }
+                blocks.push((
+                    [base_pos[0] + dx, base_pos[1] + dy, base_pos[2] + dz],
+                    BLOCK_RUBBER_LEAVES,
+                    None,
+                ));
+            }
+        }
+    }
+    blocks.push((
+        [base_pos[0], base_pos[1] + 6, base_pos[2]],
+        BLOCK_RUBBER_LEAVES,
+        None,
+    ));
+
+    // 2. Trunk (5 blocks tall, with 1-2 Sap Cavity blocks at y+1 / y+2 / y+3)
+    let faces = ["north", "south", "east", "west"];
+    for dy in 0..5 {
+        let p = [base_pos[0], base_pos[1] + dy, base_pos[2]];
+        let is_sap_cavity = dy == 1 || (dy == 3 && (hash.rem_euclid(100) < 65));
+        if is_sap_cavity {
+            let face = faces[((hash.unsigned_abs() as usize) + dy as usize) % 4];
+            blocks.push((p, BLOCK_RUBBER_SAP_LOG, Some(("facing", face))));
+        } else {
+            blocks.push((p, BLOCK_RUBBER_LOG, None));
+        }
+    }
+
+    blocks
 }
 
 /// Computes Solar Generator output (`FE/t`) based on world time, sky light (`0..=15`), and weather.
@@ -758,7 +930,9 @@ pub fn step_machine(
     }
 
     match state.kind {
-        MachineKind::CoalGenerator => step_generator(state, fuel_burn_ticks, speed_upgrades),
+        MachineKind::CoalGenerator | MachineKind::BioGenerator => {
+            step_generator(state, fuel_burn_ticks, speed_upgrades)
+        }
         MachineKind::SolarGenerator | MachineKind::EnergyBank => {
             let mut consume_fuel = false;
             if state.energy < state.kind.max_energy() {
@@ -796,6 +970,7 @@ pub fn step_machine(
         }
         MachineKind::Quarry
         | MachineKind::AutoHarvester
+        | MachineKind::SapExtractor
         | MachineKind::BlockBreaker
         | MachineKind::BlockPlacer => {
             // World-interacting machines are driven in glue with world access,
@@ -832,7 +1007,8 @@ pub fn step_machine(
         MachineKind::ElectricCrusher
         | MachineKind::ElectricFurnace
         | MachineKind::MechanicalPress
-        | MachineKind::IndustrialAssembler => {
+        | MachineKind::IndustrialAssembler
+        | MachineKind::Vulcanizer => {
             step_processor(state, input_item, fuel_burn_ticks, output_slot, speed_upgrades)
         }
     }
@@ -844,8 +1020,7 @@ fn step_generator(
     speed_upgrades: u32,
 ) -> StepOutcome {
     let mut consume_fuel = false;
-    let gen_rate =
-        MachineKind::CoalGenerator.energy_per_tick() + (speed_upgrades.min(8) as i32) * 10;
+    let gen_rate = state.kind.energy_per_tick() + (speed_upgrades.min(8) as i32) * 10;
 
     if state.burn_left <= 0 && state.energy < state.kind.max_energy() {
         if let Some(ticks) = fuel_burn_ticks {

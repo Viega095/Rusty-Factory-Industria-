@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "RFR",
+    "PBP",
+    "CEC"
+  ],
+  "key": {
+    "R": "rusty_factory:rubber_bar",
+    "F": "minecraft:furnace",
+    "P": "minecraft:piston",
+    "B": "rusty_factory:machine_casing",
+    "C": "rusty_factory:copper_cable",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:vulcanizer",
+    "count": 1
+  }
+}

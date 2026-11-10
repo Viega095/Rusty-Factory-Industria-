@@ -1,0 +1,8 @@
+{
+  "template": "minecraft:oak_log",
+  "destroy_time": 2.0,
+  "explosion_resistance": 2.0,
+  "requires_correct_tool_for_drops": false,
+  "sounds": "minecraft:oak_log",
+  "map_color": 13
+}

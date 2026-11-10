@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    " P ",
+    "PPP",
+    "P C"
+  ],
+  "key": {
+    "P": "minecraft:oak_planks",
+    "C": "minecraft:copper_ingot"
+  },
+  "result": {
+    "id": "rusty_factory:treetap",
+    "count": 1
+  }
+}

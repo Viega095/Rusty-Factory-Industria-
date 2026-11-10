@@ -3,6 +3,7 @@
   "values": [
     "rusty_factory:machine_casing",
     "rusty_factory:coal_generator",
+    "rusty_factory:bio_generator",
     "rusty_factory:solar_generator",
     "rusty_factory:energy_bank",
     "rusty_factory:copper_cable",
@@ -12,10 +13,17 @@
     "rusty_factory:electric_furnace",
     "rusty_factory:mechanical_press",
     "rusty_factory:industrial_assembler",
+    "rusty_factory:vulcanizer",
+    "rusty_factory:sap_extractor",
     "rusty_factory:quarry",
     "rusty_factory:auto_harvester",
     "rusty_factory:block_breaker",
     "rusty_factory:block_placer",
-    "rusty_factory:conveyor_belt"
+    "rusty_factory:conveyor_belt",
+    "rusty_factory:rubber_log",
+    "rusty_factory:rubber_sap_log",
+    "rusty_factory:rubber_leaves",
+    "rusty_factory:rubber_sapling",
+    "rusty_factory:rubber_planks"
   ]
 }

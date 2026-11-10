@@ -1,0 +1,16 @@
+{
+  "template": "minecraft:furnace",
+  "destroy_time": 3.0,
+  "explosion_resistance": 6.0,
+  "requires_correct_tool_for_drops": true,
+  "sounds": "minecraft:copper_block",
+  "map_color": 15,
+  "light_emission": {
+    "property": "lit",
+    "values": {
+      "false": 0,
+      "true": 8
+    },
+    "default": 0
+  }
+}

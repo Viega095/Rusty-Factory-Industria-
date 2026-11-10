@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " S ",
+    "SRS",
+    " B "
+  ],
+  "key": {
+    "S": "minecraft:slime_ball",
+    "R": "minecraft:oak_sapling",
+    "B": "minecraft:bone_meal"
+  },
+  "result": {
+    "id": "rusty_factory:rubber_sapling",
+    "count": 2
+  }
+}

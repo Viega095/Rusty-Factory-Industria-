@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "RRR",
+    "IGI",
+    "III"
+  ],
+  "key": {
+    "R": "rusty_factory:rubber_sheet",
+    "I": "minecraft:iron_ingot",
+    "G": "rusty_factory:steel_gear"
+  },
+  "result": {
+    "id": "rusty_factory:conveyor_belt",
+    "count": 8
+  }
+}

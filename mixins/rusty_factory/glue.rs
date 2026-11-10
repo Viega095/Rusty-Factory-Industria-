@@ -63,7 +63,8 @@ pub(in crate::game) fn listed(mods: &mut Vec<NativeMod>) {
 }
 
 pub(in crate::game) fn block_entity(block: &str, entity: &mut Option<(String, Compound)>) {
-    if MachineKind::from_block_id(block).is_some() && entity.is_none() {
+    let is_tree_tick_block = matches!(block, rules::BLOCK_RUBBER_SAP_LOG | rules::BLOCK_RUBBER_SAPLING);
+    if (MachineKind::from_block_id(block).is_some() || is_tree_tick_block) && entity.is_none() {
         let mut nbt = Compound::default();
         if let Some(kind) = MachineKind::from_block_id(block) {
             if let Ok(bytes) = serde_json::to_vec(&MachineState::new(kind)) {
@@ -75,7 +76,9 @@ pub(in crate::game) fn block_entity(block: &str, entity: &mut Option<(String, Co
 }
 
 pub(in crate::game) fn block_entity_ticks(block: &str, ticks: &mut bool) {
-    if MachineKind::from_block_id(block).is_some() {
+    if MachineKind::from_block_id(block).is_some()
+        || matches!(block, rules::BLOCK_RUBBER_SAP_LOG | rules::BLOCK_RUBBER_SAPLING)
+    {
         *ticks = true;
     }
 }
@@ -107,6 +110,12 @@ pub(in crate::game) fn container(block: &str, container: &mut Option<ModContaine
 fn fuel_burn_ticks(stack: &ItemStack) -> Option<i32> {
     match &*stack.item {
         rules::ITEM_BATTERY => Some(-1),
+        rules::ITEM_BIO_FUEL => Some(3200),
+        rules::ITEM_RAW_SAP => Some(800),
+        rules::BLOCK_RUBBER_SAPLING
+        | rules::BLOCK_RUBBER_LOG
+        | rules::BLOCK_RUBBER_SAP_LOG
+        | rules::BLOCK_RUBBER_PLANKS => Some(400),
         "minecraft:coal" | "minecraft:charcoal" => Some(1600),
         "minecraft:coal_block" => Some(16000),
         "minecraft:blaze_rod" => Some(2400),
@@ -115,6 +124,8 @@ fn fuel_burn_ticks(stack: &ItemStack) -> Option<i32> {
         "minecraft:oak_planks"
         | "minecraft:spruce_planks"
         | "minecraft:birch_planks"
+        | "minecraft:wheat"
+        | "minecraft:sugar_cane"
         | "minecraft:Stick"
         | "minecraft:stick" => Some(300),
         _ => None,
@@ -139,10 +150,45 @@ fn is_item_container_block(block_id: &str) -> bool {
             | rules::BLOCK_FURNACE
             | rules::BLOCK_PRESS
             | rules::BLOCK_ASSEMBLER
+            | rules::BLOCK_VULCANIZER
+            | rules::BLOCK_SAP_EXTRACTOR
             | rules::BLOCK_PLACER
             | rules::BLOCK_CONVEYOR
             | rules::BLOCK_GENERATOR
+            | rules::BLOCK_BIO_GENERATOR
     )
+}
+
+/// Grows a full Rubber Tree (`rubber_log`, `rubber_sap_log` with golden sap cavities, and `rubber_leaves`) at `pos`.
+fn grow_rubber_tree(game: &mut Game<'_>, pos: [i32; 3]) {
+    let dim = game.native_dimension();
+    let seed = game.world.game_time ^ ((pos[0] as u64).wrapping_mul(31) ^ (pos[2] as u64));
+    for (p, block_id, opt_prop) in rules::rubber_tree_blocks(pos, seed) {
+        let cur = game.native_block(p);
+        let can_place = p == pos
+            || matches!(
+                cur.as_str(),
+                "minecraft:air"
+                    | "minecraft:cave_air"
+                    | "minecraft:void_air"
+                    | "minecraft:short_grass"
+                    | "minecraft:tall_grass"
+                    | rules::BLOCK_RUBBER_LEAVES
+                    | "minecraft:oak_leaves"
+            );
+        if !can_place {
+            continue;
+        }
+        if let Some(st) = game.native_default_state(block_id) {
+            game.native_set_block(dim, p, st, 3);
+            if let Some((k, v)) = opt_prop {
+                game.native_set_block_property(p, k, v);
+            }
+            if block_id == rules::BLOCK_RUBBER_SAP_LOG {
+                game.native_set_block_property(p, "lit", "true");
+            }
+        }
+    }
 }
 
 /// Routes `stack` from `source_pos` into connected `rusty_factory:item_pipe` networks or adjacent containers.
@@ -789,6 +835,82 @@ fn tick_placer(
     (StepStatus::Working, -cost)
 }
 
+/// Simulates the Automated Sap Extractor (`rusty_factory:sap_extractor`):
+/// Scans adjacent blocks (and vertical trunk columns around it) for `rubber_sap_log` or `rubber_log`,
+/// extracts `raw_sap` without destroying the tree, and refills sap cavities over time!
+fn tick_sap_extractor(
+    game: &mut Game<'_>,
+    pos: [i32; 3],
+    entity: &mut ModBlockEntity,
+    state: &mut MachineState,
+    fuel_ticks: Option<i32>,
+    speed_upgrades: u32,
+    fortune_upgrades: u32,
+) -> (StepStatus, i32) {
+    let outcome = rules::step_machine(state, None, fuel_ticks, None, speed_upgrades);
+    if outcome.consume_fuel {
+        consume_one_fuel(entity);
+    }
+    if outcome.status != StepStatus::Working {
+        return (outcome.status, 0);
+    }
+
+    // Look for any Rubber Tree trunk block around the extractor (horizontal neighbors + up to 4 blocks up)
+    let mut found_trunk: Option<([i32; 3], bool)> = None;
+    'search: for [dx, _, dz] in [[-1, 0, 0], [1, 0, 0], [0, 0, -1], [0, 0, 1]] {
+        for dy in 0..=4 {
+            let p = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
+            let bid = game.native_block(p);
+            if bid == rules::BLOCK_RUBBER_SAP_LOG {
+                let has_sap = game.native_block_property(p, "lit").as_deref() == Some("true");
+                found_trunk = Some((p, has_sap));
+                if has_sap {
+                    break 'search;
+                }
+            } else if bid == rules::BLOCK_RUBBER_LOG && found_trunk.is_none() {
+                found_trunk = Some((p, false));
+            }
+        }
+    }
+
+    let Some((trunk_pos, is_active_cavity)) = found_trunk else {
+        state.progress = 0;
+        return (StepStatus::Idle, 0);
+    };
+
+    let cost = rules::effective_energy_cost(MachineKind::SapExtractor, speed_upgrades);
+    let needed = rules::effective_work_ticks(MachineKind::SapExtractor, speed_upgrades);
+    state.energy -= cost;
+    state.progress += 1;
+
+    if state.progress >= needed {
+        state.progress = 0;
+        if is_active_cavity {
+            game.native_set_block_property(trunk_pos, "lit", "false");
+        }
+        let base_sap = if is_active_cavity { 3 } else { 1 };
+        let sap_count = base_sap + fortune_upgrades.min(4);
+        state.quarry_mined += sap_count as i32;
+        state.last_target = trunk_pos;
+
+        let produced = ItemStack {
+            item: rules::ITEM_RAW_SAP.into(),
+            count: sap_count,
+            damage: 0,
+            extra: None,
+        };
+        store_or_route_output(game, pos, entity, state.auto_io, produced);
+        store_state(entity, state);
+        game.native_block_entity_sync(pos);
+    }
+
+    if state.auto_io && entity.items[rules::SLOT_OUTPUT].is_some() {
+        try_auto_eject_output(game, pos, entity, 4);
+    }
+
+    (StepStatus::Working, -cost)
+}
+
 fn consume_one_fuel(entity: &mut ModBlockEntity) {
     if let Some(fuel_stack) = entity.items[rules::SLOT_FUEL].as_mut() {
         let is_lava = &*fuel_stack.item == "minecraft:lava_bucket";
@@ -806,12 +928,39 @@ fn consume_one_fuel(entity: &mut ModBlockEntity) {
 }
 
 pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut ModBlockEntity) {
-    let Some(kind) = MachineKind::from_block_id(&entity.id) else {
-        return;
-    };
     if !game.native_on(rules::ID) {
         return;
     }
+
+    // 1. Rubber Sapling automatic growth tick (grows into a full Rubber Tree after ~8 seconds)
+    if entity.id == rules::BLOCK_RUBBER_SAPLING {
+        let t = entity.data.first().copied().unwrap_or(0) + 1;
+        if t >= 160 {
+            grow_rubber_tree(game, pos);
+        } else {
+            entity.data = vec![t];
+        }
+        return;
+    }
+
+    // 2. Rubber Sap Log Cavity natural sap regeneration tick (refills golden resin after ~10 seconds)
+    if entity.id == rules::BLOCK_RUBBER_SAP_LOG {
+        let is_full = game.native_block_property(pos, "lit").as_deref() == Some("true");
+        if !is_full {
+            let t = entity.data.first().copied().unwrap_or(0) + 1;
+            if t >= 200 {
+                game.native_set_block_property(pos, "lit", "true");
+                entity.data = vec![0];
+            } else {
+                entity.data = vec![t];
+            }
+        }
+        return;
+    }
+
+    let Some(kind) = MachineKind::from_block_id(&entity.id) else {
+        return;
+    };
     if entity.items.len() < rules::SLOTS {
         entity.items.resize(rules::SLOTS, None);
     }
@@ -868,6 +1017,17 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         ];
         store_state(entity, &state);
         return;
+    }
+
+    // For BioGenerator, allow placing bio-fuels in either SLOT_FUEL or SLOT_INPUT
+    if kind == MachineKind::BioGenerator
+        && entity.items[rules::SLOT_FUEL].is_none()
+        && entity.items[rules::SLOT_INPUT]
+            .as_ref()
+            .and_then(fuel_burn_ticks)
+            .is_some()
+    {
+        entity.items[rules::SLOT_FUEL] = entity.items[rules::SLOT_INPUT].take();
     }
 
     let fuel_ticks = entity.items[rules::SLOT_FUEL]
@@ -953,6 +1113,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             | MachineKind::AutoHarvester
             | MachineKind::BlockBreaker
             | MachineKind::BlockPlacer
+            | MachineKind::SapExtractor
     ) {
         let (status, rate) = match kind {
             MachineKind::Quarry => tick_quarry(
@@ -985,6 +1146,15 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             MachineKind::BlockPlacer => {
                 tick_placer(game, pos, entity, &mut state, fuel_ticks, speed_upgrades)
             }
+            MachineKind::SapExtractor => tick_sap_extractor(
+                game,
+                pos,
+                entity,
+                &mut state,
+                fuel_ticks,
+                speed_upgrades,
+                fortune_upgrades,
+            ),
             _ => unreachable!(),
         };
         update_lit_state(game, pos, status == StepStatus::Working);
@@ -1044,7 +1214,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     }
 
     if let Some(prod) = outcome.produced {
-        let extra_yield = if kind == MachineKind::ElectricCrusher {
+        let extra_yield = if matches!(kind, MachineKind::ElectricCrusher | MachineKind::Vulcanizer) {
             fortune_upgrades.min(4)
         } else {
             0
@@ -1067,19 +1237,20 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         }
     }
 
-    if state.auto_io && kind != MachineKind::CoalGenerator && entity.items[rules::SLOT_OUTPUT].is_some() {
+    let is_gen = matches!(kind, MachineKind::CoalGenerator | MachineKind::BioGenerator);
+    if state.auto_io && !is_gen && entity.items[rules::SLOT_OUTPUT].is_some() {
         try_auto_eject_output(game, pos, entity, 4);
     }
 
-    if kind == MachineKind::CoalGenerator && state.energy > 0 {
-        let sent = distribute_energy(game, pos, state.energy.min(240), false);
+    if is_gen && state.energy > 0 {
+        let sent = distribute_energy(game, pos, state.energy.min(280), false);
         state.energy -= sent;
     }
 
     update_lit_state(game, pos, outcome.status == StepStatus::Working);
 
     let needed = rules::effective_work_ticks(kind, speed_upgrades).max(1);
-    let pct = if kind == MachineKind::CoalGenerator {
+    let pct = if is_gen {
         state.progress
     } else {
         ((state.progress * 100) / needed).clamp(0, 100)
@@ -1347,7 +1518,7 @@ pub(in crate::game) fn world_primitives(
     }
 }
 
-/// Inspects networks or triggers manual pipe extraction when right-clicking cables/pipes/machines.
+/// Inspects networks, harvests sap from Rubber Tree Sap Cavities, grows Rubber Saplings, or triggers manual pipe extraction.
 pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled: &mut bool) {
     if *canceled {
         return;
@@ -1356,6 +1527,59 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
         return;
     };
     let block_id = game.native_block(pos);
+
+    if block_id == rules::BLOCK_RUBBER_SAPLING {
+        *canceled = true;
+        grow_rubber_tree(game, pos);
+        let style = Style {
+            color: Some(text::GREEN),
+            ..Style::default()
+        };
+        game.native_tell(
+            who.uuid,
+            Text::styled(
+                "[Rusty Factory] ¡El Brote de Árbol de Caucho ha crecido con Huecos de Savia en su tronco!",
+                style,
+            ),
+        );
+        return;
+    }
+
+    if block_id == rules::BLOCK_RUBBER_SAP_LOG {
+        *canceled = true;
+        let has_sap = game.native_block_property(pos, "lit").as_deref() == Some("true");
+        if has_sap {
+            game.native_set_block_property(pos, "lit", "false");
+            game.native_run_command("give @s rusty_factory:raw_sap 3");
+            if (game.world.game_time & 3) == 0 {
+                game.native_run_command("give @s rusty_factory:rubber_sapling 1");
+            }
+            let style = Style {
+                color: Some(text::GOLD),
+                ..Style::default()
+            };
+            game.native_tell(
+                who.uuid,
+                Text::styled(
+                    "[Rusty Factory] ¡Has extraído 3x Savia Pegajosa del Hueco de Savia! (Quémala en un horno o Vulcanizadora para obtener Goma)",
+                    style,
+                ),
+            );
+        } else {
+            let style = Style {
+                color: Some(text::YELLOW),
+                ..Style::default()
+            };
+            game.native_tell(
+                who.uuid,
+                Text::styled(
+                    "[Rusty Factory] El Hueco de Savia se está regenerando... (volverá a llenarse de resina dorada en unos segundos)",
+                    style,
+                ),
+            );
+        }
+        return;
+    }
 
     if block_id == rules::BLOCK_CABLE {
         let consumers = rules::find_connected_consumers(
@@ -1650,7 +1874,10 @@ pub(in crate::game) fn screen_draw(
         if kind == MachineKind::Quarry {
             draw_button(game, batch, origin, RESET_BTN_RECT, "TOP", 0xFF6C_584C);
         }
-    } else if !matches!(kind, MachineKind::CoalGenerator | MachineKind::SolarGenerator) {
+    } else if !matches!(
+        kind,
+        MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SolarGenerator
+    ) {
         let auto_label = lang::get(if auto_io {
             "rusty_factory.screen.auto_on"
         } else {
@@ -1681,7 +1908,10 @@ pub(in crate::game) fn screen_click(
     if in_rect(at, POWER_BTN_RECT) {
         *button = Some(BTN_TOGGLE_POWER);
     } else if in_rect(at, MODE_BTN_RECT)
-        && !matches!(kind, MachineKind::CoalGenerator | MachineKind::SolarGenerator)
+        && !matches!(
+            kind,
+            MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SolarGenerator
+        )
     {
         *button = Some(BTN_MODE_OR_SIZE);
     } else if in_rect(at, RESET_BTN_RECT) && kind == MachineKind::Quarry {
@@ -1721,7 +1951,10 @@ pub(in crate::game) fn screen_tooltip(
     } else if in_rect(at, POWER_BTN_RECT) {
         lines.push("§fAlternar Encendido / Pausa de la máquina".into());
     } else if in_rect(at, MODE_BTN_RECT)
-        && !matches!(kind, MachineKind::CoalGenerator | MachineKind::SolarGenerator)
+        && !matches!(
+            kind,
+            MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SolarGenerator
+        )
     {
         if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
             let side = quarry_radius * 2 + 1;
@@ -1756,8 +1989,16 @@ pub(in crate::game) fn perform(game: &mut Game<'_>, line: &str, ran: &mut bool) 
     *ran = true;
     for item in [
         "rusty_factory:wrench 1",
+        "rusty_factory:treetap 1",
         "rusty_factory:mining_drill 1",
         "rusty_factory:jet_boots 1",
+        "rusty_factory:rubber_sapling 8",
+        "rusty_factory:rubber_sap_log 4",
+        "rusty_factory:raw_sap 16",
+        "rusty_factory:rubber_bar 16",
+        "rusty_factory:sap_extractor 1",
+        "rusty_factory:vulcanizer 1",
+        "rusty_factory:bio_generator 1",
         "rusty_factory:quarry 1",
         "rusty_factory:auto_harvester 1",
         "rusty_factory:coal_generator 2",
@@ -1780,6 +2021,6 @@ pub(in crate::game) fn perform(game: &mut Game<'_>, line: &str, ran: &mut bool) 
         game.native_run_command(&format!("give @s {item}"));
     }
     game.native_feedback(Text::literal(
-        "[Rusty Factory v0.3.0] ¡Kit industrial completo entregado (Quarry 3D, Cosechadora 3D, Paneles Solares, Banco 100k FE, Extractores, Tuberías, Cintas y Máquinas)!",
+        "[Rusty Factory v0.4.0] ¡Kit industrial completo entregado (Árbol de Caucho con Savia, Espita, Extractor de Savia, Vulcanizadora de Goma, Bio-Generador, Quarry 3D, Cosechadora 3D, Paneles Solares y más)!",
     ));
 }

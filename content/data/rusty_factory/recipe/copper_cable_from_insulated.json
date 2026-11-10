@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "III",
+    "RRR",
+    "III"
+  ],
+  "key": {
+    "I": "rusty_factory:insulated_copper_cable",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rusty_factory:copper_cable",
+    "count": 12
+  }
+}

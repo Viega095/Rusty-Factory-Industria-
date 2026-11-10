@@ -1,0 +1,15 @@
+{
+  "template": "minecraft:furnace",
+  "destroy_time": 0.1,
+  "explosion_resistance": 0.1,
+  "requires_correct_tool_for_drops": false,
+  "sounds": "minecraft:oak_leaves",
+  "map_color": 7,
+  "occludes": false,
+  "shapes": {
+    "default": [[0.2, 0.0, 0.2, 0.8, 0.8, 0.8]]
+  },
+  "collision_shapes": {
+    "default": []
+  }
+}

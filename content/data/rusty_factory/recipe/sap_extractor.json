@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "CTC",
+    "PBP",
+    "CEC"
+  ],
+  "key": {
+    "C": "minecraft:copper_ingot",
+    "T": "rusty_factory:treetap",
+    "P": "rusty_factory:item_pipe",
+    "B": "rusty_factory:machine_casing",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:sap_extractor",
+    "count": 1
+  }
+}
