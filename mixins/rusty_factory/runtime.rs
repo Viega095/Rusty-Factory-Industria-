@@ -69,6 +69,13 @@ pub const SLOT_OUTPUT: usize = 2;
 pub const SLOT_UPGRADE: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MachineTier {
+    Tier1,    // Basic machinery / Early game
+    Tier2,    // Advanced industrial machinery
+    Storage,  // Energy storage modular banks
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MachineKind {
     CoalGenerator,
     BioGenerator,
@@ -111,23 +118,46 @@ impl MachineKind {
         }
     }
 
+    pub const fn tier(self) -> MachineTier {
+        match self {
+            Self::CoalGenerator
+            | Self::BioGenerator
+            | Self::SolarGenerator
+            | Self::ElectricCrusher
+            | Self::ElectricFurnace
+            | Self::MechanicalPress
+            | Self::Vulcanizer
+            | Self::SapExtractor
+            | Self::BlockPlacer
+            | Self::ItemExtractor
+            | Self::ConveyorBelt => MachineTier::Tier1,
+
+            Self::IndustrialAssembler
+            | Self::AutoHarvester
+            | Self::BlockBreaker
+            | Self::Quarry => MachineTier::Tier2,
+
+            Self::EnergyBank => MachineTier::Storage,
+        }
+    }
+
     pub const fn max_energy(self) -> i32 {
         match self {
-            Self::CoalGenerator => 20_000,
-            Self::BioGenerator => 20_000,
-            Self::SolarGenerator => 15_000,
-            Self::EnergyBank => 100_000,
+            Self::CoalGenerator => 4_000,
+            Self::BioGenerator => 4_000,
+            Self::SolarGenerator => 2_000, // 4_000 when part of 3x3 Solar Array
+            Self::EnergyBank => 10_000,    // 10_000 per connected cluster cell
             Self::ItemExtractor => 0,
-            Self::ElectricCrusher => 12_000,
-            Self::ElectricFurnace => 12_000,
-            Self::MechanicalPress => 12_000,
-            Self::IndustrialAssembler => 16_000,
-            Self::Vulcanizer => 14_000,
-            Self::SapExtractor => 10_000,
-            Self::Quarry => 25_000,
-            Self::AutoHarvester => 18_000,
-            Self::BlockBreaker => 10_000,
-            Self::BlockPlacer => 8_000,
+            Self::ElectricCrusher => 2_500,
+            Self::ElectricFurnace => 2_500,
+            Self::MechanicalPress => 2_500,
+            Self::IndustrialAssembler => 6_000,
+            Self::Vulcanizer => 3_000,
+            Self::SapExtractor => 2_500,
+            Self::Quarry => 10_000,
+            Self::AutoHarvester => 6_000,
+            Self::BlockBreaker => 5_000,
+            Self::BlockPlacer => 2_000,
             Self::ConveyorBelt => 0,
         }
     }
@@ -152,20 +182,20 @@ impl MachineKind {
 
     pub const fn energy_per_tick(self) -> i32 {
         match self {
-            Self::CoalGenerator => 40, // Generates +40 FE/t
-            Self::BioGenerator => 36,  // Generates +36 FE/t from organic/sap fuels
-            Self::SolarGenerator => 24, // Base daytime generation +24 FE/t
+            Self::CoalGenerator => 20, // Generates +20 FE/t (Tier 1 generator)
+            Self::BioGenerator => 24,  // Generates +24 FE/t from organic/sap fuels
+            Self::SolarGenerator => 12, // Base daytime generation +12 FE/t (+24 FE/t in 3x3 array!)
             Self::EnergyBank | Self::ItemExtractor | Self::ConveyorBelt => 0,
-            Self::ElectricCrusher => 20,
-            Self::ElectricFurnace => 16,
-            Self::MechanicalPress => 18,
-            Self::IndustrialAssembler => 22,
-            Self::Vulcanizer => 18,
-            Self::SapExtractor => 12,
-            Self::Quarry => 28,
+            Self::ElectricCrusher => 14,
+            Self::ElectricFurnace => 12,
+            Self::MechanicalPress => 14,
+            Self::IndustrialAssembler => 20,
+            Self::Vulcanizer => 15,
+            Self::SapExtractor => 10,
+            Self::Quarry => 25,
             Self::AutoHarvester => 18,
             Self::BlockBreaker => 15,
-            Self::BlockPlacer => 10,
+            Self::BlockPlacer => 8,
         }
     }
 
@@ -825,18 +855,19 @@ pub fn rubber_tree_blocks(base_pos: [i32; 3], seed: i64) -> Vec<([i32; 3], &'sta
     // 1. Leaves canopy first so trunk overwrites center
     for dy in 3i32..=5i32 {
         let radius: i32 = if dy == 5 { 1 } else { 2 };
-        for dx in -radius..=radius {
-            for dz in -radius..=radius {
+        let neg_radius: i32 = -radius;
+        for dx in neg_radius..=radius {
+            for dz in neg_radius..=radius {
                 if dx == 0 && dz == 0 && dy < 5 {
                     continue;
                 }
-                if i32::abs(dx) == radius && i32::abs(dz) == radius && dy == 3 {
+                if dx.abs() == radius && dz.abs() == radius && dy == 3 {
                     continue;
                 }
                 blocks.push((
                     [base_pos[0] + dx, base_pos[1] + dy, base_pos[2] + dz],
                     BLOCK_RUBBER_LEAVES,
-                    None,
+                    Some(("persistent", "true")),
                 ));
             }
         }
@@ -844,7 +875,7 @@ pub fn rubber_tree_blocks(base_pos: [i32; 3], seed: i64) -> Vec<([i32; 3], &'sta
     blocks.push((
         [base_pos[0], base_pos[1] + 6, base_pos[2]],
         BLOCK_RUBBER_LEAVES,
-        None,
+        Some(("persistent", "true")),
     ));
 
     // 2. Trunk (5 blocks tall, with 1-2 Sap Cavity blocks at y+1 / y+2 / y+3)
@@ -863,8 +894,72 @@ pub fn rubber_tree_blocks(base_pos: [i32; 3], seed: i64) -> Vec<([i32; 3], &'sta
     blocks
 }
 
-/// Computes Solar Generator output (`FE/t`) based on world time, sky light (`0..=15`), and weather.
-pub fn solar_generation_rate(day_time: i64, sky_light: u8, rain_level: f32, speed_upgrades: u32) -> i32 {
+/// Checks if a solar generator at `pos` is part of a complete 3x3 horizontal array of solar panels.
+pub fn is_solar_array_3x3<F>(pos: [i32; 3], mut is_solar: F) -> bool
+where
+    F: FnMut([i32; 3]) -> bool,
+{
+    for min_x in (pos[0] - 2)..=pos[0] {
+        for min_z in (pos[2] - 2)..=pos[2] {
+            let mut complete = true;
+            for x in min_x..=(min_x + 2) {
+                for z in min_z..=(min_z + 2) {
+                    if !is_solar([x, pos[1], z]) {
+                        complete = false;
+                        break;
+                    }
+                }
+                if !complete {
+                    break;
+                }
+            }
+            if complete {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Finds all connected `EnergyBank` blocks adjacent to `start` (clustering into a unified battery bank).
+pub fn find_battery_cluster<F>(start: [i32; 3], mut is_battery: F) -> Vec<[i32; 3]>
+where
+    F: FnMut([i32; 3]) -> bool,
+{
+    let mut visited = Vec::new();
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(start);
+    visited.push(start);
+
+    let directions = [
+        [1, 0, 0], [-1, 0, 0],
+        [0, 1, 0], [0, -1, 0],
+        [0, 0, 1], [0, 0, -1],
+    ];
+
+    while let Some(current) = queue.pop_front() {
+        if visited.len() >= 64 {
+            break;
+        }
+        for d in directions {
+            let neighbor = [current[0] + d[0], current[1] + d[1], current[2] + d[2]];
+            if !visited.contains(&neighbor) && is_battery(neighbor) {
+                visited.push(neighbor);
+                queue.push_back(neighbor);
+            }
+        }
+    }
+    visited
+}
+
+/// Computes Solar Generator output (`FE/t`) based on world time, sky light (`0..=15`), weather, and 3x3 array synergy.
+pub fn solar_generation_rate(
+    day_time: i64,
+    sky_light: u8,
+    rain_level: f32,
+    speed_upgrades: u32,
+    is_array_3x3: bool,
+) -> i32 {
     let tod = day_time.rem_euclid(24_000);
     // Daytime in Minecraft is 0..=12500
     if tod > 12_800 || sky_light < 6 {
@@ -876,6 +971,10 @@ pub fn solar_generation_rate(day_time: i64, sky_light: u8, rain_level: f32, spee
     let mut rate = base + upgrade_bonus;
     if rain_level > 0.2 {
         rate = (rate * 45) / 100;
+    }
+    // 3x3 Giant Solar Array captures 2x double solar energy!
+    if is_array_3x3 {
+        rate *= 2;
     }
     rate.max(1)
 }

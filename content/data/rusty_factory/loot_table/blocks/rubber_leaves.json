@@ -2,16 +2,55 @@
   "type": "minecraft:block",
   "pools": [
     {
-      "condition": {
-        "type": "minecraft:survives_explosion"
-      },
+      "rolls": 1,
       "entries": [
         {
-          "type": "minecraft:item",
-          "name": "rusty_factory:rubber_leaves"
+          "type": "minecraft:alternatives",
+          "children": [
+            {
+              "type": "minecraft:item",
+              "name": "rusty_factory:rubber_leaves",
+              "conditions": [
+                {
+                  "condition": "minecraft:any_of",
+                  "terms": [
+                    {
+                      "condition": "minecraft:match_tool",
+                      "predicate": {
+                        "items": "minecraft:shears"
+                      }
+                    },
+                    {
+                      "condition": "minecraft:has_enchantment",
+                      "enchantment": "minecraft:silk_touch"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "minecraft:item",
+              "name": "rusty_factory:rubber_sapling",
+              "conditions": [
+                {
+                  "condition": "minecraft:random_chance",
+                  "chance": 0.12
+                }
+              ]
+            },
+            {
+              "type": "minecraft:item",
+              "name": "minecraft:stick",
+              "conditions": [
+                {
+                  "condition": "minecraft:random_chance",
+                  "chance": 0.08
+                }
+              ]
+            }
+          ]
         }
-      ],
-      "rolls": 1
+      ]
     }
   ],
   "random_sequence": "rusty_factory:blocks/rubber_leaves"
