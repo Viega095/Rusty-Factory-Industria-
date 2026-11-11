@@ -1383,8 +1383,16 @@ pub(in crate::game) fn world_primitives(
         if entity.id == rules::BLOCK_ENERGY_BANK {
             let st = load_state(entity)
                 .unwrap_or_else(|| MachineState::new(MachineKind::EnergyBank));
-            let pct = (st.energy * 100) / MachineKind::EnergyBank.max_energy().max(1);
-            let label = format!("BANCO FE: {} / 100k ({pct}%)", st.energy);
+            let cluster_len = rules::find_battery_cluster([x, y, z], |p| {
+                game.native_block(p) == rules::BLOCK_ENERGY_BANK
+            }).len().max(1);
+            let cluster_max = (cluster_len as i32) * 10_000;
+            let pct = (st.energy * 100) / cluster_max.max(1);
+            let label = if cluster_len > 1 {
+                format!("BANCO [{cluster_len}x]: {} / {}k ({pct}%)", st.energy, cluster_max / 1000)
+            } else {
+                format!("BANCO FE: {} / 10k ({pct}%)", st.energy)
+            };
             primitives
                 .text(
                     [x as f64 + 0.5, y as f64 + 1.35, z as f64 + 0.5],
@@ -1393,6 +1401,21 @@ pub(in crate::game) fn world_primitives(
                     0.8,
                 )
                 .background();
+            continue;
+        }
+
+        if entity.id == rules::BLOCK_SOLAR {
+            let is_3x3 = rules::is_solar_array_3x3([x, y, z], |p| game.native_block(p) == rules::BLOCK_SOLAR);
+            if is_3x3 {
+                primitives
+                    .text(
+                        [x as f64 + 0.5, y as f64 + 1.15, z as f64 + 0.5],
+                        "☀️ MATRIZ 3x3 (2x)",
+                        0xFF55_FFAA,
+                        0.7,
+                    )
+                    .background();
+            }
             continue;
         }
 
@@ -1547,17 +1570,156 @@ pub(in crate::game) fn world_primitives(
     }
 }
 
-/// Inspects networks, harvests sap from Rubber Tree Sap Cavities, grows Rubber Saplings, or triggers manual pipe extraction.
+/// Inspects networks, harvests sap from Rubber Tree Sap Cavities, grows Rubber Saplings, rotates/dismantles machines with Wrench, or uses tools.
 pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled: &mut bool) {
     if *canceled {
         return;
     }
     let block_id = game.native_block(pos);
+    let held_info = game.native_held();
+    let is_crouching = game
+        .player
+        .as_ref()
+        .is_some_and(|p| p.pose == horizon_client::pose::Pose::Crouching);
+
+    if let Some((ref held_id, _, _)) = held_info {
+        // 1. Wrench: Rotate machine facing (normal click) or dismantle into inventory (crouch + click)
+        if held_id == rules::ITEM_WRENCH {
+            if let Some(kind) = MachineKind::from_block_id(&block_id) {
+                *canceled = true;
+                if is_crouching {
+                    game.native_give_items(&block_id, 1);
+                    game.native_run_command(&format!(
+                        "setblock {} {} {} minecraft:air destroy",
+                        pos[0], pos[1], pos[2]
+                    ));
+                    if let Some(who) = game.native_acting_player() {
+                        game.native_action_bar(
+                            who.uuid,
+                            Text::literal(format!("🔧 [Llave Inglesa] {} desmontada", lang::get(kind.title_key()))),
+                        );
+                    }
+                } else {
+                    let current = game
+                        .native_block_property(pos, "facing")
+                        .unwrap_or_else(|| "north".to_owned());
+                    let next = match current.as_str() {
+                        "north" => "east",
+                        "east" => "south",
+                        "south" => "west",
+                        _ => "north",
+                    };
+                    game.native_set_block_property(pos, "facing", next);
+                    if let Some(who) = game.native_acting_player() {
+                        game.native_action_bar(
+                            who.uuid,
+                            Text::literal(format!("🔧 [Llave Inglesa] Rotada hacia: {next}")),
+                        );
+                    }
+                }
+                return;
+            }
+
+            if block_id == rules::BLOCK_CABLE {
+                *canceled = true;
+                let consumers = rules::find_connected_consumers(
+                    pos,
+                    |p| game.native_block(p) == rules::BLOCK_CABLE,
+                    |p| MachineKind::from_block_id(&game.native_block(p)).is_some(),
+                );
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(
+                        who.uuid,
+                        Text::literal(format!("⚡ [Cable de Cobre] Red: {} máquinas conectadas", consumers.len())),
+                    );
+                }
+                return;
+            }
+
+            if block_id == rules::BLOCK_ITEM_PIPE {
+                *canceled = true;
+                let targets = rules::find_connected_item_targets(
+                    pos,
+                    |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
+                    |p| is_item_container_block(&game.native_block(p)),
+                );
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(
+                        who.uuid,
+                        Text::literal(format!("📦 [Tubería de Ítems] Red: {} inventarios conectados", targets.len())),
+                    );
+                }
+                return;
+            }
+        }
+
+        // 2. Treetap: Harvest extra sap & saplings from Rubber Sap Log
+        if held_id == rules::ITEM_TREETAP && block_id == rules::BLOCK_RUBBER_SAP_LOG {
+            *canceled = true;
+            let has_sap = game.native_block_property(pos, "lit").as_deref() == Some("true");
+            if has_sap {
+                game.native_set_block_property(pos, "lit", "false");
+                game.native_give_items(rules::ITEM_RAW_SAP, 4);
+                game.native_give_items(rules::BLOCK_RUBBER_SAPLING, 1);
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(
+                        who.uuid,
+                        Text::literal("💧 [Espita de Madera] ¡4x Savia recolectada con éxito!"),
+                    );
+                }
+            } else if let Some(who) = game.native_acting_player() {
+                game.native_action_bar(
+                    who.uuid,
+                    Text::literal("⏳ El hueco de savia se está regenerando..."),
+                );
+            }
+            return;
+        }
+
+        // 3. Mining Drill: Crouch to toggle 1x1 / 3x3 mode; Click to instantly drill a 3x3 rock slice
+        if held_id == rules::ITEM_MINING_DRILL {
+            static DRILL_MODE_3X3: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+            if is_crouching {
+                *canceled = true;
+                let prev = DRILL_MODE_3X3.fetch_xor(true, std::sync::atomic::Ordering::Relaxed);
+                let mode_now = !prev;
+                if let Some(who) = game.native_acting_player() {
+                    let msg = if mode_now {
+                        "⚡ [Taladro Minero] Modo: 3x3 Excavación Amplia"
+                    } else {
+                        "⚡ [Taladro Minero] Modo: 1x1 Precisión"
+                    };
+                    game.native_action_bar(who.uuid, Text::literal(msg));
+                }
+                return;
+            } else if DRILL_MODE_3X3.load(std::sync::atomic::Ordering::Relaxed) {
+                *canceled = true;
+                let [cx, cy, cz] = pos;
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        for dz in -1..=1 {
+                            if (dx as i32).abs() + (dz as i32).abs() <= 2 && (dy as i32).abs() <= 1 {
+                                let p = [cx + dx, cy + dy, cz + dz];
+                                let b = game.native_block(p);
+                                if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
+                                    game.native_run_command(&format!("setblock {} {} {} minecraft:air destroy", p[0], p[1], p[2]));
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(who.uuid, Text::literal("⚡ [Taladro Minero] 3x3 Excavado"));
+                }
+                return;
+            }
+        }
+    }
 
     if block_id == rules::BLOCK_RUBBER_SAPLING {
         *canceled = true;
         // Require bone meal in hand to accelerate rubber tree growth (50% chance per bone meal)
-        if let Some((held_id, _, _)) = game.native_held() {
+        if let Some((held_id, _, _)) = held_info {
             if held_id == "minecraft:bone_meal" {
                 game.native_take_items("minecraft:bone_meal", 1);
                 if (game.world.game_time & 1) == 0 {
@@ -1573,9 +1735,9 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
         let has_sap = game.native_block_property(pos, "lit").as_deref() == Some("true");
         if has_sap {
             game.native_set_block_property(pos, "lit", "false");
-            game.native_give_items("rusty_factory:raw_sap", 3);
+            game.native_give_items(rules::ITEM_RAW_SAP, 3);
             if (game.world.game_time & 3) == 0 {
-                game.native_give_items("rusty_factory:rubber_sapling", 1);
+                game.native_give_items(rules::BLOCK_RUBBER_SAPLING, 1);
             }
         }
         return;
