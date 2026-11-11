@@ -1,6 +1,6 @@
 id = "rusty_factory"
 name = "Rusty Factory"
-version = "0.4.0"
+version = "0.4.1"
 description = "Full industrial & rubber-tree automation mod for Horizon: Rubber Trees with Sap Cavities, Treetap, Sap Extractor, Vulcanizer, Bio-Generator, 3D Quarry, 3D Auto Harvester, Solar Panels, 100k FE Energy Bank, Item Pipes & 3D Conveyor Belts."
 authors = ["Chinis"]
 api = "0.2"
