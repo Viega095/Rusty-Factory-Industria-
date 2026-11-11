@@ -1,9 +1,11 @@
 {
   "template": "minecraft:oak_leaves",
-  "destroy_time": 0.2,
-  "explosion_resistance": 0.2,
-  "requires_correct_tool_for_drops": false,
-  "sounds": "minecraft:oak_leaves",
-  "map_color": 7,
-  "occludes": false
+  "properties": {
+    "hardness": 0.2,
+    "explosion_resistance": 0.2,
+    "requires_tool": false,
+    "sounds": "minecraft:oak_leaves",
+    "map_color": 7,
+    "occludes": false
+  }
 }

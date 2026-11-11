@@ -1,4 +1,5 @@
 {
+  "template": "minecraft:copper_ingot",
   "max_stack_size": 64,
   "rarity": "uncommon"
 }

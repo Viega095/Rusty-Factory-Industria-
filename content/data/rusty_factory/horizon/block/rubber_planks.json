@@ -1,8 +1,10 @@
 {
   "template": "minecraft:oak_planks",
-  "destroy_time": 2.0,
-  "explosion_resistance": 3.0,
-  "requires_correct_tool_for_drops": false,
-  "sounds": "minecraft:oak_planks",
-  "map_color": 13
+  "properties": {
+    "hardness": 2.0,
+    "explosion_resistance": 3.0,
+    "requires_tool": false,
+    "sounds": "minecraft:oak_planks",
+    "map_color": 13
+  }
 }

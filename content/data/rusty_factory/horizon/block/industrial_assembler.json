@@ -1,16 +1,10 @@
 {
   "template": "minecraft:furnace",
-  "destroy_time": 3.5,
-  "explosion_resistance": 6.0,
-  "requires_correct_tool_for_drops": true,
-  "sounds": "minecraft:iron_block",
-  "map_color": 21,
-  "light_emission": {
-    "property": "lit",
-    "values": {
-      "false": 0,
-      "true": 10
-    },
-    "default": 0
+  "properties": {
+    "hardness": 3.5,
+    "explosion_resistance": 6.0,
+    "requires_tool": true,
+    "sounds": "minecraft:iron_block",
+    "map_color": 21
   }
 }

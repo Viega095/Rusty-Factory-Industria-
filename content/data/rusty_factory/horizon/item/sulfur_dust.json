@@ -1,4 +1,5 @@
 {
+  "template": "minecraft:gunpowder",
   "max_stack_size": 64,
   "rarity": "common"
 }

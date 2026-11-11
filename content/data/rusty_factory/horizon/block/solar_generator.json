@@ -1,23 +1,21 @@
 {
   "template": "minecraft:furnace",
-  "destroy_time": 3.0,
-  "explosion_resistance": 6.0,
-  "requires_correct_tool_for_drops": true,
-  "sounds": "minecraft:iron_block",
-  "map_color": 21,
-  "occludes": false,
   "shapes": {
-    "default": [[0.0, 0.0, 0.0, 1.0, 0.375, 1.0]]
+    "default": [
+      [0.0, 0.0, 0.0, 1.0, 0.375, 1.0]
+    ]
   },
   "collision_shapes": {
-    "default": [[0.0, 0.0, 0.0, 1.0, 0.375, 1.0]]
+    "default": [
+      [0.0, 0.0, 0.0, 1.0, 0.375, 1.0]
+    ]
   },
-  "light_emission": {
-    "property": "lit",
-    "values": {
-      "false": 0,
-      "true": 6
-    },
-    "default": 0
+  "properties": {
+    "hardness": 3.0,
+    "explosion_resistance": 6.0,
+    "requires_tool": true,
+    "sounds": "minecraft:iron_block",
+    "map_color": 21,
+    "occludes": false
   }
 }
