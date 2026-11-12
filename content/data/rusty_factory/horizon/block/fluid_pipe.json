@@ -1,5 +1,6 @@
 {
   "template": "minecraft:chorus_plant",
+  "connects_to": "#rusty_factory:pipe_connectable",
   "thickness": 6.0,
   "properties": {
     "hardness": 1.5,
