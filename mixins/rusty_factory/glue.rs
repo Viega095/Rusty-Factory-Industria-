@@ -101,7 +101,9 @@ pub(in crate::game) fn container(block: &str, container: &mut Option<ModContaine
             | MachineKind::SteamBoiler
             | MachineKind::SolarGenerator
             | MachineKind::VoidTrashCan
-            | MachineKind::ChargingPad => {
+            | MachineKind::ChargingPad
+            | MachineKind::FluidTank
+            | MachineKind::FluidPump => {
                 *container = Some(ModContainer {
                     slots: 1,
                     faces: std::array::from_fn(|_| vec![0]),
@@ -110,10 +112,7 @@ pub(in crate::game) fn container(block: &str, container: &mut Option<ModContaine
                     menu: Some(rules::MENU.to_owned()),
                 });
             }
-            MachineKind::EnergyMonitor
-            | MachineKind::FluidTank
-            | MachineKind::FluidPump
-            | MachineKind::EnergyRelay => {
+            MachineKind::EnergyMonitor | MachineKind::EnergyRelay => {
                 *container = None;
             }
             MachineKind::EnergyBank => {
@@ -1086,43 +1085,88 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     if kind == MachineKind::FluidPump {
         let mut status = StepStatus::Idle;
         let mut net_rate = 0;
+        let mut detected_fluid: Option<&'static str> = None;
+        for [dx, dy, dz] in rules::NEIGHBORS_6 {
+            let check_p = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
+            let b = game.native_block(check_p);
+            if matches!(b.as_str(), "minecraft:water" | "minecraft:flowing_water") {
+                detected_fluid = Some("water");
+                break;
+            } else if matches!(b.as_str(), "minecraft:lava" | "minecraft:flowing_lava") {
+                detected_fluid = Some("lava");
+                break;
+            }
+        }
+        if let Some(fk) = detected_fluid {
+            state.fluid_kind = fk.to_owned();
+        } else {
+            state.fluid_kind.clear();
+        }
         if state.enabled {
             let cost = 15;
-            let mut found_fluid = false;
-            for [dx, dy, dz] in rules::NEIGHBORS_6 {
-                let check_p = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
-                let b = game.native_block(check_p);
-                if matches!(b.as_str(), "minecraft:water" | "minecraft:flowing_water" | "minecraft:lava" | "minecraft:flowing_lava") {
-                    found_fluid = true;
-                    break;
-                }
-            }
-            if found_fluid && state.energy >= cost {
-                state.energy -= cost;
-                net_rate = -cost;
-                status = StepStatus::Working;
-                for [dx, dy, dz] in rules::NEIGHBORS_6 {
-                    let target = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
-                    let tb = game.native_block(target);
-                    if tb == rules::BLOCK_FLUID_TANK {
-                        game.native_set_block_property(target, "lit", "true");
-                    } else if tb == rules::BLOCK_FLUID_PIPE {
-                        let tanks = rules::find_connected_item_targets(
-                            target,
-                            |p| game.native_block(p) == rules::BLOCK_FLUID_PIPE,
-                            |p| game.native_block(p) == rules::BLOCK_FLUID_TANK,
-                        );
-                        for tank_pos in tanks {
-                            game.native_set_block_property(tank_pos, "lit", "true");
+            if let Some(fk) = detected_fluid {
+                if state.energy >= cost {
+                    state.energy -= cost;
+                    net_rate = -cost;
+                    status = StepStatus::Working;
+                    let pump_mb = 100 + (speed_upgrades.min(8) as i32) * 50;
+                    let mut tank_targets: Vec<[i32; 3]> = Vec::new();
+                    for [dx, dy, dz] in rules::NEIGHBORS_6 {
+                        let target = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
+                        let tb = game.native_block(target);
+                        if tb == rules::BLOCK_FLUID_TANK {
+                            tank_targets.push(target);
+                        } else if tb == rules::BLOCK_FLUID_PIPE {
+                            let tanks = rules::find_connected_item_targets(
+                                target,
+                                |p| game.native_block(p) == rules::BLOCK_FLUID_PIPE,
+                                |p| game.native_block(p) == rules::BLOCK_FLUID_TANK,
+                            );
+                            tank_targets.extend(tanks);
                         }
                     }
+                    for tank_pos in tank_targets {
+                        let mut filled_now = false;
+                        game.native_with_mod_block_entity(tank_pos, |t_ent| {
+                            let mut t_st = load_state(t_ent).unwrap_or_else(|| MachineState::new(MachineKind::FluidTank));
+                            if (t_st.fluid_kind.is_empty() || t_st.fluid_kind == fk)
+                                && t_st.fluid_amount < rules::FLUID_TANK_MAX_MB
+                            {
+                                t_st.fluid_kind = fk.to_owned();
+                                t_st.fluid_amount = (t_st.fluid_amount + pump_mb).min(rules::FLUID_TANK_MAX_MB);
+                                store_state(t_ent, &t_st);
+                                filled_now = true;
+                            }
+                        });
+                        if filled_now {
+                            game.native_set_block_property(tank_pos, "lit", "true");
+                            break;
+                        }
+                    }
+                } else {
+                    status = StepStatus::NoPower;
                 }
-            } else if found_fluid && state.energy < cost {
-                status = StepStatus::NoPower;
             }
         }
         update_lit_state(game, pos, status == StepStatus::Working);
-        entity.data = vec![status as i32, state.energy, kind.max_energy(), 100, net_rate, i32::from(state.enabled), 0, 0, 0, 0];
+        let fcode = rules::fluid_code(&state.fluid_kind);
+        let rate_mb = if status == StepStatus::Working {
+            100 + (speed_upgrades.min(8) as i32) * 50
+        } else {
+            0
+        };
+        entity.data = vec![
+            status as i32,
+            state.energy,
+            kind.max_energy(),
+            if status == StepStatus::Working { 100 } else { 0 },
+            net_rate,
+            i32::from(state.enabled),
+            0,
+            fcode,
+            rate_mb,
+            0,
+        ];
         store_state(entity, &state);
         return;
     }
@@ -1139,7 +1183,71 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         return;
     }
 
-    if matches!(kind, MachineKind::FluidTank | MachineKind::EnergyMonitor) {
+    if kind == MachineKind::FluidTank {
+        // Process bucket / fluid item in slot 0 inside Tank GUI
+        if let Some(Some(slot0)) = entity.items.first_mut() {
+            let item_id = slot0.item.as_ref();
+            if item_id == "minecraft:water_bucket"
+                && (state.fluid_kind.is_empty() || state.fluid_kind == "water")
+                && state.fluid_amount + 1000 <= rules::FLUID_TANK_MAX_MB
+            {
+                state.fluid_kind = "water".to_owned();
+                state.fluid_amount += 1000;
+                *slot0 = ItemStack::new("minecraft:bucket", 1);
+            } else if item_id == "minecraft:lava_bucket"
+                && (state.fluid_kind.is_empty() || state.fluid_kind == "lava")
+                && state.fluid_amount + 1000 <= rules::FLUID_TANK_MAX_MB
+            {
+                state.fluid_kind = "lava".to_owned();
+                state.fluid_amount += 1000;
+                *slot0 = ItemStack::new("minecraft:bucket", 1);
+            } else if item_id == rules::ITEM_RAW_SAP
+                && (state.fluid_kind.is_empty() || state.fluid_kind == "sap")
+                && state.fluid_amount + 250 <= rules::FLUID_TANK_MAX_MB
+            {
+                state.fluid_kind = "sap".to_owned();
+                state.fluid_amount += 250;
+                if slot0.count > 1 {
+                    slot0.count -= 1;
+                } else {
+                    entity.items[0] = None;
+                }
+            } else if item_id == "minecraft:bucket" && slot0.count == 1 && state.fluid_amount >= 1000 {
+                if state.fluid_kind == "water" {
+                    state.fluid_amount -= 1000;
+                    *slot0 = ItemStack::new("minecraft:water_bucket", 1);
+                    if state.fluid_amount == 0 {
+                        state.fluid_kind.clear();
+                    }
+                } else if state.fluid_kind == "lava" {
+                    state.fluid_amount -= 1000;
+                    *slot0 = ItemStack::new("minecraft:lava_bucket", 1);
+                    if state.fluid_amount == 0 {
+                        state.fluid_kind.clear();
+                    }
+                }
+            }
+        }
+        update_lit_state(game, pos, state.fluid_amount > 0);
+        let pct = ((state.fluid_amount * 100) / rules::FLUID_TANK_MAX_MB).clamp(0, 100);
+        let fcode = rules::fluid_code(&state.fluid_kind);
+        entity.data = vec![
+            if state.fluid_amount > 0 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
+            0,
+            1,
+            pct,
+            0,
+            1,
+            0,
+            fcode,
+            state.fluid_amount,
+            rules::FLUID_TANK_MAX_MB,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
+    if kind == MachineKind::EnergyMonitor {
         store_state(entity, &state);
         return;
     }
@@ -1181,8 +1289,8 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             i32::from(state.enabled),
             0,
             0,
-            0,
-            0,
+            state.burn_left,
+            state.burn_max,
         ];
         store_state(entity, &state);
         return;
@@ -1626,12 +1734,20 @@ pub(in crate::game) fn world_primitives(
         }
 
         if entity.id == rules::BLOCK_FLUID_TANK {
-            let is_filled = game.native_block_property([x, y, z], "lit").as_deref() == Some("true");
-            if is_filled {
+            let st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::FluidTank));
+            if st.fluid_amount > 0 {
+                let ratio = (st.fluid_amount as f64 / rules::FLUID_TANK_MAX_MB as f64).clamp(0.05, 1.0);
+                let top_y = y as f64 + 0.08 + 0.80 * ratio;
+                let col = match st.fluid_kind.as_str() {
+                    "lava" => 0xEEFF_5511,
+                    "sap" => 0xCCEE_9B15,
+                    "steam" => 0x88D0_F4FF,
+                    _ => 0xAA25_85E8,
+                };
                 primitives.filled_box(
                     [x as f64 + 0.12, y as f64 + 0.08, z as f64 + 0.12],
-                    [x as f64 + 0.88, y as f64 + 0.88, z as f64 + 0.88],
-                    0xAA25_85E8,
+                    [x as f64 + 0.88, top_y, z as f64 + 0.88],
+                    col,
                 );
             }
             continue;
@@ -2018,11 +2134,15 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
 
     }
 
+    if is_crouching {
+        return;
+    }
+
     if block_id == rules::BLOCK_RUBBER_SAPLING {
-        *canceled = true;
         // Require bone meal in hand to accelerate rubber tree growth (50% chance per bone meal)
         if let Some((held_id, _, _)) = held_info {
             if held_id == "minecraft:bone_meal" {
+                *canceled = true;
                 game.native_take_items("minecraft:bone_meal", 1);
                 if (game.world.game_time & 1) == 0 {
                     grow_rubber_tree(game, pos);
@@ -2033,70 +2153,142 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
     }
 
     if block_id == rules::BLOCK_RUBBER_SAP_LOG {
-        *canceled = true;
-        let has_sap = game.native_block_property(pos, "lit").as_deref() == Some("true");
-        if has_sap {
-            game.native_set_block_property(pos, "lit", "false");
-            game.native_give_items(rules::ITEM_RAW_SAP, 3);
-            if (game.world.game_time & 3) == 0 {
-                game.native_give_items(rules::BLOCK_RUBBER_SAPLING, 1);
+        if held_info.is_none() {
+            let has_sap = game.native_block_property(pos, "lit").as_deref() == Some("true");
+            if has_sap {
+                *canceled = true;
+                game.native_set_block_property(pos, "lit", "false");
+                game.native_give_items(rules::ITEM_RAW_SAP, 3);
+                if (game.world.game_time & 3) == 0 {
+                    game.native_give_items(rules::BLOCK_RUBBER_SAPLING, 1);
+                }
             }
         }
         return;
     }
 
     if block_id == rules::BLOCK_FLUID_TANK {
-        *canceled = true;
         if let Some((ref held_id, _, _)) = held_info {
             if held_id == "minecraft:water_bucket" {
-                game.native_take_items("minecraft:water_bucket", 1);
-                game.native_give_items("minecraft:bucket", 1);
-                game.native_set_block_property(pos, "lit", "true");
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal("💧 [Tanque de Fluidos] Lleno con Agua (1000 mB)"));
+                *canceled = true;
+                let mut msg = None;
+                game.native_with_mod_block_entity(pos, |entity| {
+                    let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::FluidTank));
+                    if (st.fluid_kind.is_empty() || st.fluid_kind == "water")
+                        && st.fluid_amount + 1000 <= rules::FLUID_TANK_MAX_MB
+                    {
+                        st.fluid_kind = "water".to_owned();
+                        st.fluid_amount += 1000;
+                        store_state(entity, &st);
+                        msg = Some(format!("💧 [Tanque] Agua: {} / {} mB", st.fluid_amount, rules::FLUID_TANK_MAX_MB));
+                    } else {
+                        msg = Some("⚠️ [Tanque] Lleno o contiene otro fluido".to_owned());
+                    }
+                });
+                if let Some(m) = msg {
+                    if m.starts_with('💧') {
+                        game.native_take_items("minecraft:water_bucket", 1);
+                        game.native_give_items("minecraft:bucket", 1);
+                        game.native_set_block_property(pos, "lit", "true");
+                    }
+                    if let Some(who) = game.native_acting_player() {
+                        game.native_action_bar(who.uuid, Text::literal(m));
+                    }
                 }
                 return;
             } else if held_id == "minecraft:lava_bucket" {
-                game.native_take_items("minecraft:lava_bucket", 1);
-                game.native_give_items("minecraft:bucket", 1);
-                game.native_set_block_property(pos, "lit", "true");
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal("🔥 [Tanque de Fluidos] Lleno con Lava (1000 mB)"));
+                *canceled = true;
+                let mut msg = None;
+                game.native_with_mod_block_entity(pos, |entity| {
+                    let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::FluidTank));
+                    if (st.fluid_kind.is_empty() || st.fluid_kind == "lava")
+                        && st.fluid_amount + 1000 <= rules::FLUID_TANK_MAX_MB
+                    {
+                        st.fluid_kind = "lava".to_owned();
+                        st.fluid_amount += 1000;
+                        store_state(entity, &st);
+                        msg = Some(format!("🔥 [Tanque] Lava: {} / {} mB", st.fluid_amount, rules::FLUID_TANK_MAX_MB));
+                    } else {
+                        msg = Some("⚠️ [Tanque] Lleno o contiene otro fluido".to_owned());
+                    }
+                });
+                if let Some(m) = msg {
+                    if m.starts_with('🔥') {
+                        game.native_take_items("minecraft:lava_bucket", 1);
+                        game.native_give_items("minecraft:bucket", 1);
+                        game.native_set_block_property(pos, "lit", "true");
+                    }
+                    if let Some(who) = game.native_acting_player() {
+                        game.native_action_bar(who.uuid, Text::literal(m));
+                    }
                 }
                 return;
             } else if held_id == rules::ITEM_RAW_SAP {
-                game.native_take_items(rules::ITEM_RAW_SAP, 1);
-                game.native_set_block_property(pos, "lit", "true");
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal("🍯 [Tanque de Fluidos] Almacenando Savia de Caucho"));
+                *canceled = true;
+                let mut msg = None;
+                game.native_with_mod_block_entity(pos, |entity| {
+                    let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::FluidTank));
+                    if (st.fluid_kind.is_empty() || st.fluid_kind == "sap")
+                        && st.fluid_amount + 250 <= rules::FLUID_TANK_MAX_MB
+                    {
+                        st.fluid_kind = "sap".to_owned();
+                        st.fluid_amount += 250;
+                        store_state(entity, &st);
+                        msg = Some(format!("🍯 [Tanque] Savia: {} / {} mB", st.fluid_amount, rules::FLUID_TANK_MAX_MB));
+                    } else {
+                        msg = Some("⚠️ [Tanque] Lleno o contiene otro fluido".to_owned());
+                    }
+                });
+                if let Some(m) = msg {
+                    if m.starts_with('🍯') {
+                        game.native_take_items(rules::ITEM_RAW_SAP, 1);
+                        game.native_set_block_property(pos, "lit", "true");
+                    }
+                    if let Some(who) = game.native_acting_player() {
+                        game.native_action_bar(who.uuid, Text::literal(m));
+                    }
                 }
                 return;
             } else if held_id == "minecraft:bucket" {
-                let is_filled = game.native_block_property(pos, "lit").as_deref() == Some("true");
-                if is_filled {
-                    game.native_take_items("minecraft:bucket", 1);
-                    game.native_give_items("minecraft:water_bucket", 1);
-                    game.native_set_block_property(pos, "lit", "false");
-                    if let Some(who) = game.native_acting_player() {
-                        game.native_action_bar(who.uuid, Text::literal("🪣 [Tanque de Fluidos] Vaciado en Balde"));
+                *canceled = true;
+                let mut extracted: Option<&'static str> = None;
+                let mut remain = 0;
+                game.native_with_mod_block_entity(pos, |entity| {
+                    let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::FluidTank));
+                    if st.fluid_amount >= 1000 && matches!(st.fluid_kind.as_str(), "water" | "lava") {
+                        extracted = if st.fluid_kind == "lava" {
+                            Some("minecraft:lava_bucket")
+                        } else {
+                            Some("minecraft:water_bucket")
+                        };
+                        st.fluid_amount -= 1000;
+                        if st.fluid_amount == 0 {
+                            st.fluid_kind.clear();
+                        }
+                        remain = st.fluid_amount;
+                        store_state(entity, &st);
                     }
-                    return;
+                });
+                if let Some(bucket_out) = extracted {
+                    game.native_take_items("minecraft:bucket", 1);
+                    game.native_give_items(bucket_out, 1);
+                    if remain == 0 {
+                        game.native_set_block_property(pos, "lit", "false");
+                    }
+                    if let Some(who) = game.native_acting_player() {
+                        game.native_action_bar(who.uuid, Text::literal(format!("🪣 [Tanque] Extraído 1,000 mB (Restan: {remain} mB)")));
+                    }
                 }
+                return;
             }
-        }
-        let is_filled = game.native_block_property(pos, "lit").as_deref() == Some("true");
-        if let Some(who) = game.native_acting_player() {
-            let msg = if is_filled {
-                "💧 [Tanque de Fluidos] Nivel: 1,000 / 1,000 mB (Lleno)"
-            } else {
-                "💧 [Tanque de Fluidos] Nivel: 0 / 1,000 mB (Vacío - Usa un balde)"
-            };
-            game.native_action_bar(who.uuid, Text::literal(msg));
         }
         return;
     }
 
     if block_id == rules::BLOCK_ENERGY_MONITOR {
+        if held_info.is_some() {
+            return;
+        }
         *canceled = true;
         let consumers = rules::find_connected_consumers(
             pos,
@@ -2125,20 +2317,10 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
         return;
     }
 
-    if block_id == rules::BLOCK_TRASH_CAN {
-        *canceled = true;
-        game.native_run_command("playsound minecraft:block.lava.extinguish block @a ~ ~ ~ 0.8 1.0");
-        game.native_run_command("particle minecraft:smoke ~ ~ ~ 0.2 0.2 0.2 0.05 15");
-        if let Some(who) = game.native_acting_player() {
-            game.native_action_bar(
-                who.uuid,
-                Text::literal("🗑️ [Papelera de Vacío] Desintegrador activo: destruye todo ítem que ingrese"),
-            );
-        }
-        return;
-    }
-
     if block_id == rules::BLOCK_ENERGY_RELAY {
+        if held_info.is_some() {
+            return;
+        }
         *canceled = true;
         let mut total_relays = 0;
         for (&_p, be) in &game.world.block_entities {
@@ -2154,28 +2336,6 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
                 Text::literal(format!(
                     "📡 [Relé Inalámbrico] Red de Energía Inalámbrica: {} relés activos",
                     total_relays
-                )),
-            );
-        }
-        return;
-    }
-
-    if block_id == rules::BLOCK_FLUID_PUMP {
-        *canceled = true;
-        let mut found_sources = 0;
-        for [dx, dy, dz] in rules::NEIGHBORS_6 {
-            let check_p = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
-            let b = game.native_block(check_p);
-            if matches!(b.as_str(), "minecraft:water" | "minecraft:flowing_water" | "minecraft:lava" | "minecraft:flowing_lava") {
-                found_sources += 1;
-            }
-        }
-        if let Some(who) = game.native_acting_player() {
-            game.native_action_bar(
-                who.uuid,
-                Text::literal(format!(
-                    "⛽ [Bomba de Fluidos] Fuentes adyacentes: {} | Bombeo: 1,000 mB/t",
-                    found_sources
                 )),
             );
         }
@@ -2253,28 +2413,42 @@ pub(in crate::game) fn menu_button(entity: &mut ModBlockEntity, id: i32) {
 pub(in crate::game) fn screen(block: &str, screen: &mut Option<NativeScreen>) {
     if let Some(kind) = MachineKind::from_block_id(block) {
         let slots = match kind {
-            MachineKind::CoalGenerator | MachineKind::BioGenerator => {
-                vec![Some([80.0, 36.0])] // Single centered fuel slot
+            MachineKind::CoalGenerator
+            | MachineKind::BioGenerator
+            | MachineKind::SteamBoiler
+            | MachineKind::FluidTank => {
+                vec![Some([52.0, 34.0])] // Left-center fuel / bucket slot
             }
-            MachineKind::SolarGenerator
-            | MachineKind::ChargingPad
-            | MachineKind::EnergyBank
-            | MachineKind::VoidTrashCan => {
-                vec![Some([80.0, 36.0])] // Single centered recharge / storage / void slot
+            MachineKind::SolarGenerator | MachineKind::EnergyBank => {
+                vec![Some([124.0, 34.0])] // Right-side recharge / battery slot
+            }
+            MachineKind::ChargingPad | MachineKind::VoidTrashCan => {
+                vec![Some([80.0, 34.0])] // Centered induction / void slot
+            }
+            MachineKind::FluidPump => {
+                vec![Some([143.0, 35.0])] // Right-side speed upgrade slot
             }
             MachineKind::AlloySmelter => {
                 vec![
-                    Some([38.0, 35.0]),  // Slot 0: Primary Input
-                    Some([60.0, 35.0]),  // Slot 1: Secondary Input / Flux
-                    Some([116.0, 35.0]), // Slot 2: Alloy Output
+                    Some([32.0, 35.0]),  // Slot 0: Primary Input
+                    Some([54.0, 35.0]),  // Slot 1: Secondary Input / Flux
+                    Some([112.0, 35.0]), // Slot 2: Alloy Output
+                    Some([143.0, 35.0]), // Slot 3: Speed Upgrade
+                ]
+            }
+            MachineKind::Quarry | MachineKind::AutoHarvester => {
+                vec![
+                    Some([32.0, 35.0]),  // Slot 0: Buffer
+                    None,
+                    Some([112.0, 35.0]), // Slot 2: Output
                     Some([143.0, 35.0]), // Slot 3: Speed Upgrade
                 ]
             }
             _ => {
                 vec![
-                    Some([44.0, 35.0]),  // Slot 0: Input / Belt Item
-                    None,                // Slot 1: Hidden for pure cable-powered machines
-                    Some([106.0, 35.0]), // Slot 2: Output
+                    Some([40.0, 35.0]),  // Slot 0: Input / Belt Item
+                    None,                // Slot 1: Hidden
+                    Some([104.0, 35.0]), // Slot 2: Output
                     Some([143.0, 35.0]), // Slot 3: Speed Upgrade
                 ]
             }
@@ -2377,9 +2551,9 @@ pub(in crate::game) fn screen_draw(
     };
     game.native_text(batch, &status_text, [x + 8.0, y + 20.0], status_color, false);
 
-    // 3. Progress Bar / Radar Monitor / Combustion Gauge
+    // 3. Machine-Specific Center Modules
     if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
-        // Radar monitor display inside [64, 28]..[102, 54]
+        // Radar monitor display inside [54, 26]..[106, 54]
         let side = quarry_radius * 2 + 1;
         let area_txt = format!("{side}x{side}");
         let y_txt = if kind == MachineKind::Quarry {
@@ -2387,40 +2561,92 @@ pub(in crate::game) fn screen_draw(
         } else {
             format!("#{quarry_mined}")
         };
-        game.native_text(batch, &area_txt, [x + 68.0, y + 31.0], 0x55_FFAA, false);
-        game.native_text(batch, &y_txt, [x + 68.0, y + 42.0], 0x38_F2FF, false);
-    } else if matches!(kind, MachineKind::CoalGenerator | MachineKind::BioGenerator) {
-        // Combustion gauge directly above centered fuel slot [80, 36]
-        game.native_fill(batch, [x + 74.0, y + 25.0, 28.0, 5.0], 0xFF3A_3F48);
-        let bar_w = (28.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 28.0);
+        game.native_text(batch, &area_txt, [x + 60.0, y + 30.0], 0x55_FFAA, false);
+        game.native_text(batch, &y_txt, [x + 60.0, y + 42.0], 0x38_F2FF, false);
+    } else if matches!(kind, MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SteamBoiler) {
+        let burn_left = get(8).max(0);
+        let burn_secs = burn_left / 20;
+        let (accent_col, bolt_col) = match kind {
+            MachineKind::CoalGenerator => (0xFFFF_7B25, 0xFFFF_D166),
+            MachineKind::BioGenerator => (0xFF55_DD44, 0xFF99_FF66),
+            _ => (0xFF38_D6FF, 0xFFAA_F0FF),
+        };
+        // Module A: Lightning Bolt + Tick Duration Bar [74, 28..104, 54]
+        game.native_text(batch, "⚡", [x + 76.0, y + 29.0], bolt_col, false);
+        let tick_txt = if burn_left > 0 {
+            format!("{burn_left}t")
+        } else {
+            "0t".to_string()
+        };
+        game.native_text(batch, &tick_txt, [x + 85.0, y + 30.0], 0xFF_FFFF, false);
+        game.native_fill(batch, [x + 76.0, y + 41.0, 26.0, 5.0], 0xFF22_262E);
+        let bar_w = (26.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 26.0);
         if bar_w > 0.0 {
-            let col = if kind == MachineKind::CoalGenerator { 0xFFFF_6B35 } else { 0xFF70_E000 };
-            game.native_fill(batch, [x + 74.0, y + 25.0, bar_w, 5.0], col);
+            game.native_fill(batch, [x + 76.0, y + 41.0, bar_w, 5.0], accent_col);
         }
+        let sec_txt = format!("{burn_secs}s");
+        game.native_text(batch, &sec_txt, [x + 79.0, y + 48.0], 0xAA_B8C8, false);
+
+        // Module B: Stored & Generated Energy Readout [108, 28..168, 54]
+        game.native_text(batch, &format!("Alm:{energy}"), [x + 111.0, y + 31.0], 0x70_E8FF, false);
+        game.native_text(batch, &format!("Gen:+{rate}/t"), [x + 111.0, y + 43.0], bolt_col, false);
     } else if kind == MachineKind::SolarGenerator {
         let is_3x3 = get(7) != 0;
-        let tag = if is_3x3 { "☀️ [MATRIZ 3x3: 2x ACTIVA]" } else { "☀️ [PANEL INDIVIDUAL]" };
+        let tag = if is_3x3 { "☀ MATRIZ 3x3 (x2)" } else { "☀ PANEL 1x1" };
         let tag_col = if is_3x3 { 0x55_FFAA } else { 0xFF_D166 };
-        game.native_text(batch, tag, [x + 32.0, y + 23.0], tag_col, false);
-    } else if kind == MachineKind::ChargingPad {
-        game.native_text(batch, "🔋 [INDUCCIÓN INALÁMBRICA]", [x + 28.0, y + 23.0], 0xFF00_FFAA, false);
-    } else if kind == MachineKind::AlloySmelter {
-        // Molten progress bar
-        game.native_fill(batch, [x + 80.0, y + 39.0, 32.0, 8.0], 0xFF3A_3F48);
-        let bar_w = (32.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 32.0);
-        if bar_w > 0.0 {
-            game.native_fill(batch, [x + 80.0, y + 39.0, bar_w, 8.0], 0xFFFF_7722);
-        }
-        game.native_text(batch, "➔", [x + 92.0, y + 37.0], 0xFF_FFFF, false);
+        game.native_text(batch, tag, [x + 30.0, y + 30.0], tag_col, false);
+        game.native_text(batch, &format!("Gen: +{rate} FE/t"), [x + 30.0, y + 40.0], 0xFF_E066, false);
+        game.native_text(batch, &format!("Alm: {energy}/{max_energy}"), [x + 30.0, y + 49.0], 0x70_E8FF, false);
     } else if kind == MachineKind::EnergyBank {
-        // Modular storage gauge above center battery slot
-        game.native_fill(batch, [x + 60.0, y + 25.0, 56.0, 5.0], 0xFF2A_3038);
-        let bar_w = (56.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 56.0);
+        let cells = get(7).max(1);
+        game.native_fill(batch, [x + 30.0, y + 34.0, 84.0, 9.0], 0xFF20_2832);
+        let bar_w = (84.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 84.0);
         if bar_w > 0.0 {
-            game.native_fill(batch, [x + 60.0, y + 25.0, bar_w, 5.0], 0xFF00_E5FF);
+            game.native_fill(batch, [x + 30.0, y + 34.0, bar_w, 9.0], 0xFF00_E5FF);
         }
+        game.native_text(batch, &format!("{progress_pct}% ({cells} cel)"), [x + 32.0, y + 25.0], 0x70_E8FF, false);
+        game.native_text(batch, &format!("{energy}/{max_energy} FE"), [x + 30.0, y + 46.0], 0xFF_FFFF, false);
+    } else if kind == MachineKind::ChargingPad {
+        game.native_text(batch, "⚡", [x + 56.0, y + 39.0], 0xFF00_FFAA, false);
+        game.native_text(batch, "⚡", [x + 112.0, y + 39.0], 0xFF00_FFAA, false);
+        game.native_text(batch, "INDUCCIÓN", [x + 62.0, y + 23.0], 0xFF00_FFAA, false);
+    } else if kind == MachineKind::VoidTrashCan {
+        game.native_text(batch, "VACÍO", [x + 74.0, y + 23.0], 0xDD_88FF, false);
+    } else if kind == MachineKind::FluidTank {
+        let fcode = get(7);
+        let famount = get(8);
+        let fmax = get(9).max(1);
+        let fname = rules::fluid_name_from_code(fcode);
+        let fcol = match fcode {
+            1 => 0xFF25_85E8,
+            2 => 0xFFFF_5511,
+            3 => 0xFFEE_9B15,
+            4 => 0xFFD0_F4FF,
+            _ => 0xFF3A_404A,
+        };
+        // Tall vertical fluid column at [12, 26, 14, 30]
+        game.native_fill(batch, [x + 12.0, y + 26.0, 14.0, 30.0], 0xFF1A_1E26);
+        let fh = (30.0 * (famount as f32 / fmax as f32)).clamp(0.0, 30.0);
+        if fh > 0.0 {
+            game.native_fill(batch, [x + 12.0, y + 26.0 + (30.0 - fh), 14.0, fh], fcol);
+        }
+        game.native_text(batch, &format!("Fluido: {fname}"), [x + 78.0, y + 31.0], fcol, false);
+        game.native_text(batch, &format!("{famount}/{fmax} mB"), [x + 78.0, y + 43.0], 0xFF_FFFF, false);
+    } else if kind == MachineKind::FluidPump {
+        let fcode = get(7);
+        let rate_mb = get(8);
+        let fname = if fcode == 0 { "Sin fuente" } else { rules::fluid_name_from_code(fcode) };
+        game.native_text(batch, &format!("Fuente: {fname}"), [x + 30.0, y + 31.0], 0x38_D6FF, false);
+        game.native_text(batch, &format!("Bombeo: {rate_mb} mB/t"), [x + 30.0, y + 43.0], 0x55_FFAA, false);
+    } else if kind == MachineKind::AlloySmelter {
+        game.native_fill(batch, [x + 76.0, y + 39.0, 30.0, 8.0], 0xFF3A_3F48);
+        let bar_w = (30.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 30.0);
+        if bar_w > 0.0 {
+            game.native_fill(batch, [x + 76.0, y + 39.0, bar_w, 8.0], 0xFFFF_7722);
+        }
+        game.native_text(batch, "➔", [x + 87.0, y + 37.0], 0xFF_FFFF, false);
     } else {
-        game.native_fill(batch, [x + 66.0, y + 39.0, 34.0, 8.0], 0xFF3A_3F48);
+        game.native_fill(batch, [x + 64.0, y + 39.0, 34.0, 8.0], 0xFF3A_3F48);
         let bar_w = (34.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 34.0);
         if bar_w > 0.0 {
             let bar_col = if matches!(kind, MachineKind::ConveyorBelt | MachineKind::ItemExtractor) {
@@ -2428,19 +2654,22 @@ pub(in crate::game) fn screen_draw(
             } else {
                 0xFF38_D6FF
             };
-            game.native_fill(batch, [x + 66.0, y + 39.0, bar_w, 8.0], bar_col);
+            game.native_fill(batch, [x + 64.0, y + 39.0, bar_w, 8.0], bar_col);
         }
     }
 
-    // 4. Vertical Energy Bar on left edge `[8, 30, 6, 24]`
-    if !matches!(kind, MachineKind::ConveyorBelt | MachineKind::ItemExtractor) {
-        game.native_fill(batch, [x + 8.0, y + 31.0, 6.0, 24.0], 0xFF26_2A30);
+    // 4. Vertical Energy Bar on left edge `[12, 26, 8, 30]`
+    if !matches!(
+        kind,
+        MachineKind::ConveyorBelt | MachineKind::ItemExtractor | MachineKind::FluidTank | MachineKind::VoidTrashCan
+    ) {
+        game.native_fill(batch, [x + 12.0, y + 26.0, 8.0, 30.0], 0xFF20_242A);
         let e_ratio = (energy as f32 / max_energy as f32).clamp(0.0, 1.0);
-        let e_h = 24.0 * e_ratio;
+        let e_h = 30.0 * e_ratio;
         if e_h > 0.0 {
             game.native_fill(
                 batch,
-                [x + 8.0, y + 31.0 + (24.0 - e_h), 6.0, e_h],
+                [x + 12.0, y + 26.0 + (30.0 - e_h), 8.0, e_h],
                 0xFF00_E5FF,
             );
         }
@@ -2458,15 +2687,45 @@ pub(in crate::game) fn screen_draw(
         game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
         game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x66_FF88, false);
     } else if kind == MachineKind::CoalGenerator {
-        let line1 = format!("FE: {energy}/{max_energy} (+20 FE/t)");
-        let line2 = format!("Combustión Carbón: {progress_pct}%");
+        let burn_left = get(8).max(0);
+        let line1 = format!("Almacenada: {energy}/{max_energy} FE | +{rate} FE/t");
+        let line2 = format!("Combustión: {burn_left} ticks ({progress_pct}%)");
         game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
         game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF_9E00, false);
     } else if kind == MachineKind::BioGenerator {
-        let line1 = format!("FE: {energy}/{max_energy} (+24 FE/t)");
-        let line2 = format!("Biomasa / Savia: {progress_pct}%");
+        let burn_left = get(8).max(0);
+        let line1 = format!("Almacenada: {energy}/{max_energy} FE | +{rate} FE/t");
+        let line2 = format!("Biomasa: {burn_left} ticks ({progress_pct}%)");
         game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
         game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x70_E000, false);
+    } else if kind == MachineKind::SteamBoiler {
+        let burn_left = get(8).max(0);
+        let line1 = format!("Almacenada: {energy}/{max_energy} FE | +{rate} FE/t");
+        let line2 = format!("Presión Vapor: {burn_left} ticks ({progress_pct}%)");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x38_D6FF, false);
+    } else if kind == MachineKind::FluidTank {
+        let fcode = get(7);
+        let famount = get(8);
+        let fmax = get(9).max(1);
+        let fname = rules::fluid_name_from_code(fcode);
+        let line1 = format!("Especificación: {fname} ({progress_pct}%)");
+        let line2 = format!("Capacidad: {famount} / {fmax} mB (Usa Balde)");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x38_D6FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xA8_DADC, false);
+    } else if kind == MachineKind::FluidPump {
+        let fcode = get(7);
+        let rate_mb = get(8);
+        let fname = if fcode == 0 { "Sin fluido" } else { rules::fluid_name_from_code(fcode) };
+        let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
+        let line2 = format!("Bombeando {fname}: {rate_mb} mB/t");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x55_FFAA, false);
+    } else if kind == MachineKind::VoidTrashCan {
+        let line1 = "Papelera de Vacío: Incineración Instantánea";
+        let line2 = "Coloca cualquier ítem para destruirlo";
+        game.native_text(batch, line1, [x + 10.0, y + 60.0], 0xDD_88FF, false);
+        game.native_text(batch, line2, [x + 10.0, y + 70.0], 0xAA_B8C8, false);
     } else if kind == MachineKind::SolarGenerator {
         let is_3x3 = get(7) != 0;
         let line1 = format!("FE: {energy}/{max_energy} | Genera: +{rate} FE/t");
@@ -2555,13 +2814,15 @@ pub(in crate::game) fn screen_draw(
     }
 
     // 6. Interactive Buttons
-    let pwr_label = lang::get(if enabled {
-        "rusty_factory.screen.start"
-    } else {
-        "rusty_factory.screen.stop"
-    });
-    let pwr_bg = if enabled { 0xFF2B_8A3E } else { 0xFFA6_1E22 };
-    draw_button(game, batch, origin, POWER_BTN_RECT, &pwr_label, pwr_bg);
+    if !matches!(kind, MachineKind::FluidTank | MachineKind::VoidTrashCan) {
+        let pwr_label = lang::get(if enabled {
+            "rusty_factory.screen.start"
+        } else {
+            "rusty_factory.screen.stop"
+        });
+        let pwr_bg = if enabled { 0xFF2B_8A3E } else { 0xFFA6_1E22 };
+        draw_button(game, batch, origin, POWER_BTN_RECT, &pwr_label, pwr_bg);
+    }
 
     if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
         let side = quarry_radius * 2 + 1;
@@ -2574,10 +2835,13 @@ pub(in crate::game) fn screen_draw(
         kind,
         MachineKind::CoalGenerator
             | MachineKind::BioGenerator
+            | MachineKind::SteamBoiler
             | MachineKind::SolarGenerator
             | MachineKind::ChargingPad
             | MachineKind::EnergyBank
             | MachineKind::VoidTrashCan
+            | MachineKind::FluidTank
+            | MachineKind::FluidPump
     ) {
         let auto_label = lang::get(if auto_io {
             "rusty_factory.screen.auto_on"
@@ -2606,17 +2870,22 @@ pub(in crate::game) fn screen_click(
     if right {
         return;
     };
-    if in_rect(at, POWER_BTN_RECT) {
+    if in_rect(at, POWER_BTN_RECT)
+        && !matches!(kind, MachineKind::FluidTank | MachineKind::VoidTrashCan)
+    {
         *button = Some(BTN_TOGGLE_POWER);
     } else if in_rect(at, MODE_BTN_RECT)
         && !matches!(
             kind,
             MachineKind::CoalGenerator
                 | MachineKind::BioGenerator
+                | MachineKind::SteamBoiler
                 | MachineKind::SolarGenerator
                 | MachineKind::ChargingPad
                 | MachineKind::EnergyBank
                 | MachineKind::VoidTrashCan
+                | MachineKind::FluidTank
+                | MachineKind::FluidPump
         )
     {
         *button = Some(BTN_MODE_OR_SIZE);
@@ -2641,58 +2910,93 @@ pub(in crate::game) fn screen_tooltip(
     let auto_io = get(6) != 0;
     let quarry_radius = get(7).clamp(2, 4);
 
-    if in_rect(at, [6.0, 29.0, 10.0, 28.0])
-        && !matches!(kind, MachineKind::ConveyorBelt | MachineKind::ItemExtractor)
+    if kind == MachineKind::FluidTank && in_rect(at, [10.0, 24.0, 18.0, 34.0]) {
+        let fcode = get(7);
+        let famount = get(8);
+        let fmax = get(9).max(1);
+        let fname = rules::fluid_name_from_code(fcode);
+        lines.push(format!("§bFluido: {fname}"));
+        lines.push(format!("§7Cantidad: {famount} / {fmax} mB ({progress}%)"));
+    } else if in_rect(at, [10.0, 24.0, 12.0, 34.0])
+        && !matches!(
+            kind,
+            MachineKind::ConveyorBelt | MachineKind::ItemExtractor | MachineKind::FluidTank | MachineKind::VoidTrashCan
+        )
     {
         lines.push(format!("§bAlmacenamiento: {energy} / {max_energy} FE"));
-        lines.push("§7Conecta Cables de Cobre o usa una Batería".into());
-    } else if in_rect(at, [79.0, 35.0, 18.0, 18.0]) {
+        lines.push("§7Conecta Cables o usa una Batería".into());
+    } else if in_rect(at, [51.0, 33.0, 18.0, 18.0])
+        && matches!(
+            kind,
+            MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SteamBoiler | MachineKind::FluidTank
+        )
+    {
         match kind {
             MachineKind::CoalGenerator => {
                 lines.push("§6Ranura de Combustible".into());
-                lines.push("§7Coloca Carbón o Carbón Vegetal".into());
+                lines.push("§7Coloca Carbón, Carbón Vegetal o Bloques de Carbón".into());
             }
             MachineKind::BioGenerator => {
                 lines.push("§aRanura de Biomasa".into());
-                lines.push("§7Coloca Savia, Savia Refinada o Hojas de Árbol".into());
+                lines.push("§7Coloca Savia, Savia Refinada, Hojas o Cultivos".into());
             }
-            MachineKind::SolarGenerator => {
-                lines.push("§eRanura de Recarga Solar".into());
-                lines.push("§7Coloca Baterías, Jetpack, Taladro o Casco para recargar".into());
+            MachineKind::SteamBoiler => {
+                lines.push("§bRanura de Caldera".into());
+                lines.push("§7Coloca Carbón o Combustible de Alta Energía".into());
             }
-            MachineKind::ChargingPad => {
-                lines.push("§bRanura de Carga por Inducción".into());
-                lines.push("§7Coloca cualquier ítem eléctrico o párate encima".into());
-            }
-            MachineKind::EnergyBank => {
-                lines.push("§bRanura de Batería".into());
-                lines.push("§7Coloca Baterías Portátiles para cargar/descargar".into());
-            }
-            MachineKind::VoidTrashCan => {
-                lines.push("§dRanura de Destrucción".into());
-                lines.push("§7Cualquier ítem colocado aquí es incinerado al instante".into());
+            MachineKind::FluidTank => {
+                lines.push("§bRanura de Balde / Fluido".into());
+                lines.push("§7Coloca Balde de Agua, Lava, Savia o Balde Vacío".into());
             }
             _ => {}
+        }
+    } else if in_rect(at, [123.0, 33.0, 18.0, 18.0])
+        && matches!(kind, MachineKind::SolarGenerator | MachineKind::EnergyBank)
+    {
+        if kind == MachineKind::SolarGenerator {
+            lines.push("§eRanura de Recarga Solar".into());
+            lines.push("§7Coloca Baterías, Jetpack, Taladro o Casco".into());
+        } else {
+            lines.push("§bRanura de Batería".into());
+            lines.push("§7Coloca Baterías Portátiles para cargar/descargar".into());
+        }
+    } else if in_rect(at, [79.0, 33.0, 18.0, 18.0])
+        && matches!(kind, MachineKind::ChargingPad | MachineKind::VoidTrashCan)
+    {
+        if kind == MachineKind::ChargingPad {
+            lines.push("§bRanura de Carga por Inducción".into());
+            lines.push("§7Coloca cualquier ítem eléctrico o párate encima".into());
+        } else {
+            lines.push("§dRanura de Destrucción".into());
+            lines.push("§7Cualquier ítem colocado aquí es incinerado al instante".into());
         }
     } else if in_rect(at, [64.0, 28.0, 38.0, 26.0]) {
         if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
             let side = quarry_radius * 2 + 1;
             lines.push(format!("§eÁrea 3D activa: {side}x{side}"));
             lines.push(format!("§7Progreso del ciclo actual: {progress}%"));
+        } else if matches!(kind, MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SteamBoiler) {
+            let burn_left = get(8).max(0);
+            lines.push(format!("§eCombustión restante: {burn_left} ticks ({progress}%)"));
         } else {
             lines.push(format!("§aProgreso: {progress}%"));
         }
-    } else if in_rect(at, POWER_BTN_RECT) {
+    } else if in_rect(at, POWER_BTN_RECT)
+        && !matches!(kind, MachineKind::FluidTank | MachineKind::VoidTrashCan)
+    {
         lines.push("§fAlternar Encendido / Pausa de la máquina".into());
     } else if in_rect(at, MODE_BTN_RECT)
         && !matches!(
             kind,
             MachineKind::CoalGenerator
                 | MachineKind::BioGenerator
+                | MachineKind::SteamBoiler
                 | MachineKind::SolarGenerator
                 | MachineKind::ChargingPad
                 | MachineKind::EnergyBank
                 | MachineKind::VoidTrashCan
+                | MachineKind::FluidTank
+                | MachineKind::FluidPump
         )
     {
         if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {

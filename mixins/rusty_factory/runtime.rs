@@ -345,15 +345,17 @@ impl MachineKind {
             Self::IndustrialAssembler => "rusty_factory:gui/industrial_assembler",
             Self::Vulcanizer => "rusty_factory:gui/vulcanizer",
             Self::SapExtractor => "rusty_factory:gui/sap_extractor",
-            Self::Quarry | Self::AutoHarvester => "rusty_factory:gui/quarry",
-            Self::ConveyorBelt | Self::ItemExtractor => "rusty_factory:gui/conveyor",
-            Self::BlockBreaker | Self::BlockPlacer => "rusty_factory:gui/machine",
-            Self::EnergyMonitor
-            | Self::FluidTank
-            | Self::SteamBoiler
-            | Self::FluidPump
-            | Self::VoidTrashCan
-            | Self::EnergyRelay => "rusty_factory:gui/machine",
+            Self::Quarry => "rusty_factory:gui/quarry",
+            Self::AutoHarvester => "rusty_factory:gui/auto_harvester",
+            Self::ConveyorBelt => "rusty_factory:gui/conveyor",
+            Self::ItemExtractor => "rusty_factory:gui/item_extractor",
+            Self::BlockBreaker => "rusty_factory:gui/block_breaker",
+            Self::BlockPlacer => "rusty_factory:gui/block_placer",
+            Self::FluidTank => "rusty_factory:gui/fluid_tank",
+            Self::SteamBoiler => "rusty_factory:gui/steam_boiler",
+            Self::FluidPump => "rusty_factory:gui/fluid_pump",
+            Self::VoidTrashCan => "rusty_factory:gui/void_trash_can",
+            Self::EnergyMonitor | Self::EnergyRelay => "rusty_factory:gui/machine",
         }
     }
 }
@@ -365,6 +367,28 @@ fn default_true() -> bool {
 
 fn default_quarry_radius() -> i32 {
     2 // 5x5 area (2*2 + 1)
+}
+
+pub const FLUID_TANK_MAX_MB: i32 = 8000;
+
+pub fn fluid_code(kind: &str) -> i32 {
+    match kind {
+        "water" => 1,
+        "lava" => 2,
+        "sap" => 3,
+        "steam" => 4,
+        _ => 0,
+    }
+}
+
+pub fn fluid_name_from_code(code: i32) -> &'static str {
+    match code {
+        1 => "Agua",
+        2 => "Lava",
+        3 => "Savia de Caucho",
+        4 => "Vapor",
+        _ => "Vacío",
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -389,6 +413,10 @@ pub struct MachineState {
     pub last_target: [i32; 3],
     #[serde(default)]
     pub belt_item: String,
+    #[serde(default)]
+    pub fluid_kind: String,
+    #[serde(default)]
+    pub fluid_amount: i32,
 }
 
 impl MachineState {
@@ -407,6 +435,8 @@ impl MachineState {
             quarry_mined: 0,
             last_target: [0, 0, 0],
             belt_item: String::new(),
+            fluid_kind: String::new(),
+            fluid_amount: 0,
         }
     }
 
