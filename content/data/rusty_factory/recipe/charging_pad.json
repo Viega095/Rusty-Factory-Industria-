@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    " C ",
+    "PBP",
+    "SSS"
+  ],
+  "key": {
+    "C": "rusty_factory:copper_cable",
+    "P": "rusty_factory:iron_plate",
+    "B": "rusty_factory:energy_battery",
+    "S": "rusty_factory:steel_ingot"
+  },
+  "result": {
+    "id": "rusty_factory:charging_pad",
+    "count": 1
+  }
+}

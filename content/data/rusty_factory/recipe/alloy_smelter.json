@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "IFI",
+    "PBP",
+    "CEC"
+  ],
+  "key": {
+    "I": "rusty_factory:steel_ingot",
+    "F": "minecraft:blast_furnace",
+    "P": "rusty_factory:mechanical_press",
+    "B": "rusty_factory:machine_casing",
+    "C": "rusty_factory:copper_cable",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:alloy_smelter",
+    "count": 1
+  }
+}

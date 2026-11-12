@@ -36,8 +36,14 @@ pub const BLOCK_RUBBER_PLANKS: &str = "rusty_factory:rubber_planks";
 pub const BLOCK_ENERGY_MONITOR: &str = "rusty_factory:energy_monitor";
 pub const BLOCK_FLUID_TANK: &str = "rusty_factory:fluid_tank";
 pub const BLOCK_STEAM_BOILER: &str = "rusty_factory:steam_boiler";
+pub const BLOCK_FLUID_PUMP: &str = "rusty_factory:fluid_pump";
+pub const BLOCK_TRASH_CAN: &str = "rusty_factory:void_trash_can";
+pub const BLOCK_ENERGY_RELAY: &str = "rusty_factory:energy_relay";
+pub const BLOCK_CHARGING_PAD: &str = "rusty_factory:charging_pad";
+pub const BLOCK_FLUID_PIPE: &str = "rusty_factory:fluid_pipe";
+pub const BLOCK_ALLOY_SMELTER: &str = "rusty_factory:alloy_smelter";
 
-// Item IDs (25 items)
+// Item IDs (29 items)
 pub const ITEM_WRENCH: &str = "rusty_factory:wrench";
 pub const ITEM_TREETAP: &str = "rusty_factory:treetap";
 pub const ITEM_RAW_SAP: &str = "rusty_factory:raw_sap";
@@ -48,6 +54,10 @@ pub const ITEM_SULFUR_DUST: &str = "rusty_factory:sulfur_dust";
 pub const ITEM_BIO_FUEL: &str = "rusty_factory:bio_fuel";
 pub const ITEM_MINING_DRILL: &str = "rusty_factory:mining_drill";
 pub const ITEM_JET_BOOTS: &str = "rusty_factory:jet_boots";
+pub const ITEM_JETPACK: &str = "rusty_factory:jetpack";
+pub const ITEM_ITEM_MAGNET: &str = "rusty_factory:item_magnet";
+pub const ITEM_MINING_LASER: &str = "rusty_factory:mining_laser";
+pub const ITEM_SOLAR_HELMET: &str = "rusty_factory:solar_helmet";
 pub const ITEM_SPEED_UPGRADE: &str = "rusty_factory:speed_upgrade";
 pub const ITEM_FORTUNE_UPGRADE: &str = "rusty_factory:fortune_upgrade";
 pub const ITEM_BATTERY: &str = "rusty_factory:energy_battery";
@@ -99,6 +109,11 @@ pub enum MachineKind {
     EnergyMonitor,
     FluidTank,
     SteamBoiler,
+    FluidPump,
+    VoidTrashCan,
+    EnergyRelay,
+    ChargingPad,
+    AlloySmelter,
 }
 
 impl MachineKind {
@@ -123,6 +138,11 @@ impl MachineKind {
             BLOCK_ENERGY_MONITOR => Some(Self::EnergyMonitor),
             BLOCK_FLUID_TANK => Some(Self::FluidTank),
             BLOCK_STEAM_BOILER => Some(Self::SteamBoiler),
+            BLOCK_FLUID_PUMP => Some(Self::FluidPump),
+            BLOCK_TRASH_CAN => Some(Self::VoidTrashCan),
+            BLOCK_ENERGY_RELAY => Some(Self::EnergyRelay),
+            BLOCK_CHARGING_PAD => Some(Self::ChargingPad),
+            BLOCK_ALLOY_SMELTER => Some(Self::AlloySmelter),
             _ => None,
         }
     }
@@ -139,13 +159,18 @@ impl MachineKind {
             | Self::SapExtractor
             | Self::BlockPlacer
             | Self::ItemExtractor
-            | Self::ConveyorBelt => MachineTier::Tier1,
+            | Self::ConveyorBelt
+            | Self::FluidPump
+            | Self::VoidTrashCan => MachineTier::Tier1,
 
             Self::IndustrialAssembler
             | Self::AutoHarvester
             | Self::BlockBreaker
             | Self::Quarry
-            | Self::SteamBoiler => MachineTier::Tier2,
+            | Self::SteamBoiler
+            | Self::EnergyRelay
+            | Self::ChargingPad
+            | Self::AlloySmelter => MachineTier::Tier2,
 
             Self::EnergyBank | Self::EnergyMonitor | Self::FluidTank => MachineTier::Storage,
         }
@@ -172,6 +197,11 @@ impl MachineKind {
             Self::EnergyMonitor => 0,
             Self::FluidTank => 0,
             Self::SteamBoiler => 10_000,
+            Self::FluidPump => 4_000,
+            Self::VoidTrashCan => 0,
+            Self::EnergyRelay => 20_000,
+            Self::ChargingPad => 8_000,
+            Self::AlloySmelter => 5_000,
         }
     }
 
@@ -183,7 +213,11 @@ impl MachineKind {
             | Self::EnergyBank
             | Self::EnergyMonitor
             | Self::FluidTank
-            | Self::SteamBoiler => 1,
+            | Self::SteamBoiler
+            | Self::FluidPump
+            | Self::VoidTrashCan
+            | Self::EnergyRelay
+            | Self::ChargingPad => 1,
             Self::ItemExtractor => 10,
             Self::ElectricCrusher => 70,
             Self::ElectricFurnace => 50,
@@ -196,6 +230,7 @@ impl MachineKind {
             Self::BlockBreaker => 18,
             Self::BlockPlacer => 12,
             Self::ConveyorBelt => 8,
+            Self::AlloySmelter => 50,
         }
     }
 
@@ -205,7 +240,8 @@ impl MachineKind {
             Self::BioGenerator => 24,  // Generates +24 FE/t from organic/sap fuels
             Self::SolarGenerator => 12, // Base daytime generation +12 FE/t (+24 FE/t in 3x3 array!)
             Self::SteamBoiler => 80,    // Massive +80 FE/t high-pressure steam generation
-            Self::EnergyBank | Self::ItemExtractor | Self::ConveyorBelt | Self::EnergyMonitor | Self::FluidTank => 0,
+            Self::EnergyBank | Self::ItemExtractor | Self::ConveyorBelt | Self::EnergyMonitor | Self::FluidTank | Self::VoidTrashCan | Self::EnergyRelay => 0,
+            Self::FluidPump => 15,
             Self::ElectricCrusher => 14,
             Self::ElectricFurnace => 12,
             Self::MechanicalPress => 14,
@@ -216,6 +252,8 @@ impl MachineKind {
             Self::AutoHarvester => 18,
             Self::BlockBreaker => 15,
             Self::BlockPlacer => 8,
+            Self::ChargingPad => 25,
+            Self::AlloySmelter => 16,
         }
     }
 
@@ -233,6 +271,10 @@ impl MachineKind {
                 | Self::AutoHarvester
                 | Self::BlockBreaker
                 | Self::BlockPlacer
+                | Self::FluidPump
+                | Self::EnergyRelay
+                | Self::ChargingPad
+                | Self::AlloySmelter
         )
     }
 
@@ -257,6 +299,11 @@ impl MachineKind {
             Self::EnergyMonitor => "block.rusty_factory.energy_monitor",
             Self::FluidTank => "block.rusty_factory.fluid_tank",
             Self::SteamBoiler => "block.rusty_factory.steam_boiler",
+            Self::FluidPump => "block.rusty_factory.fluid_pump",
+            Self::VoidTrashCan => "block.rusty_factory.void_trash_can",
+            Self::EnergyRelay => "block.rusty_factory.energy_relay",
+            Self::ChargingPad => "block.rusty_factory.charging_pad",
+            Self::AlloySmelter => "block.rusty_factory.alloy_smelter",
         }
     }
 
@@ -268,7 +315,11 @@ impl MachineKind {
             | Self::EnergyBank
             | Self::EnergyMonitor
             | Self::FluidTank
-            | Self::SteamBoiler => "rusty_factory:gui/generator",
+            | Self::SteamBoiler
+            | Self::FluidPump
+            | Self::VoidTrashCan
+            | Self::EnergyRelay
+            | Self::ChargingPad => "rusty_factory:gui/generator",
             Self::Quarry | Self::AutoHarvester => "rusty_factory:gui/quarry",
             Self::ConveyorBelt | Self::ItemExtractor => "rusty_factory:gui/conveyor",
             Self::ElectricCrusher
@@ -278,10 +329,12 @@ impl MachineKind {
             | Self::Vulcanizer
             | Self::SapExtractor
             | Self::BlockBreaker
-            | Self::BlockPlacer => "rusty_factory:gui/machine",
+            | Self::BlockPlacer
+            | Self::AlloySmelter => "rusty_factory:gui/machine",
         }
     }
 }
+
 
 fn default_true() -> bool {
     true
@@ -691,6 +744,15 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
             _ => None,
         },
 
+        MachineKind::AlloySmelter => match input {
+            "minecraft:iron_ingot" => Some(RecipeOutput { item: ITEM_STEEL_INGOT, count: 2 }),
+            ITEM_IRON_DUST => Some(RecipeOutput { item: ITEM_STEEL_INGOT, count: 1 }),
+            "minecraft:copper_ingot" | ITEM_COPPER_DUST => Some(RecipeOutput { item: ITEM_GOLD_PLATE, count: 1 }),
+            "minecraft:gold_ingot" | ITEM_GOLD_DUST => Some(RecipeOutput { item: ITEM_CIRCUIT, count: 2 }),
+            ITEM_RUBBER_BAR => Some(RecipeOutput { item: ITEM_RUBBER_SHEET, count: 3 }),
+            _ => None,
+        },
+
         MachineKind::CoalGenerator
         | MachineKind::BioGenerator
         | MachineKind::SolarGenerator
@@ -704,7 +766,11 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
         | MachineKind::ConveyorBelt
         | MachineKind::EnergyMonitor
         | MachineKind::FluidTank
-        | MachineKind::SteamBoiler => None,
+        | MachineKind::SteamBoiler
+        | MachineKind::FluidPump
+        | MachineKind::VoidTrashCan
+        | MachineKind::EnergyRelay
+        | MachineKind::ChargingPad => None,
     }
 }
 
@@ -1061,13 +1127,39 @@ pub fn step_machine(
         MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SteamBoiler => {
             step_generator(state, fuel_burn_ticks, speed_upgrades)
         }
-        MachineKind::EnergyMonitor | MachineKind::FluidTank => StepOutcome {
+        MachineKind::EnergyMonitor
+        | MachineKind::FluidTank
+        | MachineKind::VoidTrashCan
+        | MachineKind::EnergyRelay
+        | MachineKind::ChargingPad => StepOutcome {
             status: StepStatus::Idle,
             consume_input: false,
             consume_fuel: false,
             produced: None,
             net_energy_rate: 0,
         },
+        MachineKind::FluidPump => {
+            let cost = 15;
+            if state.energy < cost {
+                StepOutcome {
+                    status: StepStatus::NoPower,
+                    consume_input: false,
+                    consume_fuel: false,
+                    produced: None,
+                    net_energy_rate: 0,
+                }
+            } else {
+                state.energy -= cost;
+                StepOutcome {
+                    status: StepStatus::Working,
+                    consume_input: false,
+                    consume_fuel: false,
+                    produced: None,
+                    net_energy_rate: -cost,
+                }
+            }
+        },
+
         MachineKind::SolarGenerator | MachineKind::EnergyBank => {
             let mut consume_fuel = false;
             if state.energy < state.kind.max_energy() {
@@ -1143,7 +1235,8 @@ pub fn step_machine(
         | MachineKind::ElectricFurnace
         | MachineKind::MechanicalPress
         | MachineKind::IndustrialAssembler
-        | MachineKind::Vulcanizer => {
+        | MachineKind::Vulcanizer
+        | MachineKind::AlloySmelter => {
             step_processor(state, input_item, fuel_burn_ticks, output_slot, speed_upgrades)
         }
     }

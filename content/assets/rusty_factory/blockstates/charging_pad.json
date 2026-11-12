@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "lit=false": {
+      "model": "rusty_factory:block/charging_pad"
+    },
+    "lit=true": {
+      "model": "rusty_factory:block/charging_pad_on"
+    }
+  }
+}

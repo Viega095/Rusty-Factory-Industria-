@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    " C ",
+    "RBR",
+    "CEC"
+  ],
+  "key": {
+    "C": "rusty_factory:copper_cable",
+    "R": "minecraft:redstone_block",
+    "B": "rusty_factory:machine_casing",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:energy_relay",
+    "count": 1
+  }
+}

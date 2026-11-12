@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "condition": {
+        "type": "minecraft:survives_explosion"
+      },
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "rusty_factory:void_trash_can"
+        }
+      ],
+      "rolls": 1
+    }
+  ],
+  "random_sequence": "rusty_factory:blocks/void_trash_can"
+}

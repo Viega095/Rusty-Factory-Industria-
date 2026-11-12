@@ -1,0 +1,11 @@
+{
+  "template": "minecraft:netherite_helmet",
+  "max_stack_size": 1,
+  "rarity": "rare",
+  "components": {
+    "minecraft:equippable": {
+      "slot": "head",
+      "asset_id": "rusty_factory:solar_helmet"
+    }
+  }
+}

@@ -96,16 +96,24 @@ pub(in crate::game) fn update_tag(
 pub(in crate::game) fn container(block: &str, container: &mut Option<ModContainer>) {
     if let Some(kind) = MachineKind::from_block_id(block) {
         match kind {
-            MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SteamBoiler => {
+            MachineKind::CoalGenerator
+            | MachineKind::BioGenerator
+            | MachineKind::SteamBoiler
+            | MachineKind::SolarGenerator
+            | MachineKind::VoidTrashCan
+            | MachineKind::ChargingPad => {
                 *container = Some(ModContainer {
                     slots: 1,
                     faces: std::array::from_fn(|_| vec![0]),
                     inputs: vec![0],
-                    outputs: vec![],
+                    outputs: vec![0],
                     menu: Some(rules::MENU.to_owned()),
                 });
             }
-            MachineKind::SolarGenerator | MachineKind::EnergyMonitor | MachineKind::FluidTank => {
+            MachineKind::EnergyMonitor
+            | MachineKind::FluidTank
+            | MachineKind::FluidPump
+            | MachineKind::EnergyRelay => {
                 *container = None;
             }
             MachineKind::EnergyBank => {
@@ -181,6 +189,9 @@ fn is_item_container_block(block_id: &str) -> bool {
             | rules::BLOCK_CONVEYOR
             | rules::BLOCK_GENERATOR
             | rules::BLOCK_BIO_GENERATOR
+            | rules::BLOCK_TRASH_CAN
+            | rules::BLOCK_CHARGING_PAD
+            | rules::BLOCK_ALLOY_SMELTER
     )
 }
 
@@ -988,8 +999,13 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         return;
     };
     let min_slots = match kind {
-        MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::EnergyBank => 1,
-        MachineKind::SolarGenerator => 0,
+        MachineKind::CoalGenerator
+        | MachineKind::BioGenerator
+        | MachineKind::EnergyBank
+        | MachineKind::SolarGenerator
+        | MachineKind::ChargingPad
+        | MachineKind::VoidTrashCan => 1,
+        MachineKind::EnergyMonitor | MachineKind::FluidTank | MachineKind::FluidPump | MachineKind::EnergyRelay => 0,
         _ => rules::SLOTS,
     };
     if entity.items.len() < min_slots {
@@ -1050,6 +1066,73 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         return;
     }
 
+    if kind == MachineKind::VoidTrashCan {
+        if entity.items.iter().any(|s| s.is_some()) {
+            entity.items = vec![None];
+            update_lit_state(game, pos, true);
+        } else {
+            update_lit_state(game, pos, false);
+        }
+        store_state(entity, &state);
+        return;
+    }
+
+    if kind == MachineKind::FluidPump {
+        let mut status = StepStatus::Idle;
+        let mut net_rate = 0;
+        if state.enabled {
+            let cost = 15;
+            let mut found_fluid = false;
+            for [dx, dy, dz] in rules::NEIGHBORS_6 {
+                let check_p = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
+                let b = game.native_block(check_p);
+                if matches!(b.as_str(), "minecraft:water" | "minecraft:flowing_water" | "minecraft:lava" | "minecraft:flowing_lava") {
+                    found_fluid = true;
+                    break;
+                }
+            }
+            if found_fluid && state.energy >= cost {
+                state.energy -= cost;
+                net_rate = -cost;
+                status = StepStatus::Working;
+                for [dx, dy, dz] in rules::NEIGHBORS_6 {
+                    let target = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
+                    let tb = game.native_block(target);
+                    if tb == rules::BLOCK_FLUID_TANK {
+                        game.native_set_block_property(target, "lit", "true");
+                    } else if tb == rules::BLOCK_FLUID_PIPE {
+                        let tanks = rules::find_connected_item_targets(
+                            target,
+                            |p| game.native_block(p) == rules::BLOCK_FLUID_PIPE,
+                            |p| game.native_block(p) == rules::BLOCK_FLUID_TANK,
+                        );
+                        for tank_pos in tanks {
+                            game.native_set_block_property(tank_pos, "lit", "true");
+                        }
+                    }
+                }
+            } else if found_fluid && state.energy < cost {
+                status = StepStatus::NoPower;
+            }
+        }
+        update_lit_state(game, pos, status == StepStatus::Working);
+        entity.data = vec![status as i32, state.energy, kind.max_energy(), 100, net_rate, i32::from(state.enabled), 0, 0, 0, 0];
+        store_state(entity, &state);
+        return;
+    }
+
+    if kind == MachineKind::EnergyRelay {
+        if state.enabled && state.energy > 0 {
+            let sent = distribute_energy(game, pos, state.energy.min(500), false);
+            state.energy -= sent;
+        }
+        update_lit_state(game, pos, state.enabled && state.energy > 0);
+        let pct = (state.energy * 100) / kind.max_energy().max(1);
+        entity.data = vec![1, state.energy, kind.max_energy(), pct, 0, i32::from(state.enabled), 0, 0, 0, 0];
+        store_state(entity, &state);
+        return;
+    }
+
     if matches!(kind, MachineKind::FluidTank | MachineKind::EnergyMonitor) {
         store_state(entity, &state);
         return;
@@ -1064,7 +1147,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
 
     if kind == MachineKind::SolarGenerator {
         let is_array_3x3 = rules::is_solar_array_3x3(pos, |p| game.native_block(p) == rules::BLOCK_SOLAR);
-        let max_e = if is_array_3x3 { 4_000 } else { 2_000 };
+        let max_e = if is_array_3x3 { 20_000 } else { 2_000 };
         let mut net_rate = 0;
         let status = if !state.enabled {
             StepStatus::Paused
@@ -1078,8 +1161,28 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 net_rate = solar_gen;
             }
             if state.energy > 0 {
-                let sent = distribute_energy(game, pos, state.energy.min(if is_array_3x3 { 320 } else { 160 }), false);
+                let sent = distribute_energy(game, pos, state.energy.min(if is_array_3x3 { 600 } else { 200 }), false);
                 state.energy -= sent;
+            }
+            // Recharging item placed in single centered slot 0 (Battery, Jetpack, Drill, Jet Boots, Mining Laser, Solar Helmet)
+            if let Some(Some(item_stack)) = entity.items.first_mut() {
+                let charge_cost = 40;
+                if state.energy >= charge_cost {
+                    if matches!(
+                        item_stack.item.as_ref(),
+                        rules::ITEM_BATTERY
+                            | rules::ITEM_JETPACK
+                            | rules::ITEM_JET_BOOTS
+                            | rules::ITEM_MINING_DRILL
+                            | rules::ITEM_MINING_LASER
+                            | rules::ITEM_SOLAR_HELMET
+                    ) {
+                        if item_stack.damage > 0 {
+                            item_stack.damage = item_stack.damage.saturating_sub(1);
+                            state.energy -= charge_cost;
+                        }
+                    }
+                }
             }
             if solar_gen > 0 {
                 StepStatus::Working
@@ -1098,6 +1201,74 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             i32::from(state.enabled),
             i32::from(state.auto_io),
             i32::from(is_array_3x3),
+            0,
+            0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
+    if kind == MachineKind::ChargingPad {
+        // 1. Recharging slot for placed item:
+        if let Some(Some(item_stack)) = entity.items.first_mut() {
+            let charge_cost = 50;
+            if state.energy >= charge_cost {
+                if matches!(
+                    item_stack.item.as_ref(),
+                    rules::ITEM_BATTERY
+                        | rules::ITEM_JETPACK
+                        | rules::ITEM_JET_BOOTS
+                        | rules::ITEM_MINING_DRILL
+                        | rules::ITEM_MINING_LASER
+                        | rules::ITEM_SOLAR_HELMET
+                ) {
+                    if item_stack.damage > 0 {
+                        item_stack.damage = item_stack.damage.saturating_sub(2);
+                        state.energy -= charge_cost;
+                    }
+                }
+            }
+        }
+        // 2. Standing induction wireless charging for player:
+        let mut player_on_pad = false;
+        let pad_center = [pos[0] as f64 + 0.5, pos[1] as f64 + 0.2, pos[2] as f64 + 0.5];
+        if let Some(player) = &game.player {
+            let dist_sq = (player.position.x - pad_center[0]).powi(2)
+                + (player.position.y - pad_center[1]).powi(2)
+                + (player.position.z - pad_center[2]).powi(2);
+            if dist_sq <= 1.4 * 1.4 {
+                player_on_pad = true;
+                if state.energy >= 20 {
+                    state.energy -= 20;
+                    if (game.world.game_time + pos[0] as i64) % 15 == 0 {
+                        game.native_run_command(&format!(
+                            "particle minecraft:electric_spark {} {} {} 0.3 0.1 0.3 0.05 12",
+                            pad_center[0], pad_center[1], pad_center[2]
+                        ));
+                    }
+                    if (game.world.game_time + pos[0] as i64) % 30 == 0 {
+                        game.native_run_command("playsound minecraft:block.beacon.ambient player @s ~ ~ ~ 0.35 1.8");
+                        if let Some(who) = game.native_acting_player() {
+                            game.native_action_bar(
+                                who.uuid,
+                                Text::literal("⚡ [Plataforma de Carga] Recarga por Inducción activa (500 FE/s)"),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        update_lit_state(game, pos, player_on_pad || entity.items.first().is_some_and(|s| s.is_some()));
+        let pct = ((state.energy * 100) / kind.max_energy().max(1)).clamp(0, 100);
+        entity.data = vec![
+            if player_on_pad { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
+            state.energy,
+            kind.max_energy(),
+            pct,
+            if player_on_pad { -25 } else { 0 },
+            i32::from(state.enabled),
+            0,
+            0,
             0,
             0,
         ];
@@ -1285,6 +1456,26 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
 
     update_lit_state(game, pos, outcome.status == StepStatus::Working);
 
+    // Dynamic machine sound effects
+    if outcome.status == StepStatus::Working && ((game.world.game_time + (pos[0] as i64 * 11)) % 40 == 0) {
+        match kind {
+            MachineKind::SteamBoiler => {
+                game.native_run_command(&format!("playsound minecraft:block.fire.extinguish block @a {} {} {} 0.3 1.2", pos[0], pos[1], pos[2]));
+            }
+            MachineKind::ElectricCrusher => {
+                game.native_run_command(&format!("playsound minecraft:block.grindstone.use block @a {} {} {} 0.35 0.9", pos[0], pos[1], pos[2]));
+            }
+            MachineKind::MechanicalPress => {
+                game.native_run_command(&format!("playsound minecraft:block.piston.extend block @a {} {} {} 0.4 0.8", pos[0], pos[1], pos[2]));
+            }
+            MachineKind::AlloySmelter => {
+                game.native_run_command(&format!("playsound minecraft:block.blastfurnace.fire_crackle block @a {} {} {} 0.35 1.1", pos[0], pos[1], pos[2]));
+            }
+            _ => {}
+        }
+    }
+
+
     let needed = rules::effective_work_ticks(kind, speed_upgrades).max(1);
     let pct = if is_gen {
         state.progress
@@ -1412,17 +1603,63 @@ pub(in crate::game) fn world_primitives(
         }
 
         if entity.id == rules::BLOCK_SOLAR {
-            let is_3x3 = rules::is_solar_array_3x3([x, y, z], |p| game.native_block(p) == rules::BLOCK_SOLAR);
-            if is_3x3 {
+            let is_center = (-1..=1).all(|dx| (-1..=1).all(|dz| game.native_block([x + dx, y, z + dz]) == rules::BLOCK_SOLAR));
+            if is_center {
+                primitives.box_outline(
+                    [x as f64 - 1.0, y as f64, z as f64 - 1.0],
+                    [x as f64 + 2.0, y as f64 + 0.38, z as f64 + 2.0],
+                    0xFFFF_E033,
+                    2.5,
+                );
                 primitives
                     .text(
-                        [x as f64 + 0.5, y as f64 + 1.15, z as f64 + 0.5],
-                        "☀️ MATRIZ 3x3 (2x)",
+                        [x as f64 + 0.5, y as f64 + 1.25, z as f64 + 0.5],
+                        "☀️ MEGA PANEL SOLAR 3x3 [360 FE/t]",
+                        0xFFFF_E033,
+                        0.85,
+                    )
+                    .background();
+            } else if rules::is_solar_array_3x3([x, y, z], |p| game.native_block(p) == rules::BLOCK_SOLAR) {
+                primitives
+                    .text(
+                        [x as f64 + 0.5, y as f64 + 1.1, z as f64 + 0.5],
+                        "☀️ MATRIZ (2x)",
                         0xFF55_FFAA,
-                        0.7,
+                        0.65,
                     )
                     .background();
             }
+            continue;
+        }
+
+        if entity.id == rules::BLOCK_CHARGING_PAD {
+            let st = load_state(entity)
+                .unwrap_or_else(|| MachineState::new(MachineKind::ChargingPad));
+            let pct = (st.energy * 100) / MachineKind::ChargingPad.max_energy().max(1);
+            primitives
+                .text(
+                    [x as f64 + 0.5, y as f64 + 0.65, z as f64 + 0.5],
+                    format!("🔋 PLATAFORMA CARGA: {} FE ({pct}%)", st.energy),
+                    0xFF00_FFAA,
+                    0.7,
+                )
+                .background();
+            continue;
+        }
+
+        if entity.id == rules::BLOCK_ALLOY_SMELTER {
+            let st = load_state(entity)
+                .unwrap_or_else(|| MachineState::new(MachineKind::AlloySmelter));
+            let pct = (st.energy * 100) / MachineKind::AlloySmelter.max_energy().max(1);
+            let status_icon = if st.progress > 0 { "🔥 FUNDIENDO" } else { "⚡ FUNDICIÓN ALEACIONES" };
+            primitives
+                .text(
+                    [x as f64 + 0.5, y as f64 + 1.25, z as f64 + 0.5],
+                    format!("{status_icon} ({}%)", pct),
+                    0xFFFF_7733,
+                    0.75,
+                )
+                .background();
             continue;
         }
 
@@ -1449,6 +1686,43 @@ pub(in crate::game) fn world_primitives(
             }
             continue;
         }
+
+        if entity.id == rules::BLOCK_TRASH_CAN {
+            primitives
+                .text(
+                    [x as f64 + 0.5, y as f64 + 1.25, z as f64 + 0.5],
+                    "🗑️ PAPELERA DE VACÍO",
+                    0xFFAA_55FF,
+                    0.75,
+                )
+                .background();
+            continue;
+        }
+
+        if entity.id == rules::BLOCK_ENERGY_RELAY {
+            primitives
+                .text(
+                    [x as f64 + 0.5, y as f64 + 1.35, z as f64 + 0.5],
+                    "📡 RELÉ INALÁMBRICO",
+                    0xFF00_E5FF,
+                    0.75,
+                )
+                .background();
+            continue;
+        }
+
+        if entity.id == rules::BLOCK_FLUID_PUMP {
+            primitives
+                .text(
+                    [x as f64 + 0.5, y as f64 + 1.25, z as f64 + 0.5],
+                    "⛽ BOMBA DE FLUIDOS",
+                    0xFF55_FFAA,
+                    0.75,
+                )
+                .background();
+            continue;
+        }
+
 
 
         if entity.id == rules::BLOCK_HARVESTER {
@@ -1683,6 +1957,22 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
                 }
                 return;
             }
+
+            if block_id == rules::BLOCK_FLUID_PIPE {
+                *canceled = true;
+                let targets = rules::find_connected_item_targets(
+                    pos,
+                    |p| game.native_block(p) == rules::BLOCK_FLUID_PIPE,
+                    |p| matches!(game.native_block(p).as_str(), rules::BLOCK_FLUID_TANK | rules::BLOCK_STEAM_BOILER | rules::BLOCK_FLUID_PUMP),
+                );
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(
+                        who.uuid,
+                        Text::literal(format!("🚰 [Tubería de Fluidos] Red hidráulica: {} tanques conectados", targets.len())),
+                    );
+                }
+                return;
+            }
         }
 
         // 2. Treetap: Harvest extra sap & saplings from Rubber Sap Log
@@ -1763,6 +2053,76 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
             }
             return;
         }
+
+        // 5. Jetpack: Sustained High-Altitude Flight
+        if held_id == rules::ITEM_JETPACK {
+            *canceled = true;
+            game.native_run_command("playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.5 1.0");
+            game.native_run_command("effect give @s minecraft:levitation 1 15 true");
+            game.native_run_command("effect give @s minecraft:slow_falling 6 0 true");
+            game.native_run_command("particle minecraft:flame ~ ~ ~ 0.4 0.1 0.4 0.08 30");
+            game.native_run_command("particle minecraft:campfire_cosy_smoke ~ ~ ~ 0.3 0.1 0.3 0.03 15");
+            if let Some(who) = game.native_acting_player() {
+                game.native_action_bar(
+                    who.uuid,
+                    Text::literal("🚀 [Jetpack Industrial] ¡Propulsión Aérea Máxima Activada!"),
+                );
+            }
+            return;
+        }
+
+        // 6. Item Magnet: Attracts nearby dropped items and XP
+        if held_id == rules::ITEM_ITEM_MAGNET {
+            *canceled = true;
+            game.native_run_command("playsound minecraft:entity.item.pickup player @s ~ ~ ~ 1.0 1.5");
+            game.native_run_command("tp @e[type=item,distance=..12] @s");
+            game.native_run_command("tp @e[type=experience_orb,distance=..12] @s");
+            game.native_run_command("particle minecraft:portal ~ ~1 ~ 0.5 0.5 0.5 0.1 25");
+            if let Some(who) = game.native_acting_player() {
+                game.native_action_bar(
+                    who.uuid,
+                    Text::literal("🧲 [Imán Industrial] ¡Ítems y experiencia cercanos atraídos hacia ti!"),
+                );
+            }
+            return;
+        }
+
+        // 7. Mining Laser: High-energy straight plasma beam mining
+        if held_id == rules::ITEM_MINING_LASER {
+            *canceled = true;
+            game.native_run_command("playsound minecraft:entity.guardian.attack player @s ~ ~ ~ 1.2 1.6");
+            let [cx, cy, cz] = pos;
+            for dist in 0..4 {
+                let p = [cx, cy + dist, cz];
+                let b = game.native_block(p);
+                if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
+                    game.native_run_command(&format!("setblock {} {} {} minecraft:air destroy", p[0], p[1], p[2]));
+                }
+            }
+            game.native_run_command(&format!("particle minecraft:sonic_boom {} {} {} 0 0 0 0 1", cx, cy, cz));
+            if let Some(who) = game.native_acting_player() {
+                game.native_action_bar(
+                    who.uuid,
+                    Text::literal("⚡ [Láser Minero] Haz de Plasma Concentrado Disparado"),
+                );
+            }
+            return;
+        }
+
+        // 8. Solar Helmet: Equip directly to head armor slot
+        if held_id == rules::ITEM_SOLAR_HELMET {
+            *canceled = true;
+            game.native_run_command("item replace entity @s armor.head with rusty_factory:solar_helmet");
+            game.native_run_command("playsound minecraft:item.armor.equip_diamond player @s ~ ~ ~ 1.0 1.0");
+            if let Some(who) = game.native_acting_player() {
+                game.native_action_bar(
+                    who.uuid,
+                    Text::literal("☀️ [Casco Solar] Equipado. Genera recarga pasiva de día."),
+                );
+            }
+            return;
+        }
+
     }
 
     if block_id == rules::BLOCK_RUBBER_SAPLING {
@@ -1872,6 +2232,63 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
         return;
     }
 
+    if block_id == rules::BLOCK_TRASH_CAN {
+        *canceled = true;
+        game.native_run_command("playsound minecraft:block.lava.extinguish block @a ~ ~ ~ 0.8 1.0");
+        game.native_run_command("particle minecraft:smoke ~ ~ ~ 0.2 0.2 0.2 0.05 15");
+        if let Some(who) = game.native_acting_player() {
+            game.native_action_bar(
+                who.uuid,
+                Text::literal("🗑️ [Papelera de Vacío] Desintegrador activo: destruye todo ítem que ingrese"),
+            );
+        }
+        return;
+    }
+
+    if block_id == rules::BLOCK_ENERGY_RELAY {
+        *canceled = true;
+        let mut total_relays = 0;
+        for (&_p, be) in &game.world.block_entities {
+            if let BlockEntity::Mod(entity) = be {
+                if entity.id == rules::BLOCK_ENERGY_RELAY {
+                    total_relays += 1;
+                }
+            }
+        }
+        if let Some(who) = game.native_acting_player() {
+            game.native_action_bar(
+                who.uuid,
+                Text::literal(format!(
+                    "📡 [Relé Inalámbrico] Red de Energía Inalámbrica: {} relés activos",
+                    total_relays
+                )),
+            );
+        }
+        return;
+    }
+
+    if block_id == rules::BLOCK_FLUID_PUMP {
+        *canceled = true;
+        let mut found_sources = 0;
+        for [dx, dy, dz] in rules::NEIGHBORS_6 {
+            let check_p = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
+            let b = game.native_block(check_p);
+            if matches!(b.as_str(), "minecraft:water" | "minecraft:flowing_water" | "minecraft:lava" | "minecraft:flowing_lava") {
+                found_sources += 1;
+            }
+        }
+        if let Some(who) = game.native_acting_player() {
+            game.native_action_bar(
+                who.uuid,
+                Text::literal(format!(
+                    "⛽ [Bomba de Fluidos] Fuentes adyacentes: {} | Bombeo: 1,000 mB/t",
+                    found_sources
+                )),
+            );
+        }
+        return;
+    }
+
     if block_id == rules::BLOCK_CABLE {
         return;
     }
@@ -1946,11 +2363,19 @@ pub(in crate::game) fn screen(block: &str, screen: &mut Option<NativeScreen>) {
             MachineKind::CoalGenerator | MachineKind::BioGenerator => {
                 vec![Some([80.0, 36.0])] // Single centered fuel slot
             }
-            MachineKind::SolarGenerator => {
-                vec![] // Pure telemetry screen
+            MachineKind::SolarGenerator
+            | MachineKind::ChargingPad
+            | MachineKind::EnergyBank
+            | MachineKind::VoidTrashCan => {
+                vec![Some([80.0, 36.0])] // Single centered recharge / storage / void slot
             }
-            MachineKind::EnergyBank => {
-                vec![Some([80.0, 36.0])] // Handheld battery recharge slot
+            MachineKind::AlloySmelter => {
+                vec![
+                    Some([38.0, 35.0]),  // Slot 0: Primary Input
+                    Some([60.0, 35.0]),  // Slot 1: Secondary Input / Flux
+                    Some([116.0, 35.0]), // Slot 2: Alloy Output
+                    Some([143.0, 35.0]), // Slot 3: Speed Upgrade
+                ]
             }
             _ => {
                 vec![
@@ -2080,14 +2505,32 @@ pub(in crate::game) fn screen_draw(
             game.native_fill(batch, [x + 74.0, y + 25.0, bar_w, 5.0], col);
         }
     } else if kind == MachineKind::SolarGenerator {
-        // Monitor banner covering slot area
         let is_3x3 = get(7) != 0;
-        game.native_fill(batch, [x + 36.0, y + 26.0, 104.0, 24.0], 0xFF18_2028);
-        if is_3x3 {
-            game.native_text(batch, "[Matriz 3x3: 2x ACTIVA]", [x + 40.0, y + 34.0], 0x55_FFAA, false);
-        } else {
-            game.native_text(batch, "[Panel Solar Indiv.]", [x + 44.0, y + 34.0], 0xFF_D166, false);
+        let tag = if is_3x3 { "☀️ [MATRIZ 3x3: 2x ACTIVA]" } else { "☀️ [PANEL INDIVIDUAL]" };
+        let tag_col = if is_3x3 { 0x55_FFAA } else { 0xFF_D166 };
+        game.native_text(batch, tag, [x + 32.0, y + 23.0], tag_col, false);
+        // Slot frame for item recharge at [80, 36]
+        game.native_fill(batch, [x + 79.0, y + 35.0, 18.0, 18.0], 0xFFFF_D166);
+        game.native_fill(batch, [x + 80.0, y + 36.0, 16.0, 16.0], 0xFF18_2028);
+    } else if kind == MachineKind::ChargingPad {
+        game.native_text(batch, "🔋 [INDUCCIÓN INALÁMBRICA]", [x + 28.0, y + 23.0], 0xFF00_FFAA, false);
+        game.native_fill(batch, [x + 79.0, y + 35.0, 18.0, 18.0], 0xFF00_FFAA);
+        game.native_fill(batch, [x + 80.0, y + 36.0, 16.0, 16.0], 0xFF18_2028);
+    } else if kind == MachineKind::AlloySmelter {
+        // Dual input slot frames + molten alloy arrow
+        game.native_fill(batch, [x + 37.0, y + 34.0, 18.0, 18.0], 0xFF35_3C48);
+        game.native_fill(batch, [x + 38.0, y + 35.0, 16.0, 16.0], 0xFF1A_1E24);
+        game.native_fill(batch, [x + 59.0, y + 34.0, 18.0, 18.0], 0xFF35_3C48);
+        game.native_fill(batch, [x + 60.0, y + 35.0, 16.0, 16.0], 0xFF1A_1E24);
+        game.native_fill(batch, [x + 115.0, y + 34.0, 18.0, 18.0], 0xFF35_3C48);
+        game.native_fill(batch, [x + 116.0, y + 35.0, 16.0, 16.0], 0xFF1A_1E24);
+        // Molten progress bar
+        game.native_fill(batch, [x + 80.0, y + 39.0, 32.0, 8.0], 0xFF3A_3F48);
+        let bar_w = (32.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 32.0);
+        if bar_w > 0.0 {
+            game.native_fill(batch, [x + 80.0, y + 39.0, bar_w, 8.0], 0xFFFF_7722);
         }
+        game.native_text(batch, "➔", [x + 92.0, y + 37.0], 0xFF_FFFF, false);
     } else if kind == MachineKind::EnergyBank {
         // Modular storage gauge above center battery slot
         game.native_fill(batch, [x + 60.0, y + 25.0, 56.0, 5.0], 0xFF2A_3038);
@@ -2145,15 +2588,27 @@ pub(in crate::game) fn screen_draw(
         game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x70_E000, false);
     } else if kind == MachineKind::SolarGenerator {
         let is_3x3 = get(7) != 0;
-        let line1 = format!("FE: {energy}/{max_energy} (+{rate} FE/t)");
+        let line1 = format!("FE: {energy}/{max_energy} | Genera: +{rate} FE/t");
         let line2 = if is_3x3 {
-            "Matriz Solar 3x3: +100% Doble Captación"
+            "Matriz 3x3 ACTIVA (+100% doble captación)".to_string()
+        } else if rate > 0 {
+            "Generando energía solar (Día despejado)".to_string()
         } else {
-            "Tip: Coloca 3x3 paneles juntos para 2x!"
+            "Sin radiación solar (Noche o bajo techo)".to_string()
         };
-        let col2 = if is_3x3 { 0x55_FFAA } else { 0xFF_D166 };
+        let col2 = if is_3x3 { 0x55_FFAA } else if rate > 0 { 0xFF_D166 } else { 0xAA_AA_AA };
         game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, line2, [x + 10.0, y + 70.0], col2, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], col2, false);
+    } else if kind == MachineKind::ChargingPad {
+        let line1 = format!("FE: {energy}/{max_energy} | -20 FE/t en carga");
+        let line2 = "Inducción activa: Carga armaduras y slot".to_string();
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF00_FFAA, false);
+    } else if kind == MachineKind::AlloySmelter {
+        let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
+        let line2 = format!("Fundición de Aleaciones: {progress_pct}%");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFFF_7722, false);
     } else if kind == MachineKind::EnergyBank {
         let cells = get(7).max(1);
         let line1 = format!("FE Total: {energy}/{max_energy}");
@@ -2209,7 +2664,9 @@ pub(in crate::game) fn screen_draw(
         MachineKind::CoalGenerator
             | MachineKind::BioGenerator
             | MachineKind::SolarGenerator
+            | MachineKind::ChargingPad
             | MachineKind::EnergyBank
+            | MachineKind::VoidTrashCan
     ) {
         let auto_label = lang::get(if auto_io {
             "rusty_factory.screen.auto_on"
@@ -2243,7 +2700,12 @@ pub(in crate::game) fn screen_click(
     } else if in_rect(at, MODE_BTN_RECT)
         && !matches!(
             kind,
-            MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SolarGenerator
+            MachineKind::CoalGenerator
+                | MachineKind::BioGenerator
+                | MachineKind::SolarGenerator
+                | MachineKind::ChargingPad
+                | MachineKind::EnergyBank
+                | MachineKind::VoidTrashCan
         )
     {
         *button = Some(BTN_MODE_OR_SIZE);
@@ -2273,6 +2735,34 @@ pub(in crate::game) fn screen_tooltip(
     {
         lines.push(format!("§bAlmacenamiento: {energy} / {max_energy} FE"));
         lines.push("§7Conecta Cables de Cobre o usa una Batería".into());
+    } else if in_rect(at, [79.0, 35.0, 18.0, 18.0]) {
+        match kind {
+            MachineKind::CoalGenerator => {
+                lines.push("§6Ranura de Combustible".into());
+                lines.push("§7Coloca Carbón o Carbón Vegetal".into());
+            }
+            MachineKind::BioGenerator => {
+                lines.push("§aRanura de Biomasa".into());
+                lines.push("§7Coloca Savia, Savia Refinada o Hojas de Árbol".into());
+            }
+            MachineKind::SolarGenerator => {
+                lines.push("§eRanura de Recarga Solar".into());
+                lines.push("§7Coloca Baterías, Jetpack, Taladro o Casco para recargar".into());
+            }
+            MachineKind::ChargingPad => {
+                lines.push("§bRanura de Carga por Inducción".into());
+                lines.push("§7Coloca cualquier ítem eléctrico o párate encima".into());
+            }
+            MachineKind::EnergyBank => {
+                lines.push("§bRanura de Batería".into());
+                lines.push("§7Coloca Baterías Portátiles para cargar/descargar".into());
+            }
+            MachineKind::VoidTrashCan => {
+                lines.push("§dRanura de Destrucción".into());
+                lines.push("§7Cualquier ítem colocado aquí es incinerado al instante".into());
+            }
+            _ => {}
+        }
     } else if in_rect(at, [64.0, 28.0, 38.0, 26.0]) {
         if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
             let side = quarry_radius * 2 + 1;
@@ -2286,7 +2776,12 @@ pub(in crate::game) fn screen_tooltip(
     } else if in_rect(at, MODE_BTN_RECT)
         && !matches!(
             kind,
-            MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SolarGenerator
+            MachineKind::CoalGenerator
+                | MachineKind::BioGenerator
+                | MachineKind::SolarGenerator
+                | MachineKind::ChargingPad
+                | MachineKind::EnergyBank
+                | MachineKind::VoidTrashCan
         )
     {
         if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
@@ -2335,8 +2830,8 @@ pub(in crate::game) fn perform(game: &mut Game<'_>, line: &str, ran: &mut bool) 
         "rusty_factory:quarry 1",
         "rusty_factory:auto_harvester 1",
         "rusty_factory:coal_generator 2",
-        "rusty_factory:solar_generator 4",
-        "rusty_factory:energy_bank 1",
+        "rusty_factory:solar_generator 9",
+        "rusty_factory:energy_bank 4",
         "rusty_factory:copper_cable 32",
         "rusty_factory:item_pipe 32",
         "rusty_factory:item_extractor 4",
@@ -2353,10 +2848,20 @@ pub(in crate::game) fn perform(game: &mut Game<'_>, line: &str, ran: &mut bool) 
         "rusty_factory:energy_monitor 1",
         "rusty_factory:fluid_tank 2",
         "rusty_factory:steam_boiler 1",
+        "rusty_factory:fluid_pump 1",
+        "rusty_factory:void_trash_can 1",
+        "rusty_factory:energy_relay 2",
+        "rusty_factory:jetpack 1",
+        "rusty_factory:item_magnet 1",
+        "rusty_factory:mining_laser 1",
+        "rusty_factory:charging_pad 2",
+        "rusty_factory:fluid_pipe 32",
+        "rusty_factory:alloy_smelter 1",
+        "rusty_factory:solar_helmet 1",
     ] {
         game.native_run_command(&format!("give @s {item}"));
     }
     game.native_feedback(Text::literal(
-        "[Rusty Factory v0.4.0] ¡Kit industrial completo entregado (Árbol de Caucho con Savia, Espita, Extractor de Savia, Vulcanizadora de Goma, Bio-Generador, Quarry 3D, Cosechadora 3D, Paneles Solares y más)!",
+        "[Rusty Factory v0.5.0] ¡Kit industrial avanzado entregado (Mega Panel 3x3, Plataforma de Carga Inductiva, Tubería de Fluidos, Fundición de Aleaciones, Casco Solar y más)!",
     ));
 }

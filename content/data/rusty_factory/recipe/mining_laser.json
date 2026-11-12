@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "DDD",
+    "EBE",
+    " G "
+  ],
+  "key": {
+    "D": "minecraft:diamond",
+    "E": "rusty_factory:electronic_circuit",
+    "B": "rusty_factory:energy_battery",
+    "G": "rusty_factory:steel_gear"
+  },
+  "result": {
+    "id": "rusty_factory:mining_laser",
+    "count": 1
+  }
+}

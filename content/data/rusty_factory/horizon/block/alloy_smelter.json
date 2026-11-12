@@ -1,0 +1,10 @@
+{
+  "template": "minecraft:blast_furnace",
+  "properties": {
+    "hardness": 3.5,
+    "explosion_resistance": 5.0,
+    "requires_tool": true,
+    "sounds": "minecraft:metal",
+    "map_color": 11
+  }
+}

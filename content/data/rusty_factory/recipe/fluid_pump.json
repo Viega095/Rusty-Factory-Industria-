@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    " P ",
+    "IBI",
+    "CEC"
+  ],
+  "key": {
+    "P": "rusty_factory:item_pipe",
+    "I": "minecraft:iron_ingot",
+    "B": "rusty_factory:machine_casing",
+    "C": "rusty_factory:copper_cable",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:fluid_pump",
+    "count": 1
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "IBI",
+    "PCP",
+    "R R"
+  ],
+  "key": {
+    "I": "rusty_factory:steel_ingot",
+    "B": "rusty_factory:energy_battery",
+    "P": "rusty_factory:iron_plate",
+    "C": "minecraft:copper_ingot",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "id": "rusty_factory:jetpack",
+    "count": 1
+  }
+}

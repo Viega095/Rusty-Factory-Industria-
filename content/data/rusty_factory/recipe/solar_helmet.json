@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    " S ",
+    "IHI",
+    " C "
+  ],
+  "key": {
+    "S": "rusty_factory:solar_cell",
+    "I": "rusty_factory:steel_ingot",
+    "H": "minecraft:iron_helmet",
+    "C": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:solar_helmet",
+    "count": 1
+  }
+}

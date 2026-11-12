@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "OOO",
+    "OEO",
+    "OOO"
+  ],
+  "key": {
+    "O": "minecraft:obsidian",
+    "E": "minecraft:ender_pearl"
+  },
+  "result": {
+    "id": "rusty_factory:void_trash_can",
+    "count": 1
+  }
+}

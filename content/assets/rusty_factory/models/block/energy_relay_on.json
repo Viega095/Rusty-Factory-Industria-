@@ -1,0 +1,12 @@
+{
+  "parent": "minecraft:block/cube",
+  "textures": {
+    "particle": "rusty_factory:block/machine_side",
+    "down": "rusty_factory:block/machine_side",
+    "up": "rusty_factory:block/machine_top",
+    "north": "rusty_factory:block/energy_relay_on",
+    "south": "rusty_factory:block/machine_side",
+    "west": "rusty_factory:block/machine_side",
+    "east": "rusty_factory:block/machine_side"
+  }
+}

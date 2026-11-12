@@ -22,6 +22,12 @@
     "rusty_factory:conveyor_belt",
     "rusty_factory:energy_monitor",
     "rusty_factory:fluid_tank",
-    "rusty_factory:steam_boiler"
+    "rusty_factory:steam_boiler",
+    "rusty_factory:fluid_pump",
+    "rusty_factory:void_trash_can",
+    "rusty_factory:energy_relay",
+    "rusty_factory:charging_pad",
+    "rusty_factory:fluid_pipe",
+    "rusty_factory:alloy_smelter"
   ]
 }
