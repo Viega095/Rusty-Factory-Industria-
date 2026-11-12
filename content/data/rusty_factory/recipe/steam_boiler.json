@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "PTP",
+    "TMT",
+    "PFP"
+  ],
+  "key": {
+    "P": "rusty_factory:copper_plate",
+    "T": "rusty_factory:fluid_tank",
+    "M": "rusty_factory:coal_generator",
+    "F": "minecraft:blast_furnace"
+  },
+  "result": {
+    "id": "rusty_factory:steam_boiler",
+    "count": 1
+  }
+}

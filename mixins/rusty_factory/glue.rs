@@ -96,7 +96,7 @@ pub(in crate::game) fn update_tag(
 pub(in crate::game) fn container(block: &str, container: &mut Option<ModContainer>) {
     if let Some(kind) = MachineKind::from_block_id(block) {
         match kind {
-            MachineKind::CoalGenerator | MachineKind::BioGenerator => {
+            MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SteamBoiler => {
                 *container = Some(ModContainer {
                     slots: 1,
                     faces: std::array::from_fn(|_| vec![0]),
@@ -105,7 +105,7 @@ pub(in crate::game) fn container(block: &str, container: &mut Option<ModContaine
                     menu: Some(rules::MENU.to_owned()),
                 });
             }
-            MachineKind::SolarGenerator => {
+            MachineKind::SolarGenerator | MachineKind::EnergyMonitor | MachineKind::FluidTank => {
                 *container = None;
             }
             MachineKind::EnergyBank => {
@@ -1050,7 +1050,12 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         return;
     }
 
-    let is_gen = matches!(kind, MachineKind::CoalGenerator | MachineKind::BioGenerator);
+    if matches!(kind, MachineKind::FluidTank | MachineKind::EnergyMonitor) {
+        store_state(entity, &state);
+        return;
+    }
+
+    let is_gen = matches!(kind, MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SteamBoiler);
     let fuel_ticks = if is_gen {
         entity.items.first().and_then(|s| s.as_ref()).and_then(fuel_burn_ticks)
     } else {
@@ -1266,15 +1271,17 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         }
     }
 
-    let is_gen = matches!(kind, MachineKind::CoalGenerator | MachineKind::BioGenerator);
+    let is_gen = matches!(kind, MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SteamBoiler);
     if state.auto_io && !is_gen && entity.items[rules::SLOT_OUTPUT].is_some() {
         try_auto_eject_output(game, pos, entity, 4);
     }
 
     if is_gen && state.energy > 0 {
-        let sent = distribute_energy(game, pos, state.energy.min(280), false);
+        let max_send = if kind == MachineKind::SteamBoiler { 600 } else { 280 };
+        let sent = distribute_energy(game, pos, state.energy.min(max_send), false);
         state.energy -= sent;
     }
+
 
     update_lit_state(game, pos, outcome.status == StepStatus::Working);
 
@@ -1418,6 +1425,31 @@ pub(in crate::game) fn world_primitives(
             }
             continue;
         }
+
+        if entity.id == rules::BLOCK_ENERGY_MONITOR {
+            primitives
+                .text(
+                    [x as f64 + 0.5, y as f64 + 1.25, z as f64 + 0.5],
+                    "⚡ MONITOR DE RED",
+                    0xFF38_F2FF,
+                    0.75,
+                )
+                .background();
+            continue;
+        }
+
+        if entity.id == rules::BLOCK_FLUID_TANK {
+            let is_filled = game.native_block_property([x, y, z], "lit").as_deref() == Some("true");
+            if is_filled {
+                primitives.filled_box(
+                    [x as f64 + 0.12, y as f64 + 0.08, z as f64 + 0.12],
+                    [x as f64 + 0.88, y as f64 + 0.88, z as f64 + 0.88],
+                    0xAA25_85E8,
+                );
+            }
+            continue;
+        }
+
 
         if entity.id == rules::BLOCK_HARVESTER {
             let st = load_state(entity)
@@ -1714,6 +1746,23 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
                 return;
             }
         }
+
+        // 4. Jet Boots: Rocket propulsion boost with flame & smoke exhaust, slow falling to prevent fall damage!
+        if held_id == rules::ITEM_JET_BOOTS {
+            *canceled = true;
+            game.native_run_command("playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.2 1.1");
+            game.native_run_command("effect give @s minecraft:levitation 1 10 true");
+            game.native_run_command("effect give @s minecraft:slow_falling 5 0 true");
+            game.native_run_command("particle minecraft:flame ~ ~ ~ 0.3 0.1 0.3 0.05 20");
+            game.native_run_command("particle minecraft:smoke ~ ~ ~ 0.2 0.1 0.2 0.02 15");
+            if let Some(who) = game.native_acting_player() {
+                game.native_action_bar(
+                    who.uuid,
+                    Text::literal("🚀 [Botas Cohete] ¡Propulsión Cohete Activada!"),
+                );
+            }
+            return;
+        }
     }
 
     if block_id == rules::BLOCK_RUBBER_SAPLING {
@@ -1739,6 +1788,86 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
             if (game.world.game_time & 3) == 0 {
                 game.native_give_items(rules::BLOCK_RUBBER_SAPLING, 1);
             }
+        }
+        return;
+    }
+
+    if block_id == rules::BLOCK_FLUID_TANK {
+        *canceled = true;
+        if let Some((ref held_id, _, _)) = held_info {
+            if held_id == "minecraft:water_bucket" {
+                game.native_take_items("minecraft:water_bucket", 1);
+                game.native_give_items("minecraft:bucket", 1);
+                game.native_set_block_property(pos, "lit", "true");
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(who.uuid, Text::literal("💧 [Tanque de Fluidos] Lleno con Agua (1000 mB)"));
+                }
+                return;
+            } else if held_id == "minecraft:lava_bucket" {
+                game.native_take_items("minecraft:lava_bucket", 1);
+                game.native_give_items("minecraft:bucket", 1);
+                game.native_set_block_property(pos, "lit", "true");
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(who.uuid, Text::literal("🔥 [Tanque de Fluidos] Lleno con Lava (1000 mB)"));
+                }
+                return;
+            } else if held_id == rules::ITEM_RAW_SAP {
+                game.native_take_items(rules::ITEM_RAW_SAP, 1);
+                game.native_set_block_property(pos, "lit", "true");
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(who.uuid, Text::literal("🍯 [Tanque de Fluidos] Almacenando Savia de Caucho"));
+                }
+                return;
+            } else if held_id == "minecraft:bucket" {
+                let is_filled = game.native_block_property(pos, "lit").as_deref() == Some("true");
+                if is_filled {
+                    game.native_take_items("minecraft:bucket", 1);
+                    game.native_give_items("minecraft:water_bucket", 1);
+                    game.native_set_block_property(pos, "lit", "false");
+                    if let Some(who) = game.native_acting_player() {
+                        game.native_action_bar(who.uuid, Text::literal("🪣 [Tanque de Fluidos] Vaciado en Balde"));
+                    }
+                    return;
+                }
+            }
+        }
+        let is_filled = game.native_block_property(pos, "lit").as_deref() == Some("true");
+        if let Some(who) = game.native_acting_player() {
+            let msg = if is_filled {
+                "💧 [Tanque de Fluidos] Nivel: 1,000 / 1,000 mB (Lleno)"
+            } else {
+                "💧 [Tanque de Fluidos] Nivel: 0 / 1,000 mB (Vacío - Usa un balde)"
+            };
+            game.native_action_bar(who.uuid, Text::literal(msg));
+        }
+        return;
+    }
+
+    if block_id == rules::BLOCK_ENERGY_MONITOR {
+        *canceled = true;
+        let consumers = rules::find_connected_consumers(
+            pos,
+            |p| game.native_block(p) == rules::BLOCK_CABLE,
+            |p| MachineKind::from_block_id(&game.native_block(p)).is_some(),
+        );
+        let mut total_energy = 0;
+        let mut total_capacity = 0;
+        for cpos in &consumers {
+            game.native_with_mod_block_entity(*cpos, |entity| {
+                if let Some(st) = load_state(entity) {
+                    total_energy += st.energy;
+                    total_capacity += st.kind.max_energy();
+                }
+            });
+        }
+        if let Some(who) = game.native_acting_player() {
+            game.native_action_bar(
+                who.uuid,
+                Text::literal(format!(
+                    "⚡ [Monitor de Red] Red Eléctrica: {} / {} FE ({} máquinas conectadas)",
+                    total_energy, total_capacity, consumers.len()
+                )),
+            );
         }
         return;
     }
@@ -2221,6 +2350,9 @@ pub(in crate::game) fn perform(game: &mut Game<'_>, line: &str, ran: &mut bool) 
         "rusty_factory:speed_upgrade 8",
         "rusty_factory:fortune_upgrade 8",
         "rusty_factory:energy_battery 4",
+        "rusty_factory:energy_monitor 1",
+        "rusty_factory:fluid_tank 2",
+        "rusty_factory:steam_boiler 1",
     ] {
         game.native_run_command(&format!("give @s {item}"));
     }

@@ -19,6 +19,9 @@
     "rusty_factory:auto_harvester",
     "rusty_factory:block_breaker",
     "rusty_factory:block_placer",
-    "rusty_factory:conveyor_belt"
+    "rusty_factory:conveyor_belt",
+    "rusty_factory:energy_monitor",
+    "rusty_factory:fluid_tank",
+    "rusty_factory:steam_boiler"
   ]
 }

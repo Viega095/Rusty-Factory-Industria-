@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "building",
+  "pattern": [
+    "SGS",
+    "G G",
+    "SGS"
+  ],
+  "key": {
+    "S": "rusty_factory:iron_plate",
+    "G": "minecraft:glass"
+  },
+  "result": {
+    "id": "rusty_factory:fluid_tank",
+    "count": 1
+  }
+}

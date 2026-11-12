@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    " P ",
+    "CMC",
+    " I "
+  ],
+  "key": {
+    "P": "rusty_factory:iron_plate",
+    "C": "rusty_factory:electronic_circuit",
+    "M": "rusty_factory:machine_casing",
+    "I": "rusty_factory:copper_cable"
+  },
+  "result": {
+    "id": "rusty_factory:energy_monitor",
+    "count": 1
+  }
+}

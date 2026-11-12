@@ -33,6 +33,9 @@ pub const BLOCK_RUBBER_SAP_LOG: &str = "rusty_factory:rubber_sap_log";
 pub const BLOCK_RUBBER_LEAVES: &str = "rusty_factory:rubber_leaves";
 pub const BLOCK_RUBBER_SAPLING: &str = "rusty_factory:rubber_sapling";
 pub const BLOCK_RUBBER_PLANKS: &str = "rusty_factory:rubber_planks";
+pub const BLOCK_ENERGY_MONITOR: &str = "rusty_factory:energy_monitor";
+pub const BLOCK_FLUID_TANK: &str = "rusty_factory:fluid_tank";
+pub const BLOCK_STEAM_BOILER: &str = "rusty_factory:steam_boiler";
 
 // Item IDs (25 items)
 pub const ITEM_WRENCH: &str = "rusty_factory:wrench";
@@ -93,6 +96,9 @@ pub enum MachineKind {
     BlockBreaker,
     BlockPlacer,
     ConveyorBelt,
+    EnergyMonitor,
+    FluidTank,
+    SteamBoiler,
 }
 
 impl MachineKind {
@@ -114,6 +120,9 @@ impl MachineKind {
             BLOCK_BREAKER => Some(Self::BlockBreaker),
             BLOCK_PLACER => Some(Self::BlockPlacer),
             BLOCK_CONVEYOR => Some(Self::ConveyorBelt),
+            BLOCK_ENERGY_MONITOR => Some(Self::EnergyMonitor),
+            BLOCK_FLUID_TANK => Some(Self::FluidTank),
+            BLOCK_STEAM_BOILER => Some(Self::SteamBoiler),
             _ => None,
         }
     }
@@ -135,9 +144,10 @@ impl MachineKind {
             Self::IndustrialAssembler
             | Self::AutoHarvester
             | Self::BlockBreaker
-            | Self::Quarry => MachineTier::Tier2,
+            | Self::Quarry
+            | Self::SteamBoiler => MachineTier::Tier2,
 
-            Self::EnergyBank => MachineTier::Storage,
+            Self::EnergyBank | Self::EnergyMonitor | Self::FluidTank => MachineTier::Storage,
         }
     }
 
@@ -159,12 +169,21 @@ impl MachineKind {
             Self::BlockBreaker => 5_000,
             Self::BlockPlacer => 2_000,
             Self::ConveyorBelt => 0,
+            Self::EnergyMonitor => 0,
+            Self::FluidTank => 0,
+            Self::SteamBoiler => 10_000,
         }
     }
 
     pub const fn base_work_ticks(self) -> i32 {
         match self {
-            Self::CoalGenerator | Self::BioGenerator | Self::SolarGenerator | Self::EnergyBank => 1,
+            Self::CoalGenerator
+            | Self::BioGenerator
+            | Self::SolarGenerator
+            | Self::EnergyBank
+            | Self::EnergyMonitor
+            | Self::FluidTank
+            | Self::SteamBoiler => 1,
             Self::ItemExtractor => 10,
             Self::ElectricCrusher => 70,
             Self::ElectricFurnace => 50,
@@ -185,7 +204,8 @@ impl MachineKind {
             Self::CoalGenerator => 20, // Generates +20 FE/t (Tier 1 generator)
             Self::BioGenerator => 24,  // Generates +24 FE/t from organic/sap fuels
             Self::SolarGenerator => 12, // Base daytime generation +12 FE/t (+24 FE/t in 3x3 array!)
-            Self::EnergyBank | Self::ItemExtractor | Self::ConveyorBelt => 0,
+            Self::SteamBoiler => 80,    // Massive +80 FE/t high-pressure steam generation
+            Self::EnergyBank | Self::ItemExtractor | Self::ConveyorBelt | Self::EnergyMonitor | Self::FluidTank => 0,
             Self::ElectricCrusher => 14,
             Self::ElectricFurnace => 12,
             Self::MechanicalPress => 14,
@@ -234,6 +254,9 @@ impl MachineKind {
             Self::BlockBreaker => "block.rusty_factory.block_breaker",
             Self::BlockPlacer => "block.rusty_factory.block_placer",
             Self::ConveyorBelt => "block.rusty_factory.conveyor_belt",
+            Self::EnergyMonitor => "block.rusty_factory.energy_monitor",
+            Self::FluidTank => "block.rusty_factory.fluid_tank",
+            Self::SteamBoiler => "block.rusty_factory.steam_boiler",
         }
     }
 
@@ -242,7 +265,10 @@ impl MachineKind {
             Self::CoalGenerator
             | Self::BioGenerator
             | Self::SolarGenerator
-            | Self::EnergyBank => "rusty_factory:gui/generator",
+            | Self::EnergyBank
+            | Self::EnergyMonitor
+            | Self::FluidTank
+            | Self::SteamBoiler => "rusty_factory:gui/generator",
             Self::Quarry | Self::AutoHarvester => "rusty_factory:gui/quarry",
             Self::ConveyorBelt | Self::ItemExtractor => "rusty_factory:gui/conveyor",
             Self::ElectricCrusher
@@ -675,7 +701,10 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
         | MachineKind::AutoHarvester
         | MachineKind::BlockBreaker
         | MachineKind::BlockPlacer
-        | MachineKind::ConveyorBelt => None,
+        | MachineKind::ConveyorBelt
+        | MachineKind::EnergyMonitor
+        | MachineKind::FluidTank
+        | MachineKind::SteamBoiler => None,
     }
 }
 
@@ -1029,9 +1058,16 @@ pub fn step_machine(
     }
 
     match state.kind {
-        MachineKind::CoalGenerator | MachineKind::BioGenerator => {
+        MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SteamBoiler => {
             step_generator(state, fuel_burn_ticks, speed_upgrades)
         }
+        MachineKind::EnergyMonitor | MachineKind::FluidTank => StepOutcome {
+            status: StepStatus::Idle,
+            consume_input: false,
+            consume_fuel: false,
+            produced: None,
+            net_energy_rate: 0,
+        },
         MachineKind::SolarGenerator | MachineKind::EnergyBank => {
             let mut consume_fuel = false;
             if state.energy < state.kind.max_energy() {
