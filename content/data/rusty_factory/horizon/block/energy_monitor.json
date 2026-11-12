@@ -1,5 +1,5 @@
 {
-  "template": "minecraft:furnace",
+  "template": "minecraft:redstone_lamp",
   "properties": {
     "hardness": 3.0,
     "explosion_resistance": 6.0,

@@ -1,5 +1,5 @@
 {
-  "template": "minecraft:iron_block",
+  "template": "minecraft:furnace",
   "properties": {
     "hardness": 2.5,
     "explosion_resistance": 4.0,

@@ -1,5 +1,18 @@
 {
-  "template": "minecraft:furnace",
+  "template": "minecraft:oak_log",
+  "state_properties": {
+    "facing": {
+      "type": "enum",
+      "values": ["north", "east", "south", "west"]
+    },
+    "lit": {
+      "type": "boolean"
+    }
+  },
+  "default_state": {
+    "facing": "north",
+    "lit": "true"
+  },
   "properties": {
     "hardness": 2.0,
     "explosion_resistance": 2.5,

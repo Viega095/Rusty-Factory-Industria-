@@ -1,5 +1,5 @@
 {
-  "template": "minecraft:furnace",
+  "template": "minecraft:oak_sapling",
   "shapes": {
     "default": [
       [0.2, 0.0, 0.2, 0.8, 0.8, 0.8]
