@@ -4,7 +4,7 @@
     "hardness": 2.5,
     "explosion_resistance": 4.0,
     "requires_tool": true,
-    "sounds": "minecraft:metal",
+    "sounds": "minecraft:iron_block",
     "map_color": 11
   }
 }
