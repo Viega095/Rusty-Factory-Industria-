@@ -1009,8 +1009,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         | MachineKind::EnergyBank
         | MachineKind::SolarGenerator
         | MachineKind::ChargingPad
-        | MachineKind::VoidTrashCan => 1,
-        MachineKind::EnergyMonitor | MachineKind::FluidTank | MachineKind::FluidPump | MachineKind::EnergyRelay => 0,
+        | MachineKind::VoidTrashCan
+        | MachineKind::FluidTank
+        | MachineKind::FluidPump => 1,
+        MachineKind::EnergyMonitor | MachineKind::EnergyRelay => 0,
         _ => rules::SLOTS,
     };
     if entity.items.len() < min_slots {
@@ -1078,6 +1080,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         } else {
             update_lit_state(game, pos, false);
         }
+        entity.data = vec![StepStatus::Working as i32, 0, 1, 0, 0, 1, 0, 0, 0, 0];
         store_state(entity, &state);
         return;
     }
