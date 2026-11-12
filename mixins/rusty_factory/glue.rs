@@ -149,6 +149,7 @@ fn fuel_burn_ticks(stack: &ItemStack) -> Option<i32> {
         | rules::BLOCK_RUBBER_LOG
         | rules::BLOCK_RUBBER_SAP_LOG
         | rules::BLOCK_RUBBER_PLANKS => Some(400),
+        rules::BLOCK_RUBBER_LEAVES => Some(100),
         "minecraft:coal" | "minecraft:charcoal" => Some(1600),
         "minecraft:coal_block" => Some(16000),
         "minecraft:blaze_rod" => Some(2400),
@@ -159,6 +160,11 @@ fn fuel_burn_ticks(stack: &ItemStack) -> Option<i32> {
         | "minecraft:birch_planks"
         | "minecraft:wheat"
         | "minecraft:sugar_cane"
+        | "minecraft:apple"
+        | "minecraft:bread"
+        | "minecraft:wheat_seeds"
+        | "minecraft:oak_leaves"
+        | "minecraft:oak_sapling"
         | "minecraft:Stick"
         | "minecraft:stick" => Some(300),
         _ => None,
@@ -1145,6 +1151,43 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         entity.items.get(rules::SLOT_FUEL).and_then(|s| s.as_ref()).and_then(fuel_burn_ticks)
     };
 
+    if is_gen {
+        let max_e = kind.max_energy();
+        let outcome = rules::step_machine(&mut state, None, fuel_ticks, None, speed_upgrades);
+        if outcome.consume_fuel {
+            consume_one_fuel(entity);
+        }
+        let gen_rate = if outcome.status == StepStatus::Working {
+            kind.energy_per_tick() + (speed_upgrades.min(8) as i32) * 10
+        } else {
+            0
+        };
+        if state.energy > 0 {
+            let sent = distribute_energy(game, pos, state.energy.min(kind.energy_per_tick() * 4), false);
+            state.energy -= sent;
+        }
+        update_lit_state(game, pos, outcome.status == StepStatus::Working);
+        let pct = if state.burn_max > 0 {
+            ((state.burn_left * 100) / state.burn_max).clamp(0, 100)
+        } else {
+            0
+        };
+        entity.data = vec![
+            outcome.status as i32,
+            state.energy,
+            max_e,
+            pct,
+            gen_rate,
+            i32::from(state.enabled),
+            0,
+            0,
+            0,
+            0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
     if kind == MachineKind::SolarGenerator {
         let is_array_3x3 = rules::is_solar_array_3x3(pos, |p| game.native_block(p) == rules::BLOCK_SOLAR);
         let max_e = if is_array_3x3 { 20_000 } else { 2_000 };
@@ -1386,6 +1429,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         return;
     }
 
+    if entity.items.len() < rules::SLOTS {
+        entity.items.resize(rules::SLOTS, None);
+    }
+
     let input_id = entity.items[rules::SLOT_INPUT]
         .as_ref()
         .map(|s| s.item.to_string());
@@ -1578,103 +1625,6 @@ pub(in crate::game) fn world_primitives(
             continue;
         }
 
-        if entity.id == rules::BLOCK_ENERGY_BANK {
-            let st = load_state(entity)
-                .unwrap_or_else(|| MachineState::new(MachineKind::EnergyBank));
-            let cluster_len = rules::find_battery_cluster([x, y, z], |p| {
-                game.native_block(p) == rules::BLOCK_ENERGY_BANK
-            }).len().max(1);
-            let cluster_max = (cluster_len as i32) * 10_000;
-            let pct = (st.energy * 100) / cluster_max.max(1);
-            let label = if cluster_len > 1 {
-                format!("BANCO [{cluster_len}x]: {} / {}k ({pct}%)", st.energy, cluster_max / 1000)
-            } else {
-                format!("BANCO FE: {} / 10k ({pct}%)", st.energy)
-            };
-            primitives
-                .text(
-                    [x as f64 + 0.5, y as f64 + 1.35, z as f64 + 0.5],
-                    label,
-                    0xFF38_F2FF,
-                    0.8,
-                )
-                .background();
-            continue;
-        }
-
-        if entity.id == rules::BLOCK_SOLAR {
-            let is_center = (-1..=1).all(|dx| (-1..=1).all(|dz| game.native_block([x + dx, y, z + dz]) == rules::BLOCK_SOLAR));
-            if is_center {
-                primitives.box_outline(
-                    [x as f64 - 1.0, y as f64, z as f64 - 1.0],
-                    [x as f64 + 2.0, y as f64 + 0.38, z as f64 + 2.0],
-                    0xFFFF_E033,
-                    2.5,
-                );
-                primitives
-                    .text(
-                        [x as f64 + 0.5, y as f64 + 1.25, z as f64 + 0.5],
-                        "☀️ MEGA PANEL SOLAR 3x3 [360 FE/t]",
-                        0xFFFF_E033,
-                        0.85,
-                    )
-                    .background();
-            } else if rules::is_solar_array_3x3([x, y, z], |p| game.native_block(p) == rules::BLOCK_SOLAR) {
-                primitives
-                    .text(
-                        [x as f64 + 0.5, y as f64 + 1.1, z as f64 + 0.5],
-                        "☀️ MATRIZ (2x)",
-                        0xFF55_FFAA,
-                        0.65,
-                    )
-                    .background();
-            }
-            continue;
-        }
-
-        if entity.id == rules::BLOCK_CHARGING_PAD {
-            let st = load_state(entity)
-                .unwrap_or_else(|| MachineState::new(MachineKind::ChargingPad));
-            let pct = (st.energy * 100) / MachineKind::ChargingPad.max_energy().max(1);
-            primitives
-                .text(
-                    [x as f64 + 0.5, y as f64 + 0.65, z as f64 + 0.5],
-                    format!("🔋 PLATAFORMA CARGA: {} FE ({pct}%)", st.energy),
-                    0xFF00_FFAA,
-                    0.7,
-                )
-                .background();
-            continue;
-        }
-
-        if entity.id == rules::BLOCK_ALLOY_SMELTER {
-            let st = load_state(entity)
-                .unwrap_or_else(|| MachineState::new(MachineKind::AlloySmelter));
-            let pct = (st.energy * 100) / MachineKind::AlloySmelter.max_energy().max(1);
-            let status_icon = if st.progress > 0 { "🔥 FUNDIENDO" } else { "⚡ FUNDICIÓN ALEACIONES" };
-            primitives
-                .text(
-                    [x as f64 + 0.5, y as f64 + 1.25, z as f64 + 0.5],
-                    format!("{status_icon} ({}%)", pct),
-                    0xFFFF_7733,
-                    0.75,
-                )
-                .background();
-            continue;
-        }
-
-        if entity.id == rules::BLOCK_ENERGY_MONITOR {
-            primitives
-                .text(
-                    [x as f64 + 0.5, y as f64 + 1.25, z as f64 + 0.5],
-                    "⚡ MONITOR DE RED",
-                    0xFF38_F2FF,
-                    0.75,
-                )
-                .background();
-            continue;
-        }
-
         if entity.id == rules::BLOCK_FLUID_TANK {
             let is_filled = game.native_block_property([x, y, z], "lit").as_deref() == Some("true");
             if is_filled {
@@ -1686,44 +1636,6 @@ pub(in crate::game) fn world_primitives(
             }
             continue;
         }
-
-        if entity.id == rules::BLOCK_TRASH_CAN {
-            primitives
-                .text(
-                    [x as f64 + 0.5, y as f64 + 1.25, z as f64 + 0.5],
-                    "🗑️ PAPELERA DE VACÍO",
-                    0xFFAA_55FF,
-                    0.75,
-                )
-                .background();
-            continue;
-        }
-
-        if entity.id == rules::BLOCK_ENERGY_RELAY {
-            primitives
-                .text(
-                    [x as f64 + 0.5, y as f64 + 1.35, z as f64 + 0.5],
-                    "📡 RELÉ INALÁMBRICO",
-                    0xFF00_E5FF,
-                    0.75,
-                )
-                .background();
-            continue;
-        }
-
-        if entity.id == rules::BLOCK_FLUID_PUMP {
-            primitives
-                .text(
-                    [x as f64 + 0.5, y as f64 + 1.25, z as f64 + 0.5],
-                    "⛽ BOMBA DE FLUIDOS",
-                    0xFF55_FFAA,
-                    0.75,
-                )
-                .background();
-            continue;
-        }
-
-
 
         if entity.id == rules::BLOCK_HARVESTER {
             let st = load_state(entity)
@@ -1741,7 +1653,7 @@ pub(in crate::game) fn world_primitives(
             let base_y = y as f64;
             let top_y = y as f64 + 2.0;
 
-            // Green agricultural perimeter frame
+            // Agricultural perimeter frame
             primitives.box_outline([x0, base_y, z0], [x1, top_y, z1], 0xFF55_FF66, 2.5);
             if st.enabled && st.last_target != [0, 0, 0] {
                 let tx = st.last_target[0] as f64 + 0.5;
@@ -1754,19 +1666,6 @@ pub(in crate::game) fn world_primitives(
                     2.2,
                 );
             }
-            let side = st.quarry_side_len();
-            let label = format!(
-                "COSECHADORA {side}x{side} | {} FE | Cosechados: {}",
-                st.energy, st.quarry_mined
-            );
-            primitives
-                .text(
-                    [x as f64 + 0.5, y as f64 + 1.4, z as f64 + 0.5],
-                    label,
-                    0xFF66_FF88,
-                    0.8,
-                )
-                .background();
             continue;
         }
 
@@ -1789,9 +1688,8 @@ pub(in crate::game) fn world_primitives(
         let base_y = y as f64;
         let top_y = y as f64 + 3.0;
 
-        // 1. Outer Industrial Quarry Frame (Yellow/Amber hazard structural outline)
+        // 1. Outer Industrial Quarry Frame (Hazard structural outline)
         primitives.box_outline([x0, base_y, z0], [x1, top_y, z1], 0xFFFF_B81C, 3.0);
-        // Top Gantry Rail Ring
         primitives.box_outline(
             [x0, top_y - 0.22, z0],
             [x1, top_y, z1],
@@ -1858,21 +1756,6 @@ pub(in crate::game) fn world_primitives(
                 2.0,
             );
         }
-
-        // 4. Floating 3D Quarry Telemetry Label above the machine
-        let side = st.quarry_side_len();
-        let label = format!(
-            "QUARRY {side}x{side} [Y={}] | {} FE | Minados: {}",
-            target[1], st.energy, st.quarry_mined
-        );
-        primitives
-            .text(
-                [x as f64 + 0.5, y as f64 + 1.45, z as f64 + 0.5],
-                label,
-                if st.enabled { 0xFF55_FF99 } else { 0xFFFF_6666 },
-                0.85,
-            )
-            .background();
     }
 }
 
@@ -2519,21 +2402,9 @@ pub(in crate::game) fn screen_draw(
         let tag = if is_3x3 { "☀️ [MATRIZ 3x3: 2x ACTIVA]" } else { "☀️ [PANEL INDIVIDUAL]" };
         let tag_col = if is_3x3 { 0x55_FFAA } else { 0xFF_D166 };
         game.native_text(batch, tag, [x + 32.0, y + 23.0], tag_col, false);
-        // Slot frame for item recharge at [80, 36]
-        game.native_fill(batch, [x + 79.0, y + 35.0, 18.0, 18.0], 0xFFFF_D166);
-        game.native_fill(batch, [x + 80.0, y + 36.0, 16.0, 16.0], 0xFF18_2028);
     } else if kind == MachineKind::ChargingPad {
         game.native_text(batch, "🔋 [INDUCCIÓN INALÁMBRICA]", [x + 28.0, y + 23.0], 0xFF00_FFAA, false);
-        game.native_fill(batch, [x + 79.0, y + 35.0, 18.0, 18.0], 0xFF00_FFAA);
-        game.native_fill(batch, [x + 80.0, y + 36.0, 16.0, 16.0], 0xFF18_2028);
     } else if kind == MachineKind::AlloySmelter {
-        // Dual input slot frames + molten alloy arrow
-        game.native_fill(batch, [x + 37.0, y + 34.0, 18.0, 18.0], 0xFF35_3C48);
-        game.native_fill(batch, [x + 38.0, y + 35.0, 16.0, 16.0], 0xFF1A_1E24);
-        game.native_fill(batch, [x + 59.0, y + 34.0, 18.0, 18.0], 0xFF35_3C48);
-        game.native_fill(batch, [x + 60.0, y + 35.0, 16.0, 16.0], 0xFF1A_1E24);
-        game.native_fill(batch, [x + 115.0, y + 34.0, 18.0, 18.0], 0xFF35_3C48);
-        game.native_fill(batch, [x + 116.0, y + 35.0, 16.0, 16.0], 0xFF1A_1E24);
         // Molten progress bar
         game.native_fill(batch, [x + 80.0, y + 39.0, 32.0, 8.0], 0xFF3A_3F48);
         let bar_w = (32.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 32.0);
@@ -2643,6 +2514,36 @@ pub(in crate::game) fn screen_draw(
         let line2 = "Slot 0 = Filtro (Vacío = Todo)";
         game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF_D166, false);
         game.native_text(batch, line2, [x + 10.0, y + 70.0], 0x90_E0EF, false);
+    } else if kind == MachineKind::SapExtractor {
+        let line1 = format!("FE: {energy}/{max_energy} | Extracción de Savia");
+        let line2 = format!("Progreso extracción: {progress_pct}% (Tronco de caucho)");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF_B820, false);
+    } else if kind == MachineKind::Vulcanizer {
+        let line1 = format!("FE: {energy}/{max_energy} | Horno Vulcanizador");
+        let line2 = format!("Vulcanizando caucho puro: {progress_pct}%");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xEE_82EE, false);
+    } else if kind == MachineKind::MechanicalPress {
+        let line1 = format!("FE: {energy}/{max_energy} | Prensa Hidráulica");
+        let line2 = format!("Estampado de placas y engranajes: {progress_pct}%");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x55_FFAA, false);
+    } else if kind == MachineKind::ElectricCrusher {
+        let line1 = format!("FE: {energy}/{max_energy} | Triturador Cinético");
+        let line2 = format!("Molienda (x2 polvo mineral): {progress_pct}%");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF_D166, false);
+    } else if kind == MachineKind::ElectricFurnace {
+        let line1 = format!("FE: {energy}/{max_energy} | Horno Eléctrico");
+        let line2 = format!("Fundición de alta temperatura: {progress_pct}%");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF_8844, false);
+    } else if kind == MachineKind::IndustrialAssembler {
+        let line1 = format!("FE: {energy}/{max_energy} | Ensamblador Robótico");
+        let line2 = format!("Ensamblaje automatizado: {progress_pct}%");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x38_F2FF, false);
     } else {
         let energy_line = fill_template(
             "rusty_factory.screen.energy",

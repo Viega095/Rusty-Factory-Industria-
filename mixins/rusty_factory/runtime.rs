@@ -333,28 +333,27 @@ impl MachineKind {
 
     pub const fn gui_sprite(self) -> &'static str {
         match self {
-            Self::CoalGenerator
-            | Self::BioGenerator
-            | Self::SolarGenerator
-            | Self::EnergyBank
-            | Self::EnergyMonitor
+            Self::CoalGenerator => "rusty_factory:gui/coal_generator",
+            Self::BioGenerator => "rusty_factory:gui/bio_generator",
+            Self::SolarGenerator => "rusty_factory:gui/solar_generator",
+            Self::EnergyBank => "rusty_factory:gui/energy_bank",
+            Self::ChargingPad => "rusty_factory:gui/charging_pad",
+            Self::ElectricCrusher => "rusty_factory:gui/electric_crusher",
+            Self::ElectricFurnace => "rusty_factory:gui/electric_furnace",
+            Self::AlloySmelter => "rusty_factory:gui/alloy_smelter",
+            Self::MechanicalPress => "rusty_factory:gui/mechanical_press",
+            Self::IndustrialAssembler => "rusty_factory:gui/industrial_assembler",
+            Self::Vulcanizer => "rusty_factory:gui/vulcanizer",
+            Self::SapExtractor => "rusty_factory:gui/sap_extractor",
+            Self::Quarry | Self::AutoHarvester => "rusty_factory:gui/quarry",
+            Self::ConveyorBelt | Self::ItemExtractor => "rusty_factory:gui/conveyor",
+            Self::BlockBreaker | Self::BlockPlacer => "rusty_factory:gui/machine",
+            Self::EnergyMonitor
             | Self::FluidTank
             | Self::SteamBoiler
             | Self::FluidPump
             | Self::VoidTrashCan
-            | Self::EnergyRelay
-            | Self::ChargingPad => "rusty_factory:gui/generator",
-            Self::Quarry | Self::AutoHarvester => "rusty_factory:gui/quarry",
-            Self::ConveyorBelt | Self::ItemExtractor => "rusty_factory:gui/conveyor",
-            Self::ElectricCrusher
-            | Self::ElectricFurnace
-            | Self::MechanicalPress
-            | Self::IndustrialAssembler
-            | Self::Vulcanizer
-            | Self::SapExtractor
-            | Self::BlockBreaker
-            | Self::BlockPlacer
-            | Self::AlloySmelter => "rusty_factory:gui/machine",
+            | Self::EnergyRelay => "rusty_factory:gui/machine",
         }
     }
 }
