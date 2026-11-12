@@ -109,7 +109,7 @@ pub(in crate::game) fn container(block: &str, container: &mut Option<ModContaine
                     faces: std::array::from_fn(|_| vec![0]),
                     inputs: vec![0],
                     outputs: vec![0],
-                    menu: Some(rules::MENU.to_owned()),
+                    menu: Some(rules::MENU_SINGLE.to_owned()),
                 });
             }
             MachineKind::EnergyMonitor | MachineKind::EnergyRelay => {
@@ -121,7 +121,7 @@ pub(in crate::game) fn container(block: &str, container: &mut Option<ModContaine
                     faces: std::array::from_fn(|_| vec![0]),
                     inputs: vec![0],
                     outputs: vec![0],
-                    menu: Some(rules::MENU.to_owned()),
+                    menu: Some(rules::MENU_SINGLE.to_owned()),
                 });
             }
             _ => {

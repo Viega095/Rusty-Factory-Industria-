@@ -7,6 +7,7 @@ use std::collections::{HashSet, VecDeque};
 pub const ID: &str = "rusty_factory";
 pub const VERSION: &str = "0.4.1";
 pub const MENU: &str = "rusty_factory:machine";
+pub const MENU_SINGLE: &str = "rusty_factory:single";
 
 // Block IDs (24 blocks)
 pub const BLOCK_CASING: &str = "rusty_factory:machine_casing";
