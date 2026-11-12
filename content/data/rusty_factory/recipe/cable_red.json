@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "RRR",
+    "SSS",
+    "RRR"
+  ],
+  "key": {
+    "R": "rusty_factory:rubber_bar",
+    "S": "minecraft:redstone_block"
+  },
+  "result": {
+    "id": "rusty_factory:cable_red",
+    "count": 6
+  }
+}

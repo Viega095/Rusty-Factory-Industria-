@@ -295,7 +295,7 @@ fn distribute_energy(
     }
     let targets = rules::find_connected_consumers(
         gen_pos,
-        |p| game.native_block(p) == rules::BLOCK_CABLE,
+        |p| rules::is_cable(&game.native_block(p)),
         |p| {
             let Some(k) = MachineKind::from_block_id(&game.native_block(p)) else {
                 return false;
@@ -1926,17 +1926,24 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
                 return;
             }
 
-            if block_id == rules::BLOCK_CABLE {
+            if rules::is_cable(&block_id) {
                 *canceled = true;
+                let limit = rules::cable_transfer_limit(&block_id);
                 let consumers = rules::find_connected_consumers(
                     pos,
-                    |p| game.native_block(p) == rules::BLOCK_CABLE,
+                    |p| rules::is_cable(&game.native_block(p)),
                     |p| MachineKind::from_block_id(&game.native_block(p)).is_some(),
                 );
+                let cable_name = match block_id.as_str() {
+                    rules::BLOCK_CABLE_WHITE => "Cable Blanco [Tier 1]",
+                    rules::BLOCK_CABLE_GOLD => "Cable Amarillo [Tier 3]",
+                    rules::BLOCK_CABLE_RED => "Cable Rojo [Tier 4]",
+                    _ => "Cable Naranja / Cobre [Tier 2]",
+                };
                 if let Some(who) = game.native_acting_player() {
                     game.native_action_bar(
                         who.uuid,
-                        Text::literal(format!("⚡ [Cable de Cobre] Red: {} máquinas conectadas", consumers.len())),
+                        Text::literal(format!("⚡ [{cable_name}] Capacidad: {limit} FE/t | {} máquinas conectadas", consumers.len())),
                     );
                 }
                 return;
@@ -1975,18 +1982,21 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
             }
         }
 
-        // 2. Treetap: Harvest extra sap & saplings from Rubber Sap Log
+        // 2. Treetap: Harvest extra sap & saplings from Rubber Sap Log with durability consumption
         if held_id == rules::ITEM_TREETAP && block_id == rules::BLOCK_RUBBER_SAP_LOG {
             *canceled = true;
             let has_sap = game.native_block_property(pos, "lit").as_deref() == Some("true");
             if has_sap {
                 game.native_set_block_property(pos, "lit", "false");
-                game.native_give_items(rules::ITEM_RAW_SAP, 4);
+                game.native_give_items(rules::ITEM_RAW_SAP, 3);
                 game.native_give_items(rules::BLOCK_RUBBER_SAPLING, 1);
+                game.damage_held(1);
+                game.native_run_command("playsound minecraft:item.honey_bottle.drink player @s ~ ~ ~ 1.0 1.2");
+                game.native_run_command("particle minecraft:dripping_honey ~ ~0.5 ~ 0.2 0.2 0.2 0.05 12");
                 if let Some(who) = game.native_acting_player() {
                     game.native_action_bar(
                         who.uuid,
-                        Text::literal("💧 [Espita de Madera] ¡4x Savia recolectada con éxito!"),
+                        Text::literal("💧 [Espita de Madera] ¡Savia recolectada! (-1 durabilidad)"),
                     );
                 }
             } else if let Some(who) = game.native_acting_player() {
@@ -2207,7 +2217,7 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
         *canceled = true;
         let consumers = rules::find_connected_consumers(
             pos,
-            |p| game.native_block(p) == rules::BLOCK_CABLE,
+            |p| rules::is_cable(&game.native_block(p)),
             |p| MachineKind::from_block_id(&game.native_block(p)).is_some(),
         );
         let mut total_energy = 0;
@@ -2289,7 +2299,7 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
         return;
     }
 
-    if block_id == rules::BLOCK_CABLE {
+    if rules::is_cable(&block_id) {
         return;
     }
 
@@ -2832,7 +2842,10 @@ pub(in crate::game) fn perform(game: &mut Game<'_>, line: &str, ran: &mut bool) 
         "rusty_factory:coal_generator 2",
         "rusty_factory:solar_generator 9",
         "rusty_factory:energy_bank 4",
-        "rusty_factory:copper_cable 32",
+        "rusty_factory:cable_white 16",
+        "rusty_factory:copper_cable 16",
+        "rusty_factory:cable_gold 16",
+        "rusty_factory:cable_red 16",
         "rusty_factory:item_pipe 32",
         "rusty_factory:item_extractor 4",
         "rusty_factory:conveyor_belt 32",

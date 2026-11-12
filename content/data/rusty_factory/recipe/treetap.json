@@ -4,11 +4,10 @@
   "pattern": [
     " P ",
     "PPP",
-    "P C"
+    "P  "
   ],
   "key": {
-    "P": "minecraft:oak_planks",
-    "C": "minecraft:copper_ingot"
+    "P": "minecraft:oak_planks"
   },
   "result": {
     "id": "rusty_factory:treetap",

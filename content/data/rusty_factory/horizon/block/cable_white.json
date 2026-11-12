@@ -1,0 +1,12 @@
+{
+  "template": "minecraft:chorus_plant",
+  "connects_to": "#rusty_factory:energy_connectable",
+  "thickness": 6.0,
+  "properties": {
+    "hardness": 1.5,
+    "explosion_resistance": 3.0,
+    "requires_tool": false,
+    "sounds": "minecraft:copper_block",
+    "occludes": false
+  }
+}

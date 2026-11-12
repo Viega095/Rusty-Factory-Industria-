@@ -2,13 +2,13 @@
   "type": "minecraft:crafting_shaped",
   "category": "redstone",
   "pattern": [
-    "CCC",
     "RRR",
-    "CCC"
+    "CCC",
+    "RRR"
   ],
   "key": {
-    "C": "minecraft:copper_ingot",
-    "R": "minecraft:redstone"
+    "R": "rusty_factory:rubber_bar",
+    "C": "minecraft:copper_ingot"
   },
   "result": {
     "id": "rusty_factory:copper_cable",

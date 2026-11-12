@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "building",
+  "ingredients": [
+    "rusty_factory:rubber_sap_log"
+  ],
+  "result": {
+    "id": "rusty_factory:rubber_planks",
+    "count": 4
+  }
+}

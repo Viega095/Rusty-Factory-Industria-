@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "RRR",
+    "III",
+    "RRR"
+  ],
+  "key": {
+    "R": "rusty_factory:rubber_bar",
+    "I": "minecraft:iron_nugget"
+  },
+  "result": {
+    "id": "rusty_factory:cable_white",
+    "count": 6
+  }
+}

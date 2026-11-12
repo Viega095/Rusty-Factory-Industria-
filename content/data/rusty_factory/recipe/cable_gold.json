@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "RRR",
+    "GGG",
+    "RRR"
+  ],
+  "key": {
+    "R": "rusty_factory:rubber_bar",
+    "G": "minecraft:gold_ingot"
+  },
+  "result": {
+    "id": "rusty_factory:cable_gold",
+    "count": 6
+  }
+}

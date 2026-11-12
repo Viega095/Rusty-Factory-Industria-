@@ -15,6 +15,30 @@ pub const BLOCK_BIO_GENERATOR: &str = "rusty_factory:bio_generator";
 pub const BLOCK_SOLAR: &str = "rusty_factory:solar_generator";
 pub const BLOCK_ENERGY_BANK: &str = "rusty_factory:energy_bank";
 pub const BLOCK_CABLE: &str = "rusty_factory:copper_cable";
+pub const BLOCK_CABLE_WHITE: &str = "rusty_factory:cable_white";
+pub const BLOCK_CABLE_COPPER: &str = "rusty_factory:copper_cable";
+pub const BLOCK_CABLE_GOLD: &str = "rusty_factory:cable_gold";
+pub const BLOCK_CABLE_RED: &str = "rusty_factory:cable_red";
+
+pub fn is_cable(block: &str) -> bool {
+    matches!(
+        block,
+        BLOCK_CABLE_WHITE
+            | BLOCK_CABLE_COPPER
+            | BLOCK_CABLE_GOLD
+            | BLOCK_CABLE_RED
+    )
+}
+
+pub fn cable_transfer_limit(block: &str) -> i32 {
+    match block {
+        BLOCK_CABLE_WHITE => 120,
+        BLOCK_CABLE_COPPER => 360,
+        BLOCK_CABLE_GOLD => 1_200,
+        BLOCK_CABLE_RED => 10_000,
+        _ => 360,
+    }
+}
 pub const BLOCK_ITEM_PIPE: &str = "rusty_factory:item_pipe";
 pub const BLOCK_EXTRACTOR: &str = "rusty_factory:item_extractor";
 pub const BLOCK_CRUSHER: &str = "rusty_factory:electric_crusher";
