@@ -112,7 +112,10 @@ pub(in crate::game) fn container(block: &str, container: &mut Option<ModContaine
                     menu: Some(rules::MENU_SINGLE.to_owned()),
                 });
             }
-            MachineKind::EnergyMonitor | MachineKind::EnergyRelay => {
+            MachineKind::EnergyMonitor
+            | MachineKind::EnergyRelay
+            | MachineKind::ConveyorBelt
+            | MachineKind::ItemPipe => {
                 *container = None;
             }
             MachineKind::EnergyBank => {
@@ -191,7 +194,6 @@ fn is_item_container_block(block_id: &str) -> bool {
             | rules::BLOCK_VULCANIZER
             | rules::BLOCK_SAP_EXTRACTOR
             | rules::BLOCK_PLACER
-            | rules::BLOCK_CONVEYOR
             | rules::BLOCK_GENERATOR
             | rules::BLOCK_BIO_GENERATOR
             | rules::BLOCK_TRASH_CAN
@@ -232,30 +234,155 @@ fn grow_rubber_tree(game: &mut Game<'_>, pos: [i32; 3]) {
     }
 }
 
-/// Routes `stack` from `source_pos` into connected `rusty_factory:item_pipe` networks or adjacent containers.
+/// Inserts `stack` onto a conveyor belt's `MachineState` if it is empty or can batch more of the same item.
+/// Returns `None` if all items were accepted, or `Some(leftover)`.
+fn insert_into_conveyor(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) -> Option<ItemStack> {
+    let block = game.native_block(pos);
+    let Some((_, max_batch)) = rules::conveyor_tier(&block) else {
+        return Some(stack);
+    };
+    let mut accepted = 0u32;
+    let changed = game.native_with_mod_block_entity(pos, |entity| {
+        let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ConveyorBelt));
+        if !st.enabled {
+            return false;
+        }
+        let item_id = stack.item.to_string();
+        if st.belt_item.is_empty() {
+            let take = stack.count.min(max_batch);
+            st.belt_item = item_id;
+            st.belt_count = take;
+            st.progress = 0;
+            accepted = take;
+            store_state(entity, &st);
+            true
+        } else if st.belt_item == item_id && st.belt_count < max_batch {
+            let space = max_batch - st.belt_count;
+            let take = stack.count.min(space);
+            st.belt_count += take;
+            accepted = take;
+            store_state(entity, &st);
+            true
+        } else {
+            false
+        }
+    });
+    if changed == Some(true) && accepted > 0 {
+        game.native_block_entity_sync(pos);
+        if stack.count > accepted {
+            let mut rest = stack;
+            rest.count -= accepted;
+            Some(rest)
+        } else {
+            None
+        }
+    } else {
+        Some(stack)
+    }
+}
+
+/// Inserts `stack` into an `item_pipe`'s `ModBlockEntity` so it visibly travels through the glass tube.
+fn insert_into_pipe(
+    game: &mut Game<'_>,
+    from_pos: [i32; 3],
+    pipe_pos: [i32; 3],
+    stack: ItemStack,
+    target_pos: Option<[i32; 3]>,
+) -> Option<ItemStack> {
+    if game.native_block(pipe_pos) != rules::BLOCK_ITEM_PIPE {
+        return Some(stack);
+    }
+    let from_off = [from_pos[0] - pipe_pos[0], from_pos[1] - pipe_pos[1], from_pos[2] - pipe_pos[2]];
+    let from_dir = rules::dir_index_from_offset(from_off);
+    let next_step = rules::find_next_pipe_step(
+        pipe_pos,
+        target_pos,
+        |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE && p != from_pos,
+        |p| p != from_pos && (is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p))),
+    );
+    let (to_dir, final_target) = if let Some((step, tgt)) = next_step {
+        let to_off = [step[0] - pipe_pos[0], step[1] - pipe_pos[1], step[2] - pipe_pos[2]];
+        (rules::dir_index_from_offset(to_off), Some(tgt))
+    } else {
+        (rules::opposite_dir_index(from_dir), target_pos)
+    };
+
+    let inserted = game.native_with_mod_block_entity(pipe_pos, |entity| {
+        let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ItemPipe));
+        if !st.belt_item.is_empty() {
+            return false;
+        }
+        st.belt_item = stack.item.to_string();
+        st.belt_count = stack.count;
+        st.progress = 0;
+        st.pipe_from = from_dir;
+        st.pipe_to = to_dir;
+        if let Some(t) = final_target {
+            st.pipe_target = t;
+            st.pipe_has_target = true;
+        } else {
+            st.pipe_has_target = false;
+        }
+        store_state(entity, &st);
+        true
+    });
+    if inserted == Some(true) {
+        game.native_block_entity_sync(pipe_pos);
+        None
+    } else {
+        Some(stack)
+    }
+}
+
+/// Routes `stack` from `source_pos` into connected `rusty_factory:item_pipe` networks (step-by-step visible travel)
+/// or directly into adjacent containers / conveyor belts.
 /// Returns the remaining stack (`None` if all items were inserted).
 fn route_item_from(game: &mut Game<'_>, source_pos: [i32; 3], mut stack: ItemStack) -> Option<ItemStack> {
-    let targets = rules::find_connected_item_targets(
-        source_pos,
-        |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
-        |p| is_item_container_block(&game.native_block(p)),
-    );
-
-    for target_pos in targets {
-        if stack.count == 0 {
-            return None;
-        }
-        // Try inserting through Up first (inputs for furnaces/machines), then North
-        match game.native_insert_item(target_pos, Direction::Up, stack) {
-            None => return None,
-            Some(rest) => {
-                stack = match game.native_insert_item(target_pos, Direction::North, rest) {
-                    None => return None,
-                    Some(r2) => r2,
-                };
+    // 1. Try direct adjacent containers first (except conveyors)
+    for d in rules::DIRS {
+        let adj = [source_pos[0] + d[0], source_pos[1] + d[1], source_pos[2] + d[2]];
+        let blk = game.native_block(adj);
+        if !rules::is_conveyor_block(&blk) && is_item_container_block(&blk) {
+            match game.native_insert_item(adj, Direction::Up, stack) {
+                None => return None,
+                Some(rest) => {
+                    stack = match game.native_insert_item(adj, Direction::North, rest) {
+                        None => return None,
+                        Some(r2) => r2,
+                    };
+                }
             }
         }
     }
+
+    // 2. Try adjacent item_pipes if the network has a reachable target
+    let targets = rules::find_connected_item_targets(
+        source_pos,
+        |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
+        |p| p != source_pos && (is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p))),
+    );
+    if let Some(&first_target) = targets.first() {
+        for d in rules::DIRS {
+            let adj = [source_pos[0] + d[0], source_pos[1] + d[1], source_pos[2] + d[2]];
+            if game.native_block(adj) == rules::BLOCK_ITEM_PIPE {
+                if insert_into_pipe(game, source_pos, adj, stack.clone(), Some(first_target)).is_none() {
+                    return None;
+                }
+            }
+        }
+    }
+
+    // 3. Try adjacent conveyor belts
+    for d in rules::DIRS {
+        let adj = [source_pos[0] + d[0], source_pos[1] + d[1], source_pos[2] + d[2]];
+        if rules::is_conveyor_block(&game.native_block(adj)) {
+            match insert_into_conveyor(game, adj, stack) {
+                None => return None,
+                Some(rest) => stack = rest,
+            }
+        }
+    }
+
     Some(stack)
 }
 
@@ -346,10 +473,78 @@ fn update_lit_state(game: &mut Game<'_>, pos: [i32; 3], working: bool) {
     }
 }
 
-/// Simulates the Conveyor Belt:
+/// Simulates the Pneumatic Item Pipe (`rusty_factory:item_pipe`):
+/// Advances the travelling item smoothly from `pipe_from` to `pipe_to`,
+/// then hands it off to the next pipe, conveyor belt, or destination container.
+fn tick_item_pipe(
+    game: &mut Game<'_>,
+    pos: [i32; 3],
+    entity: &mut ModBlockEntity,
+    state: &mut MachineState,
+) {
+    if state.belt_item.is_empty() {
+        return;
+    }
+    const PIPE_TICKS: i32 = 10;
+    if state.progress < PIPE_TICKS {
+        state.progress += 1;
+        store_state(entity, state);
+        game.native_block_entity_sync(pos);
+        if state.progress < PIPE_TICKS {
+            return;
+        }
+    }
+
+    let from_off = rules::offset_from_dir_index(state.pipe_from);
+    let from_pos = [pos[0] + from_off[0], pos[1] + from_off[1], pos[2] + from_off[2]];
+    let preferred = if state.pipe_has_target { Some(state.pipe_target) } else { None };
+    let next_step = rules::find_next_pipe_step(
+        pos,
+        preferred,
+        |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE && p != from_pos,
+        |p| p != from_pos && (is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p))),
+    );
+
+    let Some((step_pos, final_target)) = next_step else {
+        return;
+    };
+
+    let stack = ItemStack::new(&state.belt_item, state.belt_count.max(1));
+    let step_block = game.native_block(step_pos);
+    let leftover = if step_block == rules::BLOCK_ITEM_PIPE {
+        insert_into_pipe(game, pos, step_pos, stack, Some(final_target))
+    } else if rules::is_conveyor_block(&step_block) {
+        insert_into_conveyor(game, step_pos, stack)
+    } else {
+        match game.native_insert_item(step_pos, Direction::Up, stack) {
+            None => None,
+            Some(rest) => game.native_insert_item(step_pos, Direction::North, rest),
+        }
+    };
+
+    match leftover {
+        None => {
+            state.belt_item.clear();
+            state.belt_count = 0;
+            state.progress = 0;
+            state.pipe_has_target = false;
+            store_state(entity, state);
+            game.native_block_entity_sync(pos);
+        }
+        Some(rest) if rest.count < state.belt_count => {
+            state.belt_count = rest.count;
+            store_state(entity, state);
+            game.native_block_entity_sync(pos);
+        }
+        Some(_) => {}
+    }
+}
+
+/// Simulates the Tiered Conveyor Belt (straight, turn_left, turn_right, up, down):
 /// 1. Picks up dropped items in the world lying on top of the belt.
 /// 2. Optionally pulls items from a container behind the belt (`auto_io`).
-/// 3. Moves carried items forward into the block in front (next belt, pipe network, chest, or machine).
+/// 3. Smoothly advances `state.progress` from `0` to `max_ticks` (20 / 10 / 5 by tier).
+/// 4. At the end of the animation, pushes into the next belt/pipe/container, OR drops into the world if at the end!
 fn tick_conveyor(
     game: &mut Game<'_>,
     pos: [i32; 3],
@@ -357,10 +552,15 @@ fn tick_conveyor(
     state: &mut MachineState,
 ) {
     let dim = game.native_dimension();
+    let (max_ticks, max_batch) = rules::conveyor_tier(&entity.id).unwrap_or((20, 1));
     let facing = game
         .native_block_property(pos, "facing")
         .unwrap_or_else(|| "north".to_owned());
-    let (front_off, back_off) = rules::conveyor_offsets(&facing);
+    let shape = game
+        .native_block_property(pos, "shape")
+        .unwrap_or_else(|| "straight".to_owned());
+    let front_off = rules::conveyor_exit_offset(&facing, &shape);
+    let (_, back_off) = rules::conveyor_offsets(&facing);
     let front_pos = [
         pos[0] + front_off[0],
         pos[1] + front_off[1],
@@ -368,37 +568,47 @@ fn tick_conveyor(
     ];
     let back_pos = [
         pos[0] + back_off[0],
-        pos[1] + back_off[1],
+        pos[1] + (if shape == "down" { 1 } else { 0 }) + back_off[1],
         pos[2] + back_off[2],
     ];
 
-    // 1. Pick up dropped item entities lying on the belt if SLOT_INPUT is empty
-    if entity.items[rules::SLOT_INPUT].is_none() {
+    // 1. Pick up dropped item entities lying on top of this belt if empty
+    if state.belt_item.is_empty() {
         let dropped = game.native_item_entities(
             dim,
-            [pos[0] as f64, pos[1] as f64, pos[2] as f64],
-            [pos[0] as f64 + 1.0, pos[1] as f64 + 1.15, pos[2] as f64 + 1.0],
+            [pos[0] as f64 + 0.1, pos[1] as f64, pos[2] as f64 + 0.1],
+            [pos[0] as f64 + 0.9, pos[1] as f64 + 1.15, pos[2] as f64 + 0.9],
         );
         if let Some(first) = dropped.first() {
-            entity.items[rules::SLOT_INPUT] = Some(first.stack.clone());
-            let mut empty = first.stack.clone();
-            empty.count = 0;
-            game.native_set_item_entity(dim, first.id, empty);
+            let take = first.stack.count.min(max_batch);
+            state.belt_item = first.stack.item.to_string();
+            state.belt_count = take;
+            state.progress = 0;
+            let mut rem = first.stack.clone();
+            rem.count = first.stack.count.saturating_sub(take);
+            game.native_set_item_entity(dim, first.id, rem);
+            store_state(entity, state);
+            game.native_block_entity_sync(pos);
+            return;
         }
     }
 
-    // 2. If Auto-Pull (`state.auto_io`) is enabled and belt is empty, pull 1 item from container behind
-    if state.auto_io && entity.items[rules::SLOT_INPUT].is_none() {
+    // 2. If Auto-Pull (`state.auto_io`) is enabled and belt is empty, pull up to `max_batch` from container behind
+    if state.auto_io && state.belt_item.is_empty() {
         let back_block = game.native_block(back_pos);
-        if back_block != rules::BLOCK_CONVEYOR && is_item_container_block(&back_block) {
+        if !rules::is_conveyor_block(&back_block) && is_item_container_block(&back_block) {
             if let Some(slots) = game.native_container_slots(dim, back_pos, Direction::Down) {
                 for s in slots {
                     if s.can_take && s.stack.is_some() {
                         if let Some(pulled) =
-                            game.native_extract_item(dim, back_pos, Direction::Down, s.slot, 1)
+                            game.native_extract_item(dim, back_pos, Direction::Down, s.slot, max_batch)
                         {
-                            entity.items[rules::SLOT_INPUT] = Some(pulled);
-                            break;
+                            state.belt_item = pulled.item.to_string();
+                            state.belt_count = pulled.count;
+                            state.progress = 0;
+                            store_state(entity, state);
+                            game.native_block_entity_sync(pos);
+                            return;
                         }
                     }
                 }
@@ -406,45 +616,69 @@ fn tick_conveyor(
         }
     }
 
-    // 3. When progress reaches 0, push 1 item forward into the block in front (or pipe network)
-    if state.progress == 0 {
-        for slot in [rules::SLOT_INPUT, rules::SLOT_OUTPUT, rules::SLOT_FUEL] {
-            if let Some(stack) = entity.items.get(slot).cloned().flatten() {
-                let mut one = stack.clone();
-                one.count = 1;
-                let front_block = game.native_block(front_pos);
-                let leftover = if front_block == rules::BLOCK_ITEM_PIPE {
-                    route_item_from(game, pos, one)
-                } else {
-                    match game.native_insert_item(front_pos, Direction::Up, one) {
-                        None => None,
-                        Some(r) => game.native_insert_item(front_pos, Direction::North, r),
-                    }
-                };
-                if leftover.is_none() {
-                    if stack.count > 1 {
-                        if let Some(Some(s)) = entity.items.get_mut(slot) {
-                            s.count -= 1;
-                        }
-                    } else {
-                        entity.items[slot] = None;
-                    }
-                    break;
-                }
-            }
-        }
+    if state.belt_item.is_empty() {
+        return;
     }
 
-    // Sync the visible belt item ID for 3D rendering on the belt
-    let current_item = entity
-        .items
-        .iter()
-        .find_map(|s| s.as_ref().map(|st| st.item.to_string()))
-        .unwrap_or_default();
-    if state.belt_item != current_item {
-        state.belt_item = current_item;
+    // 3. Advance smooth travel progress up to `max_ticks`
+    if state.progress < max_ticks {
+        state.progress += 1;
         store_state(entity, state);
         game.native_block_entity_sync(pos);
+        if state.progress < max_ticks {
+            return;
+        }
+    }
+
+    // 4. Animation finished: push forward into next belt/pipe/container, OR drop into world at the end!
+    let stack = ItemStack::new(&state.belt_item, state.belt_count.max(1));
+    let front_block = game.native_block(front_pos);
+    let mut dropped_at_end = false;
+    let leftover = if rules::is_conveyor_block(&front_block) {
+        insert_into_conveyor(game, front_pos, stack)
+    } else if front_block == rules::BLOCK_ITEM_PIPE {
+        insert_into_pipe(game, pos, front_pos, stack, None)
+    } else if is_item_container_block(&front_block) {
+        match game.native_insert_item(front_pos, Direction::Up, stack) {
+            None => None,
+            Some(r) => game.native_insert_item(front_pos, Direction::North, r),
+        }
+    } else if front_block == "minecraft:air" || front_block == "minecraft:cave_air" || front_block == "minecraft:void_air" {
+        let drop_pos = [
+            pos[0] as f64 + 0.5 + front_off[0] as f64 * 0.68,
+            pos[1] as f64 + if shape == "up" { 1.12 } else { 0.32 },
+            pos[2] as f64 + 0.5 + front_off[2] as f64 * 0.68,
+        ];
+        let vel = [
+            front_off[0] as f64 * 0.10,
+            0.06,
+            front_off[2] as f64 * 0.10,
+        ];
+        game.spawn_item(stack, drop_pos, vel, 10);
+        dropped_at_end = true;
+        None
+    } else {
+        // Blocked by a solid non-container block at the end: check if there's a belt 1 block below (step-down)
+        let below_front = [front_pos[0], front_pos[1] - 1, front_pos[2]];
+        if rules::is_conveyor_block(&game.native_block(below_front)) {
+            insert_into_conveyor(game, below_front, stack)
+        } else {
+            Some(stack)
+        }
+    };
+
+    if dropped_at_end || leftover.is_none() {
+        state.belt_item.clear();
+        state.belt_count = 0;
+        state.progress = 0;
+        store_state(entity, state);
+        game.native_block_entity_sync(pos);
+    } else if let Some(rest) = leftover {
+        if rest.count < state.belt_count {
+            state.belt_count = rest.count;
+            store_state(entity, state);
+            game.native_block_entity_sync(pos);
+        }
     }
 }
 
@@ -1012,7 +1246,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         | MachineKind::VoidTrashCan
         | MachineKind::FluidTank
         | MachineKind::FluidPump => 1,
-        MachineKind::EnergyMonitor | MachineKind::EnergyRelay => 0,
+        MachineKind::EnergyMonitor
+        | MachineKind::EnergyRelay
+        | MachineKind::ConveyorBelt
+        | MachineKind::ItemPipe => 0,
         _ => rules::SLOTS,
     };
     if entity.items.len() < min_slots {
@@ -1029,25 +1266,16 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         .filter(|s| &*s.item == rules::ITEM_FORTUNE_UPGRADE)
         .map_or(0, |s| s.count);
 
+    if kind == MachineKind::ItemPipe {
+        tick_item_pipe(game, pos, entity, &mut state);
+        store_state(entity, &state);
+        return;
+    }
+
     if kind == MachineKind::ConveyorBelt {
-        let outcome = rules::step_machine(&mut state, None, None, None, speed_upgrades);
         if state.enabled {
             tick_conveyor(game, pos, entity, &mut state);
         }
-        let period = rules::effective_work_ticks(kind, speed_upgrades).max(1);
-        let pct = ((state.progress * 100) / period).clamp(0, 100);
-        entity.data = vec![
-            outcome.status as i32,
-            0,
-            1,
-            pct,
-            0,
-            i32::from(state.enabled),
-            i32::from(state.auto_io),
-            0,
-            0,
-            0,
-        ];
         store_state(entity, &state);
         return;
     }
@@ -1661,7 +1889,8 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
 }
 
 /// 3D Block Entity Renderer (`native_block_entity_submit`):
-/// Renders items smoothly gliding along the top of the 3D Conveyor Belt!
+/// Renders items smoothly gliding along Tiered Conveyor Belts (straight, left/right curves, up/down slopes)
+/// AND travelling visibly inside glass Pneumatic Item Pipes!
 pub(in crate::game) fn submit(
     game: &Game<'_>,
     pos: [i32; 3],
@@ -1670,9 +1899,54 @@ pub(in crate::game) fn submit(
     entity: &ModBlockEntity,
     draw: &mut BlockEntityDraw,
 ) {
-    if !game.native_on(rules::ID) || block != rules::BLOCK_CONVEYOR {
+    if !game.native_on(rules::ID) {
         return;
     }
+
+    if block == rules::BLOCK_ITEM_PIPE {
+        let Some(st) = load_state(entity) else {
+            return;
+        };
+        if st.belt_item.is_empty() {
+            return;
+        }
+        let t = ((st.progress as f32 + if st.progress < 10 { draw.partial } else { 0.0 }) / 10.0).clamp(0.0, 1.0);
+        let from_off = rules::offset_from_dir_index(st.pipe_from);
+        let to_off = rules::offset_from_dir_index(st.pipe_to);
+        let (ix, iy, iz) = if t < 0.5 {
+            let u = t * 2.0;
+            (
+                0.5 + from_off[0] as f32 * 0.5 * (1.0 - u),
+                0.5 + from_off[1] as f32 * 0.5 * (1.0 - u),
+                0.5 + from_off[2] as f32 * 0.5 * (1.0 - u),
+            )
+        } else {
+            let u = (t - 0.5) * 2.0;
+            (
+                0.5 + to_off[0] as f32 * 0.5 * u,
+                0.5 + to_off[1] as f32 * 0.5 * u,
+                0.5 + to_off[2] as f32 * 0.5 * u,
+            )
+        };
+        let stack = ItemStack::new(&st.belt_item, 1);
+        draw.push();
+        draw.translate([ix, iy, iz]);
+        draw.rotate_about([0.0, 1.0, 0.0], (draw.game_time as f32 + draw.partial) * 4.0, [0.0, 0.0, 0.0]);
+        draw.scale([0.30, 0.30, 0.30]);
+        let _ = game.native_draw_item(
+            draw,
+            &stack,
+            DisplayContext::Fixed,
+            None,
+            pos[0].wrapping_mul(31) ^ pos[2],
+        );
+        draw.pop();
+        return;
+    }
+
+    let Some((max_ticks, _)) = rules::conveyor_tier(block) else {
+        return;
+    };
     let Some(st) = load_state(entity) else {
         return;
     };
@@ -1682,26 +1956,85 @@ pub(in crate::game) fn submit(
     let facing = game
         .native_block_state_property(state, "facing")
         .unwrap_or("north");
-    // Smooth belt motion from back (0.18) to front (0.82) along the facing axis
-    let t = if st.enabled {
-        ((draw.game_time as f32 + draw.partial) * 0.08).rem_euclid(1.0)
-    } else {
-        0.5
-    };
-    let travel = 0.18 + t * 0.64;
-    let (ix, iz, yaw) = match facing {
-        "north" => (0.5, 1.0 - travel, 0.0),
-        "south" => (0.5, travel, 180.0),
-        "east" => (travel, 0.5, 270.0),
-        "west" => (1.0 - travel, 0.5, 90.0),
-        _ => (0.5, 1.0 - travel, 0.0),
+    let shape = game
+        .native_block_state_property(state, "shape")
+        .unwrap_or("straight");
+
+    let t = ((st.progress as f32 + if st.enabled && st.progress < max_ticks { draw.partial } else { 0.0 })
+        / max_ticks as f32)
+        .clamp(0.0, 1.0);
+
+    let (_front_off, back_off) = rules::conveyor_offsets(facing);
+    let exit_off = rules::conveyor_exit_offset(facing, shape);
+
+    let (ix, iy, iz, yaw) = match shape {
+        "turn_left" | "turn_right" => {
+            let base_yaw = match facing {
+                "north" => 0.0,
+                "south" => 180.0,
+                "east" => 270.0,
+                "west" => 90.0,
+                _ => 0.0,
+            };
+            if t < 0.5 {
+                let u = t * 2.0;
+                (
+                    0.5 + back_off[0] as f32 * 0.45 * (1.0 - u),
+                    0.28,
+                    0.5 + back_off[2] as f32 * 0.45 * (1.0 - u),
+                    base_yaw,
+                )
+            } else {
+                let u = (t - 0.5) * 2.0;
+                let turn_delta = if shape == "turn_left" { 90.0 } else { -90.0 };
+                (
+                    0.5 + exit_off[0] as f32 * 0.45 * u,
+                    0.28,
+                    0.5 + exit_off[2] as f32 * 0.45 * u,
+                    base_yaw + turn_delta * u,
+                )
+            }
+        }
+        "up" => {
+            let travel = 0.08 + t * 0.84;
+            let (x, z, y_rot) = match facing {
+                "north" => (0.5, 1.0 - travel, 0.0),
+                "south" => (0.5, travel, 180.0),
+                "east" => (travel, 0.5, 270.0),
+                "west" => (1.0 - travel, 0.5, 90.0),
+                _ => (0.5, 1.0 - travel, 0.0),
+            };
+            (x, 0.28 + t * 0.85, z, y_rot)
+        }
+        "down" => {
+            let travel = 0.08 + t * 0.84;
+            let (x, z, y_rot) = match facing {
+                "north" => (0.5, 1.0 - travel, 0.0),
+                "south" => (0.5, travel, 180.0),
+                "east" => (travel, 0.5, 270.0),
+                "west" => (1.0 - travel, 0.5, 90.0),
+                _ => (0.5, 1.0 - travel, 0.0),
+            };
+            (x, 1.13 - t * 0.85, z, y_rot)
+        }
+        _ => {
+            let travel = 0.12 + t * 0.76;
+            let (x, z, y_rot) = match facing {
+                "north" => (0.5, 1.0 - travel, 0.0),
+                "south" => (0.5, travel, 180.0),
+                "east" => (travel, 0.5, 270.0),
+                "west" => (1.0 - travel, 0.5, 90.0),
+                _ => (0.5, 1.0 - travel, 0.0),
+            };
+            (x, 0.28, z, y_rot)
+        }
     };
 
     let stack = ItemStack::new(&st.belt_item, 1);
     draw.push();
-    draw.translate([ix, 0.52, iz]);
+    draw.translate([ix, iy, iz]);
     draw.rotate_about([0.0, 1.0, 0.0], yaw, [0.0, 0.0, 0.0]);
-    draw.scale([0.52, 0.52, 0.52]);
+    draw.scale([0.46, 0.46, 0.46]);
     let _ = game.native_draw_item(
         draw,
         &stack,
@@ -1878,7 +2211,78 @@ pub(in crate::game) fn world_primitives(
     }
 }
 
-/// Inspects networks, harvests sap from Rubber Tree Sap Cavities, grows Rubber Saplings, rotates/dismantles machines with Wrench, or uses tools.
+/// Auto-shapes Conveyor Belts (straight / turn_left / turn_right / up / down) on placement!
+pub(in crate::game) fn place_block(game: &mut Game<'_>, pos: [i32; 3]) {
+    if !game.native_on(rules::ID) {
+        return;
+    }
+    let block_id = game.native_block(pos);
+    if !rules::is_conveyor_block(&block_id) {
+        return;
+    }
+    let facing = game
+        .native_block_property(pos, "facing")
+        .unwrap_or_else(|| "north".to_owned());
+    let (front_off, back_off) = rules::conveyor_offsets(&facing);
+    let front_up = [pos[0] + front_off[0], pos[1] + 1, pos[2] + front_off[2]];
+    let back_up = [pos[0] + back_off[0], pos[1] + 1, pos[2] + back_off[2]];
+    let front_pos = [pos[0] + front_off[0], pos[1], pos[2] + front_off[2]];
+
+    let is_linkable = |p: [i32; 3]| {
+        let b = game.native_block(p);
+        rules::is_conveyor_block(&b) || b == rules::BLOCK_ITEM_PIPE || is_item_container_block(&b)
+    };
+
+    let desired_shape = if rules::is_conveyor_block(&game.native_block(front_up)) {
+        "up"
+    } else if rules::is_conveyor_block(&game.native_block(back_up)) {
+        "down"
+    } else if !is_linkable(front_pos) {
+        let left_off = rules::conveyor_exit_offset(&facing, "turn_left");
+        let right_off = rules::conveyor_exit_offset(&facing, "turn_right");
+        let left_pos = [pos[0] + left_off[0], pos[1], pos[2] + left_off[2]];
+        let right_pos = [pos[0] + right_off[0], pos[1], pos[2] + right_off[2]];
+        if is_linkable(left_pos) {
+            "turn_left"
+        } else if is_linkable(right_pos) {
+            "turn_right"
+        } else {
+            "straight"
+        }
+    } else {
+        "straight"
+    };
+    if desired_shape != "straight" {
+        game.native_set_block_property(pos, "shape", desired_shape);
+    }
+}
+
+/// Drops any item currently travelling inside an `item_pipe` or riding on a `conveyor_belt` when broken.
+pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
+    if !game.native_on(rules::ID) {
+        return;
+    }
+    let block_id = game.native_block(pos);
+    if block_id != rules::BLOCK_ITEM_PIPE && !rules::is_conveyor_block(&block_id) {
+        return;
+    }
+    let mut dropped_item: Option<(String, u32)> = None;
+    game.native_with_mod_block_entity(pos, |entity| {
+        if let Some(mut st) = load_state(entity) {
+            if !st.belt_item.is_empty() {
+                dropped_item = Some((st.belt_item.clone(), st.belt_count.max(1)));
+                st.belt_item.clear();
+                st.belt_count = 0;
+                store_state(entity, &st);
+            }
+        }
+    });
+    if let Some((item_id, count)) = dropped_item {
+        game.pop_resource(pos, ItemStack::new(&item_id, count));
+    }
+}
+
+/// Inspects networks, harvests sap from Rubber Tree Sap Cavities, grows Rubber Saplings, interacts with Conveyor Belts (no GUI), rotates/dismantles machines with Wrench, or uses tools.
 pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled: &mut bool) {
     if *canceled {
         return;
@@ -1890,9 +2294,137 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
         .as_ref()
         .is_some_and(|p| p.pose == horizon_client::pose::Pose::Crouching);
 
+    // Direct hand interaction on Conveyor Belts (NO GUI!)
+    if let Some((_, max_batch)) = rules::conveyor_tier(&block_id) {
+        if let Some((ref held_id, _, _)) = held_info {
+            if held_id == rules::ITEM_WRENCH {
+                *canceled = true;
+                if is_crouching {
+                    destroy_block(game, pos);
+                    game.native_give_items(&block_id, 1);
+                    game.native_run_command(&format!(
+                        "setblock {} {} {} minecraft:air destroy",
+                        pos[0], pos[1], pos[2]
+                    ));
+                } else {
+                    let current = game
+                        .native_block_property(pos, "shape")
+                        .unwrap_or_else(|| "straight".to_owned());
+                    let next = match current.as_str() {
+                        "straight" => "turn_left",
+                        "turn_left" => "turn_right",
+                        "turn_right" => "up",
+                        "up" => "down",
+                        _ => "straight",
+                    };
+                    game.native_set_block_property(pos, "shape", next);
+                    if let Some(who) = game.native_acting_player() {
+                        let label = match next {
+                            "turn_left" => "Curva Izquierda",
+                            "turn_right" => "Curva Derecha",
+                            "up" => "Subida (Rampa)",
+                            "down" => "Bajada (Rampa)",
+                            _ => "Recta",
+                        };
+                        game.native_action_bar(
+                            who.uuid,
+                            Text::literal(format!("🔧 [Cinta] Forma: {label}")),
+                        );
+                    }
+                }
+                return;
+            }
+            // Place 1 item from player's hand onto the conveyor belt (unless sneaking to place blocks!)
+            if !is_crouching {
+                *canceled = true;
+                let item_to_put = held_id.clone();
+                let mut placed = false;
+                let changed = game.native_with_mod_block_entity(pos, |entity| {
+                    let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ConveyorBelt));
+                    if st.belt_item.is_empty() {
+                        st.belt_item = item_to_put.clone();
+                        st.belt_count = 1;
+                        st.progress = 0;
+                        store_state(entity, &st);
+                        placed = true;
+                        true
+                    } else if st.belt_item == item_to_put && st.belt_count < max_batch {
+                        st.belt_count += 1;
+                        store_state(entity, &st);
+                        placed = true;
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if changed == Some(true) && placed {
+                    if !game.creative {
+                        if let Some(held) = game.held_mut() {
+                            if held.count > 1 {
+                                held.count -= 1;
+                            } else {
+                                *game.held_mut() = None;
+                            }
+                        }
+                    }
+                    game.native_block_entity_sync(pos);
+                }
+                return;
+            }
+        } else {
+            // Empty hand right-click: collect carried item from the conveyor belt!
+            *canceled = true;
+            let mut taken: Option<(String, u32)> = None;
+            let changed = game.native_with_mod_block_entity(pos, |entity| {
+                let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ConveyorBelt));
+                if !st.belt_item.is_empty() {
+                    taken = Some((st.belt_item.clone(), st.belt_count.max(1)));
+                    st.belt_item.clear();
+                    st.belt_count = 0;
+                    st.progress = 0;
+                    store_state(entity, &st);
+                    true
+                } else {
+                    false
+                }
+            });
+            if changed == Some(true) {
+                if let Some((item_id, count)) = taken {
+                    game.native_give_items(&item_id, count);
+                }
+                game.native_block_entity_sync(pos);
+            }
+            return;
+        }
+    }
+
     if let Some((ref held_id, _, _)) = held_info {
         // 1. Wrench: Rotate machine facing (normal click) or dismantle into inventory (crouch + click)
         if held_id == rules::ITEM_WRENCH {
+            if block_id == rules::BLOCK_ITEM_PIPE {
+                *canceled = true;
+                if is_crouching {
+                    destroy_block(game, pos);
+                    game.native_give_items(&block_id, 1);
+                    game.native_run_command(&format!(
+                        "setblock {} {} {} minecraft:air destroy",
+                        pos[0], pos[1], pos[2]
+                    ));
+                } else {
+                    let targets = rules::find_connected_item_targets(
+                        pos,
+                        |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
+                        |p| is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p)),
+                    );
+                    if let Some(who) = game.native_acting_player() {
+                        game.native_action_bar(
+                            who.uuid,
+                            Text::literal(format!("📦 [Tubería de Ítems] Red: {} destinos conectados", targets.len())),
+                        );
+                    }
+                }
+                return;
+            }
             if let Some(kind) = MachineKind::from_block_id(&block_id) {
                 *canceled = true;
                 if is_crouching {

@@ -1,0 +1,79 @@
+{
+  "variants": {
+    "facing=north,shape=straight": {
+      "model": "rusty_factory:block/conveyor_belt_mk2"
+    },
+    "facing=north,shape=turn_left": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_turn_left"
+    },
+    "facing=north,shape=turn_right": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_turn_right"
+    },
+    "facing=north,shape=up": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_up"
+    },
+    "facing=north,shape=down": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_down"
+    },
+    "facing=east,shape=straight": {
+      "model": "rusty_factory:block/conveyor_belt_mk2",
+      "y": 90
+    },
+    "facing=east,shape=turn_left": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_turn_left",
+      "y": 90
+    },
+    "facing=east,shape=turn_right": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_turn_right",
+      "y": 90
+    },
+    "facing=east,shape=up": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_up",
+      "y": 90
+    },
+    "facing=east,shape=down": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_down",
+      "y": 90
+    },
+    "facing=south,shape=straight": {
+      "model": "rusty_factory:block/conveyor_belt_mk2",
+      "y": 180
+    },
+    "facing=south,shape=turn_left": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_turn_left",
+      "y": 180
+    },
+    "facing=south,shape=turn_right": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_turn_right",
+      "y": 180
+    },
+    "facing=south,shape=up": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_up",
+      "y": 180
+    },
+    "facing=south,shape=down": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_down",
+      "y": 180
+    },
+    "facing=west,shape=straight": {
+      "model": "rusty_factory:block/conveyor_belt_mk2",
+      "y": 270
+    },
+    "facing=west,shape=turn_left": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_turn_left",
+      "y": 270
+    },
+    "facing=west,shape=turn_right": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_turn_right",
+      "y": 270
+    },
+    "facing=west,shape=up": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_up",
+      "y": 270
+    },
+    "facing=west,shape=down": {
+      "model": "rusty_factory:block/conveyor_belt_mk2_down",
+      "y": 270
+    }
+  }
+}

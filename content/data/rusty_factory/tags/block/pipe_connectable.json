@@ -16,6 +16,8 @@
     "rusty_factory:block_breaker",
     "rusty_factory:block_placer",
     "rusty_factory:conveyor_belt",
+    "rusty_factory:conveyor_belt_mk2",
+    "rusty_factory:conveyor_belt_mk3",
     "minecraft:chest",
     "minecraft:trapped_chest",
     "minecraft:barrel",

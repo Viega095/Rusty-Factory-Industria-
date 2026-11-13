@@ -21,6 +21,8 @@
     "rusty_factory:steam_boiler",
     "rusty_factory:void_trash_can",
     "rusty_factory:conveyor_belt",
+    "rusty_factory:conveyor_belt_mk2",
+    "rusty_factory:conveyor_belt_mk3",
     "rusty_factory:electric_crusher",
     "rusty_factory:electric_furnace",
     "rusty_factory:alloy_smelter",

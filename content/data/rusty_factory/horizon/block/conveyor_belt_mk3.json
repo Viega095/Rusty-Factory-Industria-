@@ -1,0 +1,47 @@
+{
+  "template": "minecraft:furnace",
+  "state_properties": {
+    "shape": {
+      "values": ["straight", "turn_left", "turn_right", "up", "down"]
+    }
+  },
+  "shapes": {
+    "property": "shape",
+    "values": {
+      "up": [
+        [0.0625, 0.0, 0.0, 0.9375, 0.5, 1.0],
+        [0.0625, 0.5, 0.0, 0.9375, 1.0, 1.0]
+      ],
+      "down": [
+        [0.0625, 0.0, 0.0, 0.9375, 0.5, 1.0],
+        [0.0625, 0.5, 0.0, 0.9375, 1.0, 1.0]
+      ]
+    },
+    "default": [
+      [0.0625, 0.0, 0.0625, 0.9375, 0.25, 0.9375]
+    ]
+  },
+  "collision_shapes": {
+    "property": "shape",
+    "values": {
+      "up": [
+        [0.0625, 0.0, 0.0, 0.9375, 0.5, 1.0],
+        [0.0625, 0.5, 0.0, 0.9375, 1.0, 1.0]
+      ],
+      "down": [
+        [0.0625, 0.0, 0.0, 0.9375, 0.5, 1.0],
+        [0.0625, 0.5, 0.0, 0.9375, 1.0, 1.0]
+      ]
+    },
+    "default": [
+      [0.0625, 0.0, 0.0625, 0.9375, 0.25, 0.9375]
+    ]
+  },
+  "properties": {
+    "hardness": 2.0,
+    "explosion_resistance": 4.0,
+    "requires_tool": true,
+    "sounds": "minecraft:iron_block",
+    "occludes": false
+  }
+}

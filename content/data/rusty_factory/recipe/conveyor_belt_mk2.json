@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "GCG",
+    "BGB",
+    "GGG"
+  ],
+  "key": {
+    "B": "rusty_factory:conveyor_belt",
+    "G": "minecraft:gold_ingot",
+    "C": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:conveyor_belt_mk2",
+    "count": 2
+  }
+}

@@ -5,18 +5,18 @@
     "top": "rusty_factory:block/conveyor_belt_top",
     "side": "rusty_factory:block/conveyor_belt_side",
     "front": "rusty_factory:block/conveyor_belt_front",
-    "bottom": "rusty_factory:block/machine_casing"
+    "bottom": "rusty_factory:block/conveyor_belt_bottom"
   },
   "elements": [
     {
       "from": [
         2,
-        1,
+        0.5,
         0
       ],
       "to": [
         14,
-        7,
+        3.5,
         16
       ],
       "faces": {
@@ -41,36 +41,36 @@
         "north": {
           "uv": [
             2,
-            9,
+            12,
             14,
-            15
+            16
           ],
           "texture": "#front"
         },
         "south": {
           "uv": [
             2,
-            9,
+            12,
             14,
-            15
+            16
           ],
           "texture": "#front"
         },
         "west": {
           "uv": [
             0,
-            9,
+            12,
             16,
-            15
+            16
           ],
           "texture": "#side"
         },
         "east": {
           "uv": [
             0,
-            9,
+            12,
             16,
-            15
+            16
           ],
           "texture": "#side"
         }
@@ -78,13 +78,13 @@
     },
     {
       "from": [
-        0,
+        1,
         0,
         0
       ],
       "to": [
         2,
-        8,
+        4,
         16
       ],
       "faces": {
@@ -109,7 +109,7 @@
         "north": {
           "uv": [
             0,
-            8,
+            12,
             2,
             16
           ],
@@ -118,7 +118,7 @@
         "south": {
           "uv": [
             14,
-            8,
+            12,
             16,
             16
           ],
@@ -127,7 +127,7 @@
         "west": {
           "uv": [
             0,
-            8,
+            12,
             16,
             16
           ],
@@ -136,7 +136,7 @@
         "east": {
           "uv": [
             0,
-            8,
+            12,
             16,
             16
           ],
@@ -151,43 +151,43 @@
         0
       ],
       "to": [
-        16,
-        8,
+        15,
+        4,
         16
       ],
       "faces": {
         "up": {
           "uv": [
-            14,
             0,
-            16,
+            0,
+            2,
             16
           ],
           "texture": "#top"
         },
         "down": {
           "uv": [
-            14,
             0,
-            16,
+            0,
+            2,
             16
           ],
           "texture": "#bottom"
         },
         "north": {
           "uv": [
-            14,
-            8,
-            16,
+            0,
+            12,
+            2,
             16
           ],
           "texture": "#side"
         },
         "south": {
           "uv": [
-            0,
-            8,
-            2,
+            14,
+            12,
+            16,
             16
           ],
           "texture": "#side"
@@ -195,7 +195,7 @@
         "west": {
           "uv": [
             0,
-            8,
+            12,
             16,
             16
           ],
@@ -204,7 +204,7 @@
         "east": {
           "uv": [
             0,
-            8,
+            12,
             16,
             16
           ],

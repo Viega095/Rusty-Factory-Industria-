@@ -53,6 +53,22 @@ pub const BLOCK_HARVESTER: &str = "rusty_factory:auto_harvester";
 pub const BLOCK_BREAKER: &str = "rusty_factory:block_breaker";
 pub const BLOCK_PLACER: &str = "rusty_factory:block_placer";
 pub const BLOCK_CONVEYOR: &str = "rusty_factory:conveyor_belt";
+pub const BLOCK_CONVEYOR_MK2: &str = "rusty_factory:conveyor_belt_mk2";
+pub const BLOCK_CONVEYOR_MK3: &str = "rusty_factory:conveyor_belt_mk3";
+
+pub fn is_conveyor_block(block: &str) -> bool {
+    matches!(block, BLOCK_CONVEYOR | BLOCK_CONVEYOR_MK2 | BLOCK_CONVEYOR_MK3)
+}
+
+/// Returns `(ticks_per_block, max_stack_per_batch)` for a conveyor belt tier.
+pub fn conveyor_tier(block: &str) -> Option<(i32, u32)> {
+    match block {
+        BLOCK_CONVEYOR => Some((20, 1)),
+        BLOCK_CONVEYOR_MK2 => Some((10, 4)),
+        BLOCK_CONVEYOR_MK3 => Some((5, 16)),
+        _ => None,
+    }
+}
 pub const BLOCK_RUBBER_LOG: &str = "rusty_factory:rubber_log";
 pub const BLOCK_RUBBER_SAP_LOG: &str = "rusty_factory:rubber_sap_log";
 pub const BLOCK_RUBBER_LEAVES: &str = "rusty_factory:rubber_leaves";
@@ -131,6 +147,7 @@ pub enum MachineKind {
     BlockBreaker,
     BlockPlacer,
     ConveyorBelt,
+    ItemPipe,
     EnergyMonitor,
     FluidTank,
     SteamBoiler,
@@ -159,7 +176,8 @@ impl MachineKind {
             BLOCK_HARVESTER => Some(Self::AutoHarvester),
             BLOCK_BREAKER => Some(Self::BlockBreaker),
             BLOCK_PLACER => Some(Self::BlockPlacer),
-            BLOCK_CONVEYOR => Some(Self::ConveyorBelt),
+            BLOCK_CONVEYOR | BLOCK_CONVEYOR_MK2 | BLOCK_CONVEYOR_MK3 => Some(Self::ConveyorBelt),
+            BLOCK_ITEM_PIPE => Some(Self::ItemPipe),
             BLOCK_ENERGY_MONITOR => Some(Self::EnergyMonitor),
             BLOCK_FLUID_TANK => Some(Self::FluidTank),
             BLOCK_STEAM_BOILER => Some(Self::SteamBoiler),
@@ -185,6 +203,7 @@ impl MachineKind {
             | Self::BlockPlacer
             | Self::ItemExtractor
             | Self::ConveyorBelt
+            | Self::ItemPipe
             | Self::FluidPump
             | Self::VoidTrashCan => MachineTier::Tier1,
 
@@ -219,6 +238,7 @@ impl MachineKind {
             Self::BlockBreaker => 5_000,
             Self::BlockPlacer => 2_000,
             Self::ConveyorBelt => 0,
+            Self::ItemPipe => 0,
             Self::EnergyMonitor => 0,
             Self::FluidTank => 0,
             Self::SteamBoiler => 10_000,
@@ -254,7 +274,8 @@ impl MachineKind {
             Self::AutoHarvester => 14,
             Self::BlockBreaker => 18,
             Self::BlockPlacer => 12,
-            Self::ConveyorBelt => 8,
+            Self::ConveyorBelt => 20,
+            Self::ItemPipe => 10,
             Self::AlloySmelter => 50,
         }
     }
@@ -265,7 +286,7 @@ impl MachineKind {
             Self::BioGenerator => 24,  // Generates +24 FE/t from organic/sap fuels
             Self::SolarGenerator => 12, // Base daytime generation +12 FE/t (+24 FE/t in 3x3 array!)
             Self::SteamBoiler => 80,    // Massive +80 FE/t high-pressure steam generation
-            Self::EnergyBank | Self::ItemExtractor | Self::ConveyorBelt | Self::EnergyMonitor | Self::FluidTank | Self::VoidTrashCan | Self::EnergyRelay => 0,
+            Self::EnergyBank | Self::ItemExtractor | Self::ConveyorBelt | Self::ItemPipe | Self::EnergyMonitor | Self::FluidTank | Self::VoidTrashCan | Self::EnergyRelay => 0,
             Self::FluidPump => 15,
             Self::ElectricCrusher => 14,
             Self::ElectricFurnace => 12,
@@ -321,6 +342,7 @@ impl MachineKind {
             Self::BlockBreaker => "block.rusty_factory.block_breaker",
             Self::BlockPlacer => "block.rusty_factory.block_placer",
             Self::ConveyorBelt => "block.rusty_factory.conveyor_belt",
+            Self::ItemPipe => "block.rusty_factory.item_pipe",
             Self::EnergyMonitor => "block.rusty_factory.energy_monitor",
             Self::FluidTank => "block.rusty_factory.fluid_tank",
             Self::SteamBoiler => "block.rusty_factory.steam_boiler",
@@ -356,7 +378,7 @@ impl MachineKind {
             Self::SteamBoiler => "rusty_factory:gui/steam_boiler",
             Self::FluidPump => "rusty_factory:gui/fluid_pump",
             Self::VoidTrashCan => "rusty_factory:gui/void_trash_can",
-            Self::EnergyMonitor | Self::EnergyRelay => "rusty_factory:gui/machine",
+            Self::ItemPipe | Self::EnergyMonitor | Self::EnergyRelay => "rusty_factory:gui/machine",
         }
     }
 }
@@ -415,6 +437,16 @@ pub struct MachineState {
     #[serde(default)]
     pub belt_item: String,
     #[serde(default)]
+    pub belt_count: u32,
+    #[serde(default)]
+    pub pipe_from: u8,
+    #[serde(default)]
+    pub pipe_to: u8,
+    #[serde(default)]
+    pub pipe_target: [i32; 3],
+    #[serde(default)]
+    pub pipe_has_target: bool,
+    #[serde(default)]
     pub fluid_kind: String,
     #[serde(default)]
     pub fluid_amount: i32,
@@ -436,6 +468,11 @@ impl MachineState {
             quarry_mined: 0,
             last_target: [0, 0, 0],
             belt_item: String::new(),
+            belt_count: 0,
+            pipe_from: 6,
+            pipe_to: 6,
+            pipe_target: [0, 0, 0],
+            pipe_has_target: false,
             fluid_kind: String::new(),
             fluid_amount: 0,
         }
@@ -818,6 +855,7 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
         | MachineKind::BlockBreaker
         | MachineKind::BlockPlacer
         | MachineKind::ConveyorBelt
+        | MachineKind::ItemPipe
         | MachineKind::EnergyMonitor
         | MachineKind::FluidTank
         | MachineKind::SteamBoiler
@@ -1238,7 +1276,7 @@ pub fn step_machine(
                 net_energy_rate: 0,
             }
         }
-        MachineKind::ConveyorBelt | MachineKind::ItemExtractor => {
+        MachineKind::ConveyorBelt | MachineKind::ItemExtractor | MachineKind::ItemPipe => {
             let period = effective_work_ticks(state.kind, speed_upgrades);
             state.progress = (state.progress + 1) % period.max(1);
             StepOutcome {
@@ -1539,6 +1577,125 @@ pub fn conveyor_offsets(facing: &str) -> ([i32; 3], [i32; 3]) {
         "west" => ([-1, 0, 0], [1, 0, 0]),
         _ => ([0, 0, -1], [0, 0, 1]),
     }
+}
+
+/// Returns the exit offset for a conveyor belt with `(facing, shape)`.
+pub fn conveyor_exit_offset(facing: &str, shape: &str) -> [i32; 3] {
+    let (front, _) = conveyor_offsets(facing);
+    match shape {
+        "turn_left" => match facing {
+            "north" => [-1, 0, 0],
+            "west" => [0, 0, 1],
+            "south" => [1, 0, 0],
+            "east" => [0, 0, -1],
+            _ => [-1, 0, 0],
+        },
+        "turn_right" => match facing {
+            "north" => [1, 0, 0],
+            "east" => [0, 0, 1],
+            "south" => [-1, 0, 0],
+            "west" => [0, 0, -1],
+            _ => [1, 0, 0],
+        },
+        "up" => [front[0], 1, front[2]],
+        "down" => [front[0], -1, front[2]],
+        _ => front,
+    }
+}
+
+/// Maps a unit cardinal offset to a direction index (`0=N, 1=S, 2=E, 3=W, 4=U, 5=D, 6=Center`).
+pub fn dir_index_from_offset(off: [i32; 3]) -> u8 {
+    match off {
+        [0, 0, -1] => 0,
+        [0, 0, 1] => 1,
+        [1, 0, 0] => 2,
+        [-1, 0, 0] => 3,
+        [0, 1, 0] => 4,
+        [0, -1, 0] => 5,
+        _ => 6,
+    }
+}
+
+pub fn offset_from_dir_index(dir: u8) -> [i32; 3] {
+    match dir {
+        0 => [0, 0, -1],
+        1 => [0, 0, 1],
+        2 => [1, 0, 0],
+        3 => [-1, 0, 0],
+        4 => [0, 1, 0],
+        5 => [0, -1, 0],
+        _ => [0, 0, 0],
+    }
+}
+
+pub fn opposite_dir_index(dir: u8) -> u8 {
+    match dir {
+        0 => 1,
+        1 => 0,
+        2 => 3,
+        3 => 2,
+        4 => 5,
+        5 => 4,
+        _ => 6,
+    }
+}
+
+pub const DIRS: [[i32; 3]; 6] = [
+    [1, 0, 0],
+    [-1, 0, 0],
+    [0, 1, 0],
+    [0, -1, 0],
+    [0, 0, 1],
+    [0, 0, -1],
+];
+
+/// BFS from `start_pipe` through connected pipes to find the immediate next step toward `target` (or any valid target).
+pub fn find_next_pipe_step<FPipe, FTarget>(
+    start_pipe: [i32; 3],
+    preferred_target: Option<[i32; 3]>,
+    is_pipe: FPipe,
+    is_target: FTarget,
+) -> Option<([i32; 3], [i32; 3])>
+where
+    FPipe: Fn([i32; 3]) -> bool,
+    FTarget: Fn([i32; 3]) -> bool,
+{
+    let mut visited = std::collections::BTreeSet::new();
+    let mut queue = VecDeque::new();
+    visited.insert(start_pipe);
+
+    // Check immediate neighbors first; record `first_step` in queue
+    for d in DIRS {
+        let next = [start_pipe[0] + d[0], start_pipe[1] + d[1], start_pipe[2] + d[2]];
+        if preferred_target == Some(next) && is_target(next) {
+            return Some((next, next));
+        }
+        if is_pipe(next) && visited.insert(next) {
+            queue.push_back((next, next));
+        } else if preferred_target.is_none() && is_target(next) {
+            return Some((next, next));
+        }
+    }
+
+    let mut fallback: Option<([i32; 3], [i32; 3])> = None;
+    while let Some((curr, first_step)) = queue.pop_front() {
+        if visited.len() > 256 {
+            break;
+        }
+        for d in DIRS {
+            let next = [curr[0] + d[0], curr[1] + d[1], curr[2] + d[2]];
+            if preferred_target == Some(next) && is_target(next) {
+                return Some((first_step, next));
+            }
+            if is_target(next) && fallback.is_none() {
+                fallback = Some((first_step, next));
+            }
+            if is_pipe(next) && visited.insert(next) {
+                queue.push_back((next, first_step));
+            }
+        }
+    }
+    fallback
 }
 
 #[cfg(test)]

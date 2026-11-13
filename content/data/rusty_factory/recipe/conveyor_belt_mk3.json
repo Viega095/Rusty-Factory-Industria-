@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "SDS",
+    "BSB",
+    "SCS"
+  ],
+  "key": {
+    "B": "rusty_factory:conveyor_belt_mk2",
+    "S": "rusty_factory:steel_ingot",
+    "D": "minecraft:diamond",
+    "C": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:conveyor_belt_mk3",
+    "count": 2
+  }
+}
