@@ -18,6 +18,7 @@
     "rusty_factory:conveyor_belt",
     "rusty_factory:conveyor_belt_mk2",
     "rusty_factory:conveyor_belt_mk3",
+    "rusty_factory:item_splitter",
     "minecraft:chest",
     "minecraft:trapped_chest",
     "minecraft:barrel",

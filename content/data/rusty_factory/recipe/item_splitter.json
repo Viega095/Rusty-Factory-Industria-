@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "IPI",
+    "CHC",
+    "IPI"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "P": "rusty_factory:item_pipe",
+    "C": "rusty_factory:electronic_circuit",
+    "H": "minecraft:hopper"
+  },
+  "result": {
+    "id": "rusty_factory:item_splitter",
+    "count": 2
+  }
+}

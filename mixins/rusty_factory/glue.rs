@@ -115,7 +115,9 @@ pub(in crate::game) fn container(block: &str, container: &mut Option<ModContaine
             MachineKind::EnergyMonitor
             | MachineKind::EnergyRelay
             | MachineKind::ConveyorBelt
-            | MachineKind::ItemPipe => {
+            | MachineKind::ItemPipe
+            | MachineKind::FluidPipe
+            | MachineKind::ItemSplitter => {
                 *container = None;
             }
             MachineKind::EnergyBank => {
@@ -281,6 +283,57 @@ fn insert_into_conveyor(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
     }
 }
 
+/// Inserts `stack` into a Round-Robin Item Splitter (`rusty_factory:item_splitter`),
+/// distributing items evenly across its Left, Front, and Right outputs!
+fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) -> Option<ItemStack> {
+    if game.native_block(pos) != rules::BLOCK_ITEM_SPLITTER {
+        return Some(stack);
+    }
+    let facing = game
+        .native_block_property(pos, "facing")
+        .unwrap_or_else(|| "north".to_owned());
+    let out_offsets = [
+        rules::conveyor_exit_offset(&facing, "turn_left"),
+        rules::conveyor_exit_offset(&facing, "straight"),
+        rules::conveyor_exit_offset(&facing, "turn_right"),
+    ];
+    let mut start_idx = 0usize;
+    game.native_with_mod_block_entity(pos, |entity| {
+        if let Some(st) = load_state(entity) {
+            start_idx = (st.progress as usize) % 3;
+        }
+    });
+
+    for step in 0..3 {
+        let idx = (start_idx + step) % 3;
+        let off = out_offsets[idx];
+        let target = [pos[0] + off[0], pos[1] + off[1], pos[2] + off[2]];
+        let tb = game.native_block(target);
+        let leftover = if rules::is_conveyor_block(&tb) {
+            insert_into_conveyor(game, target, stack.clone())
+        } else if tb == rules::BLOCK_ITEM_PIPE {
+            insert_into_pipe(game, pos, target, stack.clone(), None)
+        } else if is_item_container_block(&tb) {
+            match game.native_insert_item(target, Direction::Up, stack.clone()) {
+                None => None,
+                Some(r) => game.native_insert_item(target, Direction::North, r),
+            }
+        } else {
+            Some(stack.clone())
+        };
+        if leftover.as_ref().map_or(0, |r| r.count) < stack.count {
+            let next_idx = ((idx + 1) % 3) as i32;
+            game.native_with_mod_block_entity(pos, |entity| {
+                let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ItemSplitter));
+                st.progress = next_idx;
+                store_state(entity, &st);
+            });
+            return leftover;
+        }
+    }
+    Some(stack)
+}
+
 /// Inserts `stack` into an `item_pipe`'s `ModBlockEntity` so it visibly travels through the glass tube.
 fn insert_into_pipe(
     game: &mut Game<'_>,
@@ -359,7 +412,7 @@ fn route_item_from(game: &mut Game<'_>, source_pos: [i32; 3], mut stack: ItemSta
     let targets = rules::find_connected_item_targets(
         source_pos,
         |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
-        |p| p != source_pos && (is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p))),
+        |p| p != source_pos && (is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p)) || game.native_block(p) == rules::BLOCK_ITEM_SPLITTER),
     );
     if let Some(&first_target) = targets.first() {
         for d in rules::DIRS {
@@ -502,7 +555,7 @@ fn tick_item_pipe(
         pos,
         preferred,
         |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE && p != from_pos,
-        |p| p != from_pos && (is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p))),
+        |p| p != from_pos && (is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p)) || game.native_block(p) == rules::BLOCK_ITEM_SPLITTER),
     );
 
     let Some((step_pos, final_target)) = next_step else {
@@ -513,6 +566,8 @@ fn tick_item_pipe(
     let step_block = game.native_block(step_pos);
     let leftover = if step_block == rules::BLOCK_ITEM_PIPE {
         insert_into_pipe(game, pos, step_pos, stack, Some(final_target))
+    } else if step_block == rules::BLOCK_ITEM_SPLITTER {
+        insert_into_splitter(game, step_pos, stack)
     } else if rules::is_conveyor_block(&step_block) {
         insert_into_conveyor(game, step_pos, stack)
     } else {
@@ -636,6 +691,8 @@ fn tick_conveyor(
     let mut dropped_at_end = false;
     let leftover = if rules::is_conveyor_block(&front_block) {
         insert_into_conveyor(game, front_pos, stack)
+    } else if front_block == rules::BLOCK_ITEM_SPLITTER {
+        insert_into_splitter(game, front_pos, stack)
     } else if front_block == rules::BLOCK_ITEM_PIPE {
         insert_into_pipe(game, pos, front_pos, stack, None)
     } else if is_item_container_block(&front_block) {
@@ -1249,7 +1306,9 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         MachineKind::EnergyMonitor
         | MachineKind::EnergyRelay
         | MachineKind::ConveyorBelt
-        | MachineKind::ItemPipe => 0,
+        | MachineKind::ItemPipe
+        | MachineKind::FluidPipe
+        | MachineKind::ItemSplitter => 0,
         _ => rules::SLOTS,
     };
     if entity.items.len() < min_slots {
@@ -1265,6 +1324,45 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         .and_then(|s| s.as_ref())
         .filter(|s| &*s.item == rules::ITEM_FORTUNE_UPGRADE)
         .map_or(0, |s| s.count);
+
+    if kind == MachineKind::FluidPipe {
+        if state.fluid_amount > 0 {
+            state.fluid_amount = (state.fluid_amount - 5).max(0);
+            if state.fluid_amount == 0 {
+                state.fluid_kind.clear();
+            }
+            store_state(entity, &state);
+            game.native_block_entity_sync(pos);
+        }
+        return;
+    }
+
+    if kind == MachineKind::ItemSplitter {
+        if state.enabled && state.auto_io && (game.world.game_time % 5 == 0) {
+            let dim = game.native_dimension();
+            let facing = game
+                .native_block_property(pos, "facing")
+                .unwrap_or_else(|| "north".to_owned());
+            let (_, back_off) = rules::conveyor_offsets(&facing);
+            let back_pos = [pos[0] + back_off[0], pos[1] + back_off[1], pos[2] + back_off[2]];
+            let back_block = game.native_block(back_pos);
+            if !rules::is_conveyor_block(&back_block) && is_item_container_block(&back_block) {
+                if let Some(slots) = game.native_container_slots(dim, back_pos, Direction::Down) {
+                    for s in slots {
+                        if s.can_take && s.stack.is_some() {
+                            if let Some(pulled) = game.native_extract_item(dim, back_pos, Direction::Down, s.slot, 1) {
+                                if let Some(rest) = insert_into_splitter(game, pos, pulled) {
+                                    let _ = game.native_insert_item(back_pos, Direction::Up, rest);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return;
+    }
 
     if kind == MachineKind::ItemPipe {
         tick_item_pipe(game, pos, entity, &mut state);
@@ -1348,6 +1446,13 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                         if tb == rules::BLOCK_FLUID_TANK {
                             tank_targets.push(target);
                         } else if tb == rules::BLOCK_FLUID_PIPE {
+                            game.native_with_mod_block_entity(target, |p_ent| {
+                                let mut p_st = load_state(p_ent).unwrap_or_else(|| MachineState::new(MachineKind::FluidPipe));
+                                p_st.fluid_kind = fk.to_owned();
+                                p_st.fluid_amount = 100;
+                                store_state(p_ent, &p_st);
+                            });
+                            game.native_block_entity_sync(target);
                             let tanks = rules::find_connected_item_targets(
                                 target,
                                 |p| game.native_block(p) == rules::BLOCK_FLUID_PIPE,
@@ -1842,7 +1947,27 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
 
     update_lit_state(game, pos, outcome.status == StepStatus::Working);
 
-    // Dynamic machine sound effects
+    // Dynamic machine sound & particle effects
+    if outcome.status == StepStatus::Working && ((game.world.game_time + (pos[0] as i64 * 11)) % 15 == 0) {
+        let px = pos[0] as f64 + 0.5;
+        let py = pos[1] as f64 + 1.05;
+        let pz = pos[2] as f64 + 0.5;
+        match kind {
+            MachineKind::CoalGenerator | MachineKind::BioGenerator => {
+                game.native_run_command(&format!("particle minecraft:smoke {px} {py} {pz} 0.15 0.1 0.15 0.01 2"));
+            }
+            MachineKind::SteamBoiler => {
+                game.native_run_command(&format!("particle minecraft:cloud {px} {py} {pz} 0.15 0.15 0.15 0.02 2"));
+            }
+            MachineKind::ElectricCrusher | MachineKind::MechanicalPress => {
+                game.native_run_command(&format!("particle minecraft:crit {px} {py} {pz} 0.2 0.1 0.2 0.04 3"));
+            }
+            MachineKind::ElectricFurnace | MachineKind::AlloySmelter => {
+                game.native_run_command(&format!("particle minecraft:flame {px} {py} {pz} 0.15 0.08 0.15 0.01 2"));
+            }
+            _ => {}
+        }
+    }
     if outcome.status == StepStatus::Working && ((game.world.game_time + (pos[0] as i64 * 11)) % 40 == 0) {
         match kind {
             MachineKind::SteamBoiler => {
@@ -2066,6 +2191,24 @@ pub(in crate::game) fn world_primitives(
         let dy = y as f64 + 0.5 - camera[1];
         let dz = z as f64 + 0.5 - camera[2];
         if dx * dx + dy * dy + dz * dz > 64.0 * 64.0 {
+            continue;
+        }
+
+        if entity.id == rules::BLOCK_FLUID_PIPE {
+            let st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::FluidPipe));
+            if st.fluid_amount > 0 && !st.fluid_kind.is_empty() {
+                let col = match st.fluid_kind.as_str() {
+                    "lava" => 0xEEFF_5511,
+                    "sap" => 0xCCEE_9B15,
+                    "steam" => 0x88D0_F4FF,
+                    _ => 0xAA25_85E8,
+                };
+                primitives.filled_box(
+                    [x as f64 + 0.36, y as f64 + 0.36, z as f64 + 0.36],
+                    [x as f64 + 0.64, y as f64 + 0.64, z as f64 + 0.64],
+                    col,
+                );
+            }
             continue;
         }
 

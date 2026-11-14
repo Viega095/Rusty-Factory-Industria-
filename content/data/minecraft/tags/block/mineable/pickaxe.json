@@ -25,6 +25,7 @@
     "rusty_factory:conveyor_belt",
     "rusty_factory:conveyor_belt_mk2",
     "rusty_factory:conveyor_belt_mk3",
+    "rusty_factory:item_splitter",
     "rusty_factory:energy_monitor",
     "rusty_factory:fluid_tank",
     "rusty_factory:steam_boiler",
