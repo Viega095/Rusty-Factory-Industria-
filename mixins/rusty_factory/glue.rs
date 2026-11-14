@@ -283,8 +283,8 @@ fn insert_into_conveyor(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
     }
 }
 
-/// Inserts `stack` into a Round-Robin Item Splitter (`rusty_factory:item_splitter`),
-/// distributing items evenly across its Left, Front, and Right outputs!
+/// Inserts `stack` into a Create-style Filtered Round-Robin Item Splitter (`rusty_factory:item_splitter`),
+/// routing matching items to filtered faces (Left / Front / Right) and dropping into open air if unattached!
 fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) -> Option<ItemStack> {
     if game.native_block(pos) != rules::BLOCK_ITEM_SPLITTER {
         return Some(stack);
@@ -298,17 +298,32 @@ fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
         rules::conveyor_exit_offset(&facing, "turn_right"),
     ];
     let mut start_idx = 0usize;
+    let mut filters = [String::new(), String::new(), String::new()];
     game.native_with_mod_block_entity(pos, |entity| {
         if let Some(st) = load_state(entity) {
             start_idx = (st.progress as usize) % 3;
+            filters = st.splitter_filters;
         }
     });
 
+    let item_id = stack.item.to_string();
+    let has_matching_filter = filters.iter().any(|f| !f.is_empty() && *f == item_id);
+
     for step in 0..3 {
         let idx = (start_idx + step) % 3;
+        let f = &filters[idx];
+        if has_matching_filter {
+            if f != &item_id {
+                continue;
+            }
+        } else if !f.is_empty() {
+            continue;
+        }
+
         let off = out_offsets[idx];
         let target = [pos[0] + off[0], pos[1] + off[1], pos[2] + off[2]];
         let tb = game.native_block(target);
+        let is_air = matches!(tb.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air");
         let leftover = if rules::is_conveyor_block(&tb) {
             insert_into_conveyor(game, target, stack.clone())
         } else if tb == rules::BLOCK_ITEM_PIPE {
@@ -318,6 +333,15 @@ fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
                 None => None,
                 Some(r) => game.native_insert_item(target, Direction::North, r),
             }
+        } else if is_air && has_matching_filter {
+            let drop_pos = [
+                pos[0] as f64 + 0.5 + off[0] as f64 * 0.65,
+                pos[1] as f64 + 0.30,
+                pos[2] as f64 + 0.5 + off[2] as f64 * 0.65,
+            ];
+            let vel = [off[0] as f64 * 0.12, 0.06, off[2] as f64 * 0.12];
+            game.spawn_item(stack.clone(), drop_pos, vel, 10);
+            None
         } else {
             Some(stack.clone())
         };
@@ -2028,6 +2052,48 @@ pub(in crate::game) fn submit(
         return;
     }
 
+    if block == rules::BLOCK_ITEM_SPLITTER {
+        let Some(st) = load_state(entity) else {
+            return;
+        };
+        let facing = game
+            .native_block_state_property(state, "facing")
+            .unwrap_or("north");
+        let side_shapes = ["turn_left", "straight", "turn_right"];
+        for (i, shape_name) in side_shapes.iter().enumerate() {
+            let filter_id = &st.splitter_filters[i];
+            if filter_id.is_empty() {
+                continue;
+            }
+            let off = rules::conveyor_exit_offset(facing, shape_name);
+            let yaw = match off {
+                [0, 0, -1] => 0.0,
+                [0, 0, 1] => 180.0,
+                [1, 0, 0] => 270.0,
+                [-1, 0, 0] => 90.0,
+                _ => 0.0,
+            };
+            let stack = ItemStack::new(filter_id, 1);
+            draw.push();
+            draw.translate([
+                0.5 + off[0] as f32 * 0.46,
+                0.48,
+                0.5 + off[2] as f32 * 0.46,
+            ]);
+            draw.rotate_about([0.0, 1.0, 0.0], yaw, [0.0, 0.0, 0.0]);
+            draw.scale([0.34, 0.34, 0.34]);
+            let _ = game.native_draw_item(
+                draw,
+                &stack,
+                DisplayContext::Fixed,
+                None,
+                pos[0].wrapping_mul(31) ^ pos[2] ^ i as i32,
+            );
+            draw.pop();
+        }
+        return;
+    }
+
     if block == rules::BLOCK_ITEM_PIPE {
         let Some(st) = load_state(entity) else {
             return;
@@ -2425,8 +2491,8 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     }
 }
 
-/// Inspects networks, harvests sap from Rubber Tree Sap Cavities, grows Rubber Saplings, interacts with Conveyor Belts (no GUI), rotates/dismantles machines with Wrench, or uses tools.
-pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled: &mut bool) {
+/// Inspects networks, harvests sap from Rubber Tree Sap Cavities, grows Rubber Saplings, interacts with Conveyor Belts (no GUI), configures Item Splitter filter frames, rotates/dismantles machines with Wrench, or uses tools.
+pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i32; 3], canceled: &mut bool) {
     if *canceled {
         return;
     }
@@ -2436,6 +2502,55 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], canceled:
         .player
         .as_ref()
         .is_some_and(|p| p.pose == horizon_client::pose::Pose::Crouching);
+
+    // Create-style per-face filter configuration on Item Splitter (no GUI!)
+    if block_id == rules::BLOCK_ITEM_SPLITTER {
+        let is_wrench = held_info.as_ref().is_some_and(|(id, _, _)| id == rules::ITEM_WRENCH);
+        if !is_wrench {
+            let facing = game
+                .native_block_property(pos, "facing")
+                .unwrap_or_else(|| "north".to_owned());
+            if let Some(side) = rules::splitter_side_for_face(&facing, face) {
+                if !is_crouching {
+                    *canceled = true;
+                    let side_name = match side {
+                        0 => "Izquierda",
+                        1 => "Frente",
+                        _ => "Derecha",
+                    };
+                    if let Some((ref held_id, _, _)) = held_info {
+                        let filter_item = held_id.clone();
+                        game.native_with_mod_block_entity(pos, |entity| {
+                            let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ItemSplitter));
+                            st.splitter_filters[side] = filter_item.clone();
+                            store_state(entity, &st);
+                        });
+                        game.native_block_entity_sync(pos);
+                        if let Some(who) = game.native_acting_player() {
+                            game.native_action_bar(
+                                who.uuid,
+                                Text::literal(format!("🔍 [Divisor] Filtro {side_name}: {filter_item}")),
+                            );
+                        }
+                    } else {
+                        game.native_with_mod_block_entity(pos, |entity| {
+                            let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ItemSplitter));
+                            st.splitter_filters[side].clear();
+                            store_state(entity, &st);
+                        });
+                        game.native_block_entity_sync(pos);
+                        if let Some(who) = game.native_acting_player() {
+                            game.native_action_bar(
+                                who.uuid,
+                                Text::literal(format!("🧹 [Divisor] Filtro {side_name} limpiado")),
+                            );
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+    }
 
     // Direct hand interaction on Conveyor Belts (NO GUI!)
     if let Some((_, max_batch)) = rules::conveyor_tier(&block_id) {

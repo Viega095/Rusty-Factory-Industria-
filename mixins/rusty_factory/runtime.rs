@@ -456,6 +456,8 @@ pub struct MachineState {
     #[serde(default)]
     pub pipe_has_target: bool,
     #[serde(default)]
+    pub splitter_filters: [String; 3],
+    #[serde(default)]
     pub fluid_kind: String,
     #[serde(default)]
     pub fluid_amount: i32,
@@ -482,6 +484,7 @@ impl MachineState {
             pipe_to: 6,
             pipe_target: [0, 0, 0],
             pipe_has_target: false,
+            splitter_filters: [String::new(), String::new(), String::new()],
             fluid_kind: String::new(),
             fluid_amount: 0,
         }
@@ -1611,6 +1614,26 @@ pub fn conveyor_exit_offset(facing: &str, shape: &str) -> [i32; 3] {
         "up" => [front[0], 1, front[2]],
         "down" => [front[0], -1, front[2]],
         _ => front,
+    }
+}
+
+/// Maps a clicked block face `[dx, dy, dz]` on an `item_splitter` to its output side index:
+/// `0 = Left`, `1 = Front`, `2 = Right` (Top maps to `1 = Front`).
+pub fn splitter_side_for_face(facing: &str, face: [i32; 3]) -> Option<usize> {
+    if face == [0, 1, 0] {
+        return Some(1);
+    }
+    let left = conveyor_exit_offset(facing, "turn_left");
+    let front = conveyor_exit_offset(facing, "straight");
+    let right = conveyor_exit_offset(facing, "turn_right");
+    if face == left {
+        Some(0)
+    } else if face == front {
+        Some(1)
+    } else if face == right {
+        Some(2)
+    } else {
+        None
     }
 }
 
