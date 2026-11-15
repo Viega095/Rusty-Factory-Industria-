@@ -2,6 +2,7 @@
   "template": "minecraft:furnace",
   "state_properties": {
     "shape": {
+      "type": "enum",
       "values": ["straight", "turn_left", "turn_right", "up", "down"]
     }
   },
