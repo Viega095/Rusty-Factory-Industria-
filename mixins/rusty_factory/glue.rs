@@ -333,15 +333,22 @@ fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
                 None => None,
                 Some(r) => game.native_insert_item(target, Direction::North, r),
             }
-        } else if is_air && has_matching_filter {
-            let drop_pos = [
-                pos[0] as f64 + 0.5 + off[0] as f64 * 0.65,
-                pos[1] as f64 + 0.30,
-                pos[2] as f64 + 0.5 + off[2] as f64 * 0.65,
-            ];
-            let vel = [off[0] as f64 * 0.12, 0.06, off[2] as f64 * 0.12];
-            game.spawn_item(stack.clone(), drop_pos, vel, 10);
-            None
+        } else if is_air {
+            let target_below = [target[0], target[1] - 1, target[2]];
+            if rules::is_conveyor_block(&game.native_block(target_below)) {
+                insert_into_conveyor(game, target_below, stack.clone())
+            } else if has_matching_filter {
+                let drop_pos = [
+                    pos[0] as f64 + 0.5 + off[0] as f64 * 0.65,
+                    pos[1] as f64 + 0.30,
+                    pos[2] as f64 + 0.5 + off[2] as f64 * 0.65,
+                ];
+                let vel = [off[0] as f64 * 0.12, 0.06, off[2] as f64 * 0.12];
+                game.spawn_item(stack.clone(), drop_pos, vel, 10);
+                None
+            } else {
+                Some(stack.clone())
+            }
         } else {
             Some(stack.clone())
         };
@@ -704,6 +711,28 @@ fn tick_conveyor(
         state.progress += 1;
         store_state(entity, state);
         game.native_block_entity_sync(pos);
+        // If an Item Splitter sits directly on top of this belt, feed it once item reaches center
+        if state.progress >= (max_ticks / 2).max(1) {
+            let above_pos = [pos[0], pos[1] + 1, pos[2]];
+            if game.native_block(above_pos) == rules::BLOCK_ITEM_SPLITTER {
+                let stack = ItemStack::new(&state.belt_item, state.belt_count.max(1));
+                let leftover = insert_into_splitter(game, above_pos, stack);
+                if leftover.is_none() {
+                    state.belt_item.clear();
+                    state.belt_count = 0;
+                    state.progress = 0;
+                    store_state(entity, state);
+                    game.native_block_entity_sync(pos);
+                    return;
+                } else if let Some(rest) = leftover {
+                    if rest.count < state.belt_count {
+                        state.belt_count = rest.count;
+                        store_state(entity, state);
+                        game.native_block_entity_sync(pos);
+                    }
+                }
+            }
+        }
         if state.progress < max_ticks {
             return;
         }
@@ -2418,51 +2447,225 @@ pub(in crate::game) fn world_primitives(
             );
         }
     }
+
+    // Ghost block + directional arrow preview when holding Conveyor Belt or Item Splitter
+    if let (Some((held_id, _, _)), Some(player)) = (game.native_held(), &game.player) {
+        let is_belt = rules::is_conveyor_block(&held_id);
+        let is_splitter = held_id == rules::BLOCK_ITEM_SPLITTER;
+        if is_belt || is_splitter {
+            let yaw_rad = (game.yaw as f64).to_radians();
+            let pitch_rad = (game.pitch as f64).to_radians();
+            let dir = [
+                -yaw_rad.sin() * pitch_rad.cos(),
+                -pitch_rad.sin(),
+                yaw_rad.cos() * pitch_rad.cos(),
+            ];
+            let eye = [
+                player.position.x,
+                player.position.y + f64::from(player.dimensions.eye_height),
+                player.position.z,
+            ];
+            let mut prev_cell = [
+                eye[0].floor() as i32,
+                eye[1].floor() as i32,
+                eye[2].floor() as i32,
+            ];
+            let mut hit_place: Option<[i32; 3]> = None;
+            for step in 1..=90 {
+                let t = step as f64 * 0.05;
+                let px = eye[0] + dir[0] * t;
+                let py = eye[1] + dir[1] * t;
+                let pz = eye[2] + dir[2] * t;
+                let cell = [px.floor() as i32, py.floor() as i32, pz.floor() as i32];
+                if cell != prev_cell {
+                    let blk = game.native_block(cell);
+                    if !matches!(
+                        blk.as_str(),
+                        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
+                    ) {
+                        hit_place = Some(prev_cell);
+                        break;
+                    }
+                    prev_cell = cell;
+                }
+            }
+            if let Some(p) = hit_place {
+                let is_crouching = player.pose == horizon_client::pose::Pose::Crouching;
+                let forward_facing = cardinal_facing_from_yaw(game.yaw);
+                let facing = if is_crouching {
+                    opposite_facing(forward_facing)
+                } else {
+                    forward_facing
+                };
+                let (front_off, _) = rules::conveyor_offsets(facing);
+                let top_y = if is_belt { 0.25 } else { 0.625 };
+                let (fill_col, line_col) = if is_crouching {
+                    (0x44FF_A020, 0xEEFF_B830)
+                } else {
+                    (0x4430_E0FF, 0xEE40_F5FF)
+                };
+                let bmin = [p[0] as f64 + 0.0625, p[1] as f64, p[2] as f64 + 0.0625];
+                let bmax = [
+                    p[0] as f64 + 0.9375,
+                    p[1] as f64 + top_y,
+                    p[2] as f64 + 0.9375,
+                ];
+                primitives.filled_box(bmin, bmax, fill_col);
+                primitives.box_outline(bmin, bmax, line_col, 2.0);
+                // Directional flow arrow on top of the ghost block
+                let cx = p[0] as f64 + 0.5;
+                let cy = p[1] as f64 + top_y + 0.04;
+                let cz = p[2] as f64 + 0.5;
+                let fx = front_off[0] as f64;
+                let fz = front_off[2] as f64;
+                let tip = [cx + fx * 0.36, cy, cz + fz * 0.36];
+                let tail = [cx - fx * 0.30, cy, cz - fz * 0.30];
+                primitives.line(tail, tip, line_col, 3.0);
+                let wing1 = [cx + fx * 0.14 - fz * 0.18, cy, cz + fz * 0.14 + fx * 0.18];
+                let wing2 = [cx + fx * 0.14 + fz * 0.18, cy, cz + fz * 0.14 - fx * 0.18];
+                primitives.line(tip, wing1, line_col, 2.5);
+                primitives.line(tip, wing2, line_col, 2.5);
+            }
+        }
+    }
 }
 
-/// Auto-shapes Conveyor Belts (straight / turn_left / turn_right / up / down) on placement!
+fn cardinal_facing_from_yaw(yaw: f32) -> &'static str {
+    let y = yaw.rem_euclid(360.0);
+    if !(45.0..315.0).contains(&y) {
+        "south"
+    } else if y < 135.0 {
+        "west"
+    } else if y < 225.0 {
+        "north"
+    } else {
+        "east"
+    }
+}
+
+fn opposite_facing(facing: &str) -> &'static str {
+    match facing {
+        "north" => "south",
+        "south" => "north",
+        "east" => "west",
+        "west" => "east",
+        _ => "north",
+    }
+}
+
+fn compute_belt_shape(game: &Game<'_>, pos: [i32; 3], facing: &str) -> &'static str {
+    let (front_off, back_off) = rules::conveyor_offsets(facing);
+    let front_up = [pos[0] + front_off[0], pos[1] + 1, pos[2] + front_off[2]];
+    let back_up = [pos[0] + back_off[0], pos[1] + 1, pos[2] + back_off[2]];
+    let front_pos = [pos[0] + front_off[0], pos[1], pos[2] + front_off[2]];
+
+    if rules::is_conveyor_block(&game.native_block(front_up)) {
+        return "up";
+    }
+    if rules::is_conveyor_block(&game.native_block(back_up)) {
+        return "down";
+    }
+
+    let is_linkable_output = |p: [i32; 3], into_dir: [i32; 3]| -> bool {
+        let b = game.native_block(p);
+        if rules::is_conveyor_block(&b) {
+            let target_facing = game
+                .native_block_property(p, "facing")
+                .unwrap_or_else(|| "north".to_owned());
+            let (target_front, _) = rules::conveyor_offsets(&target_facing);
+            // Do not turn into a belt that is pointing directly into us
+            target_front != [-into_dir[0], 0, -into_dir[2]]
+        } else {
+            b == rules::BLOCK_ITEM_PIPE || b == rules::BLOCK_ITEM_SPLITTER || is_item_container_block(&b)
+        }
+    };
+
+    if is_linkable_output(front_pos, front_off) {
+        return "straight";
+    }
+
+    let left_off = rules::conveyor_exit_offset(facing, "turn_left");
+    let right_off = rules::conveyor_exit_offset(facing, "turn_right");
+    let left_pos = [pos[0] + left_off[0], pos[1], pos[2] + left_off[2]];
+    let right_pos = [pos[0] + right_off[0], pos[1], pos[2] + right_off[2]];
+
+    if is_linkable_output(left_pos, left_off) {
+        "turn_left"
+    } else if is_linkable_output(right_pos, right_off) {
+        "turn_right"
+    } else {
+        "straight"
+    }
+}
+
+/// Auto-orients Conveyor Belts & Item Splitters forward (Shift reverses) and auto-curves connected belts!
 pub(in crate::game) fn place_block(game: &mut Game<'_>, pos: [i32; 3]) {
     if !game.native_on(rules::ID) {
         return;
     }
     let block_id = game.native_block(pos);
-    if !rules::is_conveyor_block(&block_id) {
+    let is_belt = rules::is_conveyor_block(&block_id);
+    let is_splitter = block_id == rules::BLOCK_ITEM_SPLITTER;
+    if !is_belt && !is_splitter {
         return;
     }
-    let facing = game
+
+    let is_crouching = game
+        .player
+        .as_ref()
+        .is_some_and(|p| p.pose == horizon_client::pose::Pose::Crouching);
+
+    // `minecraft:furnace` template faces towards the player; flip so normal placement goes FORWARD (away from player),
+    // and Shift (crouching) reverses direction!
+    let raw_facing = game
         .native_block_property(pos, "facing")
         .unwrap_or_else(|| "north".to_owned());
-    let (front_off, back_off) = rules::conveyor_offsets(&facing);
-    let front_up = [pos[0] + front_off[0], pos[1] + 1, pos[2] + front_off[2]];
-    let back_up = [pos[0] + back_off[0], pos[1] + 1, pos[2] + back_off[2]];
-    let front_pos = [pos[0] + front_off[0], pos[1], pos[2] + front_off[2]];
-
-    let is_linkable = |p: [i32; 3]| {
-        let b = game.native_block(p);
-        rules::is_conveyor_block(&b) || b == rules::BLOCK_ITEM_PIPE || is_item_container_block(&b)
-    };
-
-    let desired_shape = if rules::is_conveyor_block(&game.native_block(front_up)) {
-        "up"
-    } else if rules::is_conveyor_block(&game.native_block(back_up)) {
-        "down"
-    } else if !is_linkable(front_pos) {
-        let left_off = rules::conveyor_exit_offset(&facing, "turn_left");
-        let right_off = rules::conveyor_exit_offset(&facing, "turn_right");
-        let left_pos = [pos[0] + left_off[0], pos[1], pos[2] + left_off[2]];
-        let right_pos = [pos[0] + right_off[0], pos[1], pos[2] + right_off[2]];
-        if is_linkable(left_pos) {
-            "turn_left"
-        } else if is_linkable(right_pos) {
-            "turn_right"
-        } else {
-            "straight"
-        }
+    let facing = if is_crouching {
+        raw_facing.clone()
     } else {
-        "straight"
+        opposite_facing(&raw_facing).to_owned()
     };
+    if facing != raw_facing {
+        game.native_set_block_property(pos, "facing", &facing);
+    }
+
+    if !is_belt {
+        return;
+    }
+
+    let desired_shape = compute_belt_shape(game, pos, &facing);
     if desired_shape != "straight" {
         game.native_set_block_property(pos, "shape", desired_shape);
+    }
+
+    // Update adjacent belts that have an open front so they smoothly curve or ramp into this newly placed belt
+    let neighbor_offsets = [
+        [0, 0, -1],
+        [0, 0, 1],
+        [1, 0, 0],
+        [-1, 0, 0],
+        [0, -1, -1],
+        [0, -1, 1],
+        [1, -1, 0],
+        [-1, -1, 0],
+    ];
+    for off in neighbor_offsets {
+        let nb = [pos[0] + off[0], pos[1] + off[1], pos[2] + off[2]];
+        if !rules::is_conveyor_block(&game.native_block(nb)) {
+            continue;
+        }
+        let nb_facing = game
+            .native_block_property(nb, "facing")
+            .unwrap_or_else(|| "north".to_owned());
+        let nb_shape = game
+            .native_block_property(nb, "shape")
+            .unwrap_or_else(|| "straight".to_owned());
+        if nb_shape == "straight" {
+            let updated = compute_belt_shape(game, nb, &nb_facing);
+            if updated != nb_shape {
+                game.native_set_block_property(nb, "shape", updated);
+            }
+        }
     }
 }
 
@@ -2590,6 +2793,14 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                         );
                     }
                 }
+                return;
+            }
+            // Allow placing filters (Item Splitter), other belts, pipes, or extractors directly against belts!
+            let is_placeable_logistics = held_id == rules::BLOCK_ITEM_SPLITTER
+                || rules::is_conveyor_block(held_id)
+                || held_id == rules::BLOCK_ITEM_PIPE
+                || held_id == rules::BLOCK_EXTRACTOR;
+            if is_placeable_logistics {
                 return;
             }
             // Place 1 item from player's hand onto the conveyor belt (unless sneaking to place blocks!)
