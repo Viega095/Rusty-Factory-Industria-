@@ -842,9 +842,45 @@ fn tick_quarry(
         let side = state.quarry_side_len();
         let layer_area = side * side;
         let dim = game.native_dimension();
+        let (min_x, max_x, min_z, max_z) =
+            rules::quarry_area_bounds(pos, &facing, state.quarry_radius);
+
+        // 0. Surface flattening: before digging underground, clear any blocks above `pos[1]` inside the quarry frame!
+        let mut cleared_surface = false;
+        if state.quarry_y_offset == 0 {
+            'surface: for sy in (pos[1]..=pos[1] + 5).rev() {
+                for sz in min_z..=max_z {
+                    for sx in min_x..=max_x {
+                        let sp = [sx, sy, sz];
+                        if sp == pos {
+                            continue;
+                        }
+                        let b = game.native_block(sp);
+                        if let Some((drop_item, base_count)) = rules::quarry_drop_for_block(&b) {
+                            if let Some(air_state) = game.native_default_state("minecraft:air") {
+                                game.native_set_block(dim, sp, air_state, 3);
+                            }
+                            state.quarry_mined += 1;
+                            state.last_target = sp;
+                            let produced = ItemStack {
+                                item: drop_item.into(),
+                                count: base_count,
+                                damage: 0,
+                                extra: None,
+                            };
+                            store_or_route_output(game, pos, entity, state.auto_io, produced);
+                            store_state(entity, state);
+                            game.native_block_entity_sync(pos);
+                            cleared_surface = true;
+                            break 'surface;
+                        }
+                    }
+                }
+            }
+        }
 
         // Scan up to 12 positions to skip over air/water/bedrock quickly
-        for _ in 0..12 {
+        for _ in 0..if cleared_surface { 0 } else { 12 } {
             let target_pos = rules::quarry_target_pos(pos, &facing, state);
             if target_pos[1] <= -60 {
                 // Reached bottom of the world; wrap back to top layer
@@ -2378,14 +2414,46 @@ pub(in crate::game) fn world_primitives(
         let base_y = y as f64;
         let top_y = y as f64 + 3.0;
 
-        // 1. Outer Industrial Quarry Frame (Hazard structural outline)
-        primitives.box_outline([x0, base_y, z0], [x1, top_y, z1], 0xFFFF_B81C, 3.0);
-        primitives.box_outline(
-            [x0, top_y - 0.22, z0],
-            [x1, top_y, z1],
-            0xFFFF_7A18,
-            2.5,
-        );
+        // 1. 3D Construction Hazard Pipe Frame (yellow & black striped tubular beams, non-interactable)
+        let draw_hazard_beam = |prims: &mut WorldPrimitives, a: [f64; 3], b: [f64; 3], r: f64| {
+            let dx = b[0] - a[0];
+            let dy = b[1] - a[1];
+            let dz = b[2] - a[2];
+            let len = (dx * dx + dy * dy + dz * dz).sqrt().max(0.01);
+            let segs = (len / 0.5).ceil().max(1.0) as usize;
+            for i in 0..segs {
+                let t0 = i as f64 / segs as f64;
+                let t1 = (i + 1) as f64 / segs as f64;
+                let p0 = [a[0] + dx * t0, a[1] + dy * t0, a[2] + dz * t0];
+                let p1 = [a[0] + dx * t1, a[1] + dy * t1, a[2] + dz * t1];
+                let bmin = [p0[0].min(p1[0]) - r, p0[1].min(p1[1]) - r, p0[2].min(p1[2]) - r];
+                let bmax = [p0[0].max(p1[0]) + r, p0[1].max(p1[1]) + r, p0[2].max(p1[2]) + r];
+                let col = if i % 2 == 0 { 0xFFFF_C800 } else { 0xFF1D_2026 };
+                prims.filled_box(bmin, bmax, col);
+            }
+        };
+
+        // 4 vertical corner pillars
+        for &(cx, cz) in &[(x0, z0), (x1, z0), (x0, z1), (x1, z1)] {
+            draw_hazard_beam(primitives, [cx, base_y, cz], [cx, top_y, cz], 0.085);
+            // Dark steel corner joint cap
+            primitives.filled_box(
+                [cx - 0.13, top_y - 0.13, cz - 0.13],
+                [cx + 0.13, top_y + 0.13, cz + 0.13],
+                0xFF3A_404D,
+            );
+        }
+        // 4 top perimeter hazard beams
+        draw_hazard_beam(primitives, [x0, top_y, z0], [x1, top_y, z0], 0.085);
+        draw_hazard_beam(primitives, [x0, top_y, z1], [x1, top_y, z1], 0.085);
+        draw_hazard_beam(primitives, [x0, top_y, z0], [x0, top_y, z1], 0.085);
+        draw_hazard_beam(primitives, [x1, top_y, z0], [x1, top_y, z1], 0.085);
+        // 4 ground perimeter hazard bars (slightly raised to avoid z-fighting)
+        let gy = base_y + 0.08;
+        draw_hazard_beam(primitives, [x0, gy, z0], [x1, gy, z0], 0.065);
+        draw_hazard_beam(primitives, [x0, gy, z1], [x1, gy, z1], 0.065);
+        draw_hazard_beam(primitives, [x0, gy, z0], [x0, gy, z1], 0.065);
+        draw_hazard_beam(primitives, [x1, gy, z0], [x1, gy, z1], 0.065);
 
         // 2. Compute current target block & Gantry position
         let target = if st.last_target != [0, 0, 0] {
@@ -2397,44 +2465,66 @@ pub(in crate::game) fn world_primitives(
         let tz = (target[2] as f64 + 0.5).clamp(z0 + 0.5, z1 - 0.5);
         let ty = (target[1] as f64 + 0.5).min(top_y - 0.5);
 
-        // Moving X-Bridge bar across the Quarry frame at `tz`
+        // Moving 3D steel X-Bridge bar across the Quarry frame at `tz`
         primitives.filled_box(
-            [x0, top_y - 0.20, tz - 0.12],
-            [x1, top_y - 0.04, tz + 0.12],
-            0xD8FF_A818,
+            [x0, top_y - 0.14, tz - 0.11],
+            [x1, top_y + 0.06, tz + 0.11],
+            0xFF56_5F6E,
+        );
+        // Yellow/black gantry carriage at `[tx, top_y, tz]`
+        primitives.filled_box(
+            [tx - 0.32, top_y - 0.28, tz - 0.32],
+            [tx + 0.32, top_y + 0.16, tz + 0.32],
+            0xFFFF_C800,
+        );
+        primitives.filled_box(
+            [tx - 0.24, top_y - 0.32, tz - 0.24],
+            [tx + 0.24, top_y + 0.20, tz + 0.24],
+            0xFF23_2730,
         );
 
-        // Drill Head Carriage at `[tx, top_y, tz]`
-        primitives.filled_box(
-            [tx - 0.28, top_y - 0.35, tz - 0.28],
-            [tx + 0.28, top_y + 0.12, tz + 0.28],
-            0xFFFF_D038,
-        );
-
-        // 3. Vertical Drill Pipe & Active Mining Laser Beam down to `[tx, ty, tz]`
+        // 3. 3D Tubular Drill Column & Animated Jackhammer/Rotating Drill Head at `[tx, ty, tz]`
         if st.enabled {
-            let pulse = ((game.world.game_time as f32 + partial) * 0.25).sin() * 0.5 + 0.5;
-            let laser_color = if pulse > 0.5 {
-                0xFF38_F2FF
-            } else {
-                0xFFFF_9E22
-            };
-            // Vertical steel drill column
-            primitives.line(
-                [tx, top_y - 0.35, tz],
-                [tx, ty + 0.3, tz],
-                0xFF45_4E5C,
-                4.0,
-            );
-            // Glowing mining laser core
-            primitives.line([tx, top_y - 0.35, tz], [tx, ty, tz], laser_color, 2.5);
-            // Drill tip box
+            let anim_t = game.world.game_time as f64 + partial as f64;
+            let bob = (anim_t * 0.55).sin().abs() * 0.22;
+            let spin_alt = ((anim_t * 0.45) as i64).rem_euclid(2) == 0;
+            let drill_tip_y = ty + 0.10 - bob;
+
+            // 3D steel drill pipe column from carriage down to drill head
+            if top_y - 0.32 > drill_tip_y + 0.65 {
+                primitives.filled_box(
+                    [tx - 0.08, drill_tip_y + 0.65, tz - 0.08],
+                    [tx + 0.08, top_y - 0.32, tz + 0.08],
+                    0xFF63_6E80,
+                );
+            }
+            // Upper drill collar (yellow hazard ring)
             primitives.filled_box(
-                [tx - 0.16, ty, tz - 0.16],
-                [tx + 0.16, ty + 0.45, tz + 0.16],
-                0xFF38_F2FF,
+                [tx - 0.22, drill_tip_y + 0.48, tz - 0.22],
+                [tx + 0.22, drill_tip_y + 0.68, tz + 0.22],
+                0xFFFF_C800,
             );
-            // Highlight outline on the block currently being excavated
+            // Rotating 4-flute cross blades (alternates orientation each quarter-turn)
+            let (bx, bz) = if spin_alt { (0.28, 0.10) } else { (0.10, 0.28) };
+            primitives.filled_box(
+                [tx - bx, drill_tip_y + 0.22, tz - bz],
+                [tx + bx, drill_tip_y + 0.48, tz + bz],
+                0xFF9E_A8B8,
+            );
+            primitives.filled_box(
+                [tx - bz, drill_tip_y + 0.22, tz - bx],
+                [tx + bz, drill_tip_y + 0.48, tz + bx],
+                0xFF39_404C,
+            );
+            // Tapered glowing drill bit tip hammering into the block
+            let tip_col = if spin_alt { 0xFF38_F2FF } else { 0xFFFF_9E22 };
+            primitives.filled_box(
+                [tx - 0.12, drill_tip_y, tz - 0.12],
+                [tx + 0.12, drill_tip_y + 0.22, tz + 0.12],
+                tip_col,
+            );
+
+            // Pulsing excavation frame around the block currently being drilled
             primitives.box_outline(
                 [target[0] as f64, target[1] as f64, target[2] as f64],
                 [
@@ -2442,8 +2532,8 @@ pub(in crate::game) fn world_primitives(
                     target[1] as f64 + 1.0,
                     target[2] as f64 + 1.0,
                 ],
-                0xFF38_F2FF,
-                2.0,
+                tip_col,
+                2.5,
             );
         }
     }
@@ -2801,6 +2891,38 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 || held_id == rules::BLOCK_ITEM_PIPE
                 || held_id == rules::BLOCK_EXTRACTOR;
             if is_placeable_logistics {
+                *canceled = true;
+                let target = [pos[0] + face[0], pos[1] + face[1], pos[2] + face[2]];
+                let target_blk = game.native_block(target);
+                if matches!(
+                    target_blk.as_str(),
+                    "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" | "minecraft:water"
+                ) {
+                    if let Some(place_state) = game.native_default_state(held_id) {
+                        let dim = game.native_dimension();
+                        if game.native_set_block(dim, target, place_state, 3) {
+                            let forward_facing = cardinal_facing_from_yaw(game.yaw);
+                            let raw_facing = opposite_facing(forward_facing);
+                            let _ = game.native_set_block_property(target, "facing", raw_facing);
+                            place_block(game, target);
+                            if !game.creative {
+                                if let Some(held) = game.held_mut() {
+                                    if held.count > 1 {
+                                        held.count -= 1;
+                                    } else {
+                                        *game.held_mut() = None;
+                                    }
+                                }
+                            }
+                            game.native_run_command(&format!(
+                                "playsound minecraft:block.metal.place block @a {} {} {} 0.8 1.1",
+                                target[0] as f64 + 0.5,
+                                target[1] as f64 + 0.5,
+                                target[2] as f64 + 0.5
+                            ));
+                        }
+                    }
+                }
                 return;
             }
             // Place 1 item from player's hand onto the conveyor belt (unless sneaking to place blocks!)
