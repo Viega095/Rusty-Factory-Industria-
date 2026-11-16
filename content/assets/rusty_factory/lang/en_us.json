@@ -117,5 +117,9 @@
   "item.rusty_factory.quantum_chestplate": "Quantum Chestplate (Tier 3)",
   "item.rusty_factory.quantum_leggings": "Quantum Leggings (Tier 3)",
   "item.rusty_factory.quantum_boots": "Quantum Boots (Tier 3)",
-  "block.rusty_factory.silo_controller": "Silo Controller"
+  "block.rusty_factory.silo_controller": "Silo Controller",
+  "block.rusty_factory.item_pipe_mk2": "Reinforced Item Pipe (MK2)",
+  "block.rusty_factory.item_pipe_mk3": "Quantum Item Pipe (MK3)",
+  "block.rusty_factory.fluid_pipe_mk2": "Reinforced Fluid Pipe (MK2)",
+  "block.rusty_factory.fluid_pipe_mk3": "Quantum Fluid Pipe (MK3)"
 }

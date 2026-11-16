@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "GPG",
+    "PEP",
+    "GPG"
+  ],
+  "key": {
+    "G": "rusty_factory:gold_plate",
+    "P": "rusty_factory:item_pipe",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:item_pipe_mk2",
+    "count": 4
+  }
+}

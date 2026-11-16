@@ -41,6 +41,28 @@ pub fn cable_transfer_limit(block: &str) -> i32 {
     }
 }
 pub const BLOCK_ITEM_PIPE: &str = "rusty_factory:item_pipe";
+pub const BLOCK_ITEM_PIPE_MK2: &str = "rusty_factory:item_pipe_mk2";
+pub const BLOCK_ITEM_PIPE_MK3: &str = "rusty_factory:item_pipe_mk3";
+
+pub fn is_item_pipe(block: &str) -> bool {
+    matches!(block, BLOCK_ITEM_PIPE | BLOCK_ITEM_PIPE_MK2 | BLOCK_ITEM_PIPE_MK3)
+}
+
+pub fn item_pipe_ticks(block: &str) -> i32 {
+    match block {
+        BLOCK_ITEM_PIPE_MK2 => 4,
+        BLOCK_ITEM_PIPE_MK3 => 1,
+        _ => 10,
+    }
+}
+
+pub fn item_pipe_batch(block: &str) -> u32 {
+    match block {
+        BLOCK_ITEM_PIPE_MK2 => 16,
+        BLOCK_ITEM_PIPE_MK3 => 64,
+        _ => 4,
+    }
+}
 pub const BLOCK_EXTRACTOR: &str = "rusty_factory:item_extractor";
 pub const BLOCK_CRUSHER: &str = "rusty_factory:electric_crusher";
 pub const BLOCK_FURNACE: &str = "rusty_factory:electric_furnace";
@@ -97,6 +119,28 @@ pub const BLOCK_TRASH_CAN: &str = "rusty_factory:void_trash_can";
 pub const BLOCK_ENERGY_RELAY: &str = "rusty_factory:energy_relay";
 pub const BLOCK_CHARGING_PAD: &str = "rusty_factory:charging_pad";
 pub const BLOCK_FLUID_PIPE: &str = "rusty_factory:fluid_pipe";
+pub const BLOCK_FLUID_PIPE_MK2: &str = "rusty_factory:fluid_pipe_mk2";
+pub const BLOCK_FLUID_PIPE_MK3: &str = "rusty_factory:fluid_pipe_mk3";
+
+pub fn is_fluid_pipe(block: &str) -> bool {
+    matches!(block, BLOCK_FLUID_PIPE | BLOCK_FLUID_PIPE_MK2 | BLOCK_FLUID_PIPE_MK3)
+}
+
+pub fn fluid_pipe_rate(block: &str) -> i32 {
+    match block {
+        BLOCK_FLUID_PIPE_MK2 => 1000,
+        BLOCK_FLUID_PIPE_MK3 => 4000,
+        _ => 250,
+    }
+}
+
+pub fn fluid_pipe_cap(block: &str) -> i32 {
+    match block {
+        BLOCK_FLUID_PIPE_MK2 => 4000,
+        BLOCK_FLUID_PIPE_MK3 => 16000,
+        _ => 1000,
+    }
+}
 pub const BLOCK_ITEM_SPLITTER: &str = "rusty_factory:item_splitter";
 pub const BLOCK_ALLOY_SMELTER: &str = "rusty_factory:alloy_smelter";
 pub const BLOCK_UPGRADE_STATION: &str = "rusty_factory:upgrade_station";
@@ -278,8 +322,8 @@ impl MachineKind {
             BLOCK_BREAKER => Some(Self::BlockBreaker),
             BLOCK_PLACER => Some(Self::BlockPlacer),
             BLOCK_CONVEYOR | BLOCK_CONVEYOR_MK2 | BLOCK_CONVEYOR_MK3 => Some(Self::ConveyorBelt),
-            BLOCK_ITEM_PIPE => Some(Self::ItemPipe),
-            BLOCK_FLUID_PIPE => Some(Self::FluidPipe),
+            BLOCK_ITEM_PIPE | BLOCK_ITEM_PIPE_MK2 | BLOCK_ITEM_PIPE_MK3 => Some(Self::ItemPipe),
+            BLOCK_FLUID_PIPE | BLOCK_FLUID_PIPE_MK2 | BLOCK_FLUID_PIPE_MK3 => Some(Self::FluidPipe),
             BLOCK_ITEM_SPLITTER => Some(Self::ItemSplitter),
             BLOCK_ENERGY_MONITOR => Some(Self::EnergyMonitor),
             BLOCK_FLUID_TANK => Some(Self::FluidTank),

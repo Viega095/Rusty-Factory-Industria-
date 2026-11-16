@@ -117,5 +117,9 @@
   "item.rusty_factory.quantum_chestplate": "Pechera Cuántica (Tier 3)",
   "item.rusty_factory.quantum_leggings": "Pantalones Cuánticos (Tier 3)",
   "item.rusty_factory.quantum_boots": "Botas Cuánticas (Tier 3)",
-  "block.rusty_factory.silo_controller": "Controlador de Silos"
+  "block.rusty_factory.silo_controller": "Controlador de Silos",
+  "block.rusty_factory.item_pipe_mk2": "Tubería de Ítems Reforzada (MK2)",
+  "block.rusty_factory.item_pipe_mk3": "Tubería de Ítems Cuántica (MK3)",
+  "block.rusty_factory.fluid_pipe_mk2": "Tubería de Fluidos Reforzada (MK2)",
+  "block.rusty_factory.fluid_pipe_mk3": "Tubería de Fluidos Cuántica (MK3)"
 }

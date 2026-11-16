@@ -493,7 +493,7 @@ fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
         let is_air = matches!(tb.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air");
         let leftover = if rules::is_conveyor_block(&tb) {
             insert_into_conveyor(game, target, stack.clone())
-        } else if tb == rules::BLOCK_ITEM_PIPE {
+        } else if rules::is_item_pipe(&tb) {
             insert_into_pipe(game, pos, target, stack.clone(), None)
         } else if tb == rules::BLOCK_INDUSTRIAL_SILO {
             insert_into_silo(game, target, stack.clone())
@@ -544,7 +544,7 @@ fn insert_into_pipe(
     stack: ItemStack,
     target_pos: Option<[i32; 3]>,
 ) -> Option<ItemStack> {
-    if game.native_block(pipe_pos) != rules::BLOCK_ITEM_PIPE {
+    if !rules::is_item_pipe(&game.native_block(pipe_pos)) {
         return Some(stack);
     }
     let from_off = [from_pos[0] - pipe_pos[0], from_pos[1] - pipe_pos[1], from_pos[2] - pipe_pos[2]];
@@ -552,7 +552,7 @@ fn insert_into_pipe(
     let next_step = rules::find_next_pipe_step(
         pipe_pos,
         target_pos,
-        |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE && p != from_pos,
+        |p| rules::is_item_pipe(&game.native_block(p)) && p != from_pos,
         |p| p != from_pos && (is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p))),
     );
     let (to_dir, final_target) = if let Some((step, tgt)) = next_step {
@@ -623,13 +623,13 @@ fn route_item_from(game: &mut Game<'_>, source_pos: [i32; 3], mut stack: ItemSta
     // 2. Try adjacent item_pipes if the network has a reachable target
     let targets = rules::find_connected_item_targets(
         source_pos,
-        |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
+        |p| rules::is_item_pipe(&game.native_block(p)),
         |p| p != source_pos && (is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p)) || game.native_block(p) == rules::BLOCK_ITEM_SPLITTER),
     );
     if !targets.is_empty() {
         for d in rules::DIRS {
             let adj = [source_pos[0] + d[0], source_pos[1] + d[1], source_pos[2] + d[2]];
-            if game.native_block(adj) == rules::BLOCK_ITEM_PIPE {
+            if rules::is_item_pipe(&game.native_block(adj)) {
                 if insert_into_pipe(game, source_pos, adj, stack.clone(), None).is_none() {
                     return None;
                 }
@@ -750,12 +750,12 @@ fn tick_item_pipe(
     if state.belt_item.is_empty() {
         return;
     }
-    const PIPE_TICKS: i32 = 10;
-    if state.progress < PIPE_TICKS {
+    let pipe_ticks = rules::item_pipe_ticks(&entity.id);
+    if state.progress < pipe_ticks {
         state.progress += 1;
         store_state(entity, state);
         game.native_block_entity_sync(pos);
-        if state.progress < PIPE_TICKS {
+        if state.progress < pipe_ticks {
             return;
         }
     }
@@ -772,7 +772,7 @@ fn tick_item_pipe(
     let next_step = rules::find_next_pipe_step(
         pos,
         preferred,
-        |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE && p != from_pos,
+        |p| rules::is_item_pipe(&game.native_block(p)) && p != from_pos,
         is_pipe_target,
     );
 
@@ -804,7 +804,7 @@ fn tick_item_pipe(
     };
 
     let step_block = game.native_block(step_pos);
-    let leftover = if step_block == rules::BLOCK_ITEM_PIPE {
+    let leftover = if rules::is_item_pipe(&step_block) {
         insert_into_pipe(game, pos, step_pos, stack.clone(), Some(final_target))
     } else if step_block == rules::BLOCK_ITEM_SPLITTER {
         insert_into_splitter(game, step_pos, stack.clone())
@@ -840,7 +840,7 @@ fn tick_item_pipe(
             state.pipe_has_target = false;
             let all_targets = rules::find_connected_item_targets(
                 pos,
-                |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
+                |p| rules::is_item_pipe(&game.native_block(p)),
                 |p| {
                     p != final_target
                         && p != step_pos
@@ -854,11 +854,11 @@ fn tick_item_pipe(
                 if let Some((alt_step, _)) = rules::find_next_pipe_step(
                     pos,
                     Some(alt),
-                    |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
+                    |p| rules::is_item_pipe(&game.native_block(p)),
                     |p| p == alt,
                 ) {
                     let alt_blk = game.native_block(alt_step);
-                    let rem = if alt_blk == rules::BLOCK_ITEM_PIPE {
+                    let rem = if rules::is_item_pipe(&alt_blk) {
                         insert_into_pipe(game, pos, alt_step, stack.clone(), Some(alt))
                     } else if alt_blk == rules::BLOCK_ITEM_SPLITTER {
                         insert_into_splitter(game, alt_step, stack.clone())
@@ -1067,7 +1067,7 @@ fn tick_conveyor(
         insert_into_conveyor(game, front_pos, stack)
     } else if front_block == rules::BLOCK_ITEM_SPLITTER {
         insert_into_splitter(game, front_pos, stack)
-    } else if front_block == rules::BLOCK_ITEM_PIPE {
+    } else if rules::is_item_pipe(&front_block) {
         insert_into_pipe(game, pos, front_pos, stack, None)
     } else if front_block == rules::BLOCK_INDUSTRIAL_SILO {
         insert_into_silo(game, front_pos, stack)
@@ -1409,11 +1409,18 @@ fn tick_extractor(
         let filter_item = entity.items[rules::SLOT_INPUT]
             .as_ref()
             .map(|s| s.item.to_string());
-        let batch_size = (2 + speed_upgrades.min(8) * 2).min(16);
+        let mut pipe_batch = 4u32;
+        for [dx, dy, dz] in rules::NEIGHBORS_6 {
+            let b = game.native_block([pos[0] + dx, pos[1] + dy, pos[2] + dz]);
+            if rules::is_item_pipe(&b) {
+                pipe_batch = pipe_batch.max(rules::item_pipe_batch(&b));
+            }
+        }
+        let batch_size = ((2 + speed_upgrades.min(8) * 2).min(16)).max(pipe_batch);
 
         let targets = rules::find_connected_item_targets(
             pos,
-            |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
+            |p| rules::is_item_pipe(&game.native_block(p)),
             |p| is_item_container_block(&game.native_block(p)),
         );
 
@@ -1887,27 +1894,30 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                     status = StepStatus::Working;
                     let pump_mb = 100 + (speed_upgrades.min(8) as i32) * 50;
                     let mut tank_targets: Vec<[i32; 3]> = Vec::new();
+                    let mut pipe_bonus = 0i32;
                     for [dx, dy, dz] in rules::NEIGHBORS_6 {
                         let target = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
                         let tb = game.native_block(target);
                         if tb == rules::BLOCK_FLUID_TANK {
                             tank_targets.push(target);
-                        } else if tb == rules::BLOCK_FLUID_PIPE {
+                        } else if rules::is_fluid_pipe(&tb) {
+                            pipe_bonus = pipe_bonus.max(rules::fluid_pipe_rate(&tb));
                             game.native_with_mod_block_entity(target, |p_ent| {
                                 let mut p_st = load_state(p_ent).unwrap_or_else(|| MachineState::new(MachineKind::FluidPipe));
                                 p_st.fluid_kind = fk.to_owned();
-                                p_st.fluid_amount = 100;
+                                p_st.fluid_amount = rules::fluid_pipe_cap(&tb);
                                 store_state(p_ent, &p_st);
                             });
                             game.native_block_entity_sync(target);
                             let tanks = rules::find_connected_item_targets(
                                 target,
-                                |p| game.native_block(p) == rules::BLOCK_FLUID_PIPE,
+                                |p| rules::is_fluid_pipe(&game.native_block(p)),
                                 |p| game.native_block(p) == rules::BLOCK_FLUID_TANK,
                             );
                             tank_targets.extend(tanks);
                         }
                     }
+                    let effective_pump_mb = pump_mb.max(pipe_bonus);
                     for tank_pos in tank_targets {
                         let mut filled_now = false;
                         game.native_with_mod_block_entity(tank_pos, |t_ent| {
@@ -1916,7 +1926,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                                 && t_st.fluid_amount < rules::FLUID_TANK_MAX_MB
                             {
                                 t_st.fluid_kind = fk.to_owned();
-                                t_st.fluid_amount = (t_st.fluid_amount + pump_mb).min(rules::FLUID_TANK_MAX_MB);
+                                t_st.fluid_amount = (t_st.fluid_amount + effective_pump_mb).min(rules::FLUID_TANK_MAX_MB);
                                 store_state(t_ent, &t_st);
                                 filled_now = true;
                             }
@@ -1970,7 +1980,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         if state.fluid_amount < 500 {
             for d in rules::DIRS {
                 let adj = [pos[0] + d[0], pos[1] + d[1], pos[2] + d[2]];
-                if matches!(game.native_block(adj).as_str(), rules::BLOCK_FLUID_TANK | rules::BLOCK_FLUID_PIPE) {
+                if matches!(game.native_block(adj).as_str(), rules::BLOCK_FLUID_TANK | rules::BLOCK_FLUID_PIPE | rules::BLOCK_FLUID_PIPE_MK2 | rules::BLOCK_FLUID_PIPE_MK3) {
                     let mut pulled = 0;
                     game.native_with_mod_block_entity(adj, |other| {
                         if let Some(mut ost) = load_state(other) {
@@ -2025,7 +2035,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         if state.fluid_amount < 500 {
             for d in rules::DIRS {
                 let adj = [pos[0] + d[0], pos[1] + d[1], pos[2] + d[2]];
-                if matches!(game.native_block(adj).as_str(), rules::BLOCK_STEAM_BOILER | rules::BLOCK_FLUID_TANK | rules::BLOCK_FLUID_PIPE) {
+                if matches!(game.native_block(adj).as_str(), rules::BLOCK_STEAM_BOILER | rules::BLOCK_FLUID_TANK | rules::BLOCK_FLUID_PIPE | rules::BLOCK_FLUID_PIPE_MK2 | rules::BLOCK_FLUID_PIPE_MK3) {
                     let mut pulled = 0;
                     game.native_with_mod_block_entity(adj, |other| {
                         if let Some(mut ost) = load_state(other) {
@@ -2968,7 +2978,7 @@ pub(in crate::game) fn submit(
         return;
     }
 
-    if block == rules::BLOCK_ITEM_PIPE {
+    if rules::is_item_pipe(block) {
         let Some(st) = load_state(entity) else {
             return;
         };
@@ -3218,7 +3228,7 @@ pub(in crate::game) fn world_primitives(
             continue;
         }
 
-        if entity.id == rules::BLOCK_FLUID_PIPE {
+        if rules::is_fluid_pipe(&entity.id) {
             let st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::FluidPipe));
             if st.fluid_amount > 0 && !st.fluid_kind.is_empty() {
                 let col = match st.fluid_kind.as_str() {
@@ -3610,7 +3620,7 @@ fn compute_belt_shape(game: &Game<'_>, pos: [i32; 3], facing: &str) -> &'static 
             // Do not turn into a belt that is pointing directly into us
             target_front != [-into_dir[0], 0, -into_dir[2]]
         } else {
-            b == rules::BLOCK_ITEM_PIPE || b == rules::BLOCK_ITEM_SPLITTER || is_item_container_block(&b)
+            rules::is_item_pipe(&b) || b == rules::BLOCK_ITEM_SPLITTER || is_item_container_block(&b)
         }
     };
 
@@ -3719,7 +3729,7 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
         return;
     }
     let block_id = game.native_block(pos);
-    if block_id == rules::BLOCK_ITEM_PIPE || rules::is_conveyor_block(&block_id) {
+    if rules::is_item_pipe(&block_id) || rules::is_conveyor_block(&block_id) {
         let mut dropped_item: Option<(String, u32)> = None;
         game.native_with_mod_block_entity(pos, |entity| {
             if let Some(mut st) = load_state(entity) {
@@ -4304,7 +4314,7 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
             // Allow placing filters (Item Splitter), other belts, pipes, or extractors directly against belts!
             let is_placeable_logistics = held_id == rules::BLOCK_ITEM_SPLITTER
                 || rules::is_conveyor_block(held_id)
-                || held_id == rules::BLOCK_ITEM_PIPE
+                || rules::is_item_pipe(held_id)
                 || held_id == rules::BLOCK_EXTRACTOR;
             if is_placeable_logistics {
                 *canceled = true;
@@ -4457,7 +4467,7 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
     if let Some((ref held_id, _, _)) = held_info {
         // 1. Wrench: Rotate machine facing (normal click) or dismantle into inventory (crouch + click)
         if held_id == rules::ITEM_WRENCH {
-            if block_id == rules::BLOCK_ITEM_PIPE {
+            if rules::is_item_pipe(&block_id) {
                 *canceled = true;
                 if is_crouching {
                     destroy_block(game, pos);
@@ -4469,7 +4479,7 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 } else {
                     let targets = rules::find_connected_item_targets(
                         pos,
-                        |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
+                        |p| rules::is_item_pipe(&game.native_block(p)),
                         |p| is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p)),
                     );
                     if let Some(who) = game.native_acting_player() {
@@ -4539,11 +4549,11 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 return;
             }
 
-            if block_id == rules::BLOCK_ITEM_PIPE {
+            if rules::is_item_pipe(&block_id) {
                 *canceled = true;
                 let targets = rules::find_connected_item_targets(
                     pos,
-                    |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
+                    |p| rules::is_item_pipe(&game.native_block(p)),
                     |p| is_item_container_block(&game.native_block(p)),
                 );
                 if let Some(who) = game.native_acting_player() {
@@ -4555,11 +4565,11 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 return;
             }
 
-            if block_id == rules::BLOCK_FLUID_PIPE {
+            if rules::is_fluid_pipe(&block_id) {
                 *canceled = true;
                 let targets = rules::find_connected_item_targets(
                     pos,
-                    |p| game.native_block(p) == rules::BLOCK_FLUID_PIPE,
+                    |p| rules::is_fluid_pipe(&game.native_block(p)),
                     |p| matches!(game.native_block(p).as_str(), rules::BLOCK_FLUID_TANK | rules::BLOCK_STEAM_BOILER | rules::BLOCK_FLUID_PUMP),
                 );
                 if let Some(who) = game.native_acting_player() {
@@ -5025,11 +5035,11 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
         return;
     }
 
-    if block_id == rules::BLOCK_ITEM_PIPE {
+    if rules::is_item_pipe(&block_id) {
         let dim = game.native_dimension();
         let targets = rules::find_connected_item_targets(
             pos,
-            |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
+            |p| rules::is_item_pipe(&game.native_block(p)),
             |p| is_item_container_block(&game.native_block(p)),
         );
         // Silently pull up to 4 items from adjacent container and route through the pipe network
@@ -6238,8 +6248,12 @@ pub(in crate::game) fn tooltip(
             "§7Divide y filtra ítems en 3 salidas (Izq / Frente / Der).",
             "§b• Clic en cada cara para asignar su filtro",
         ],
-        rules::BLOCK_ITEM_PIPE => &["§7Tubería de vidrio para transportar ítems entre inventarios."],
-        rules::BLOCK_FLUID_PIPE => &["§7Tubería para mover fluidos entre tanques y máquinas."],
+        rules::BLOCK_ITEM_PIPE => &["§7Tubería de vidrio para transportar ítems (4 ítems, velocidad base)."],
+        rules::BLOCK_ITEM_PIPE_MK2 => &["§eTubería de Ítems MK2: transporta hasta 16 ítems por pulso (2.5x más rápida)."],
+        rules::BLOCK_ITEM_PIPE_MK3 => &["§bTubería de Ítems MK3: transporta stacks completos (64 ítems) al instante."],
+        rules::BLOCK_FLUID_PIPE => &["§7Tubería de fluidos (250 mB/t, capacidad 1,000 mB)."],
+        rules::BLOCK_FLUID_PIPE_MK2 => &["§eTubería de Fluidos MK2 (1,000 mB/t, capacidad 4,000 mB)."],
+        rules::BLOCK_FLUID_PIPE_MK3 => &["§bTubería de Fluidos MK3 (4,000 mB/t, capacidad 16,000 mB)."],
         rules::BLOCK_EXTRACTOR => &["§7Extrae ítems de cofres/máquinas hacia tubos o cintas."],
         rules::BLOCK_CABLE_WHITE => &["§7Cable básico de energía (hasta 120 FE/t)."],
         rules::BLOCK_CABLE_COPPER => &["§7Cable de cobre (hasta 360 FE/t)."],

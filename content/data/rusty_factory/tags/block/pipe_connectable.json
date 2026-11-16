@@ -33,6 +33,8 @@
     "rusty_factory:industrial_silo",
     "rusty_factory:tesseract",
     "rusty_factory:recycler",
-    "rusty_factory:silo_controller"
+    "rusty_factory:silo_controller",
+    "rusty_factory:item_pipe_mk2",
+    "rusty_factory:item_pipe_mk3"
   ]
 }

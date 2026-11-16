@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "DPD",
+    "PEP",
+    "DPD"
+  ],
+  "key": {
+    "D": "minecraft:diamond",
+    "P": "rusty_factory:item_pipe_mk2",
+    "E": "minecraft:ender_pearl"
+  },
+  "result": {
+    "id": "rusty_factory:item_pipe_mk3",
+    "count": 4
+  }
+}
