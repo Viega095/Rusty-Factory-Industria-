@@ -1887,22 +1887,33 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             }
         }
         if player_on_pad && state.energy > 0 {
-            let mut transferred = 0;
-            for slot in game.inventory.iter_mut() {
-                if let Some(st) = slot.as_mut() {
+            let mut candidates: Vec<(bool, u32, usize, i32, i32)> = Vec::new();
+            for (idx, slot) in game.inventory.iter().enumerate() {
+                if let Some(st) = slot.as_ref() {
                     if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
                         let cur = get_item_energy(st);
                         if cur < cap {
-                            let add = 250.min(cap - cur).min(state.energy - transferred);
-                            if add > 0 {
-                                set_item_energy(st, cur + add);
-                                transferred += add;
-                            }
+                            let is_battery = st.item.as_ref() == rules::ITEM_BATTERY
+                                || st.item.as_ref() == rules::ITEM_BATTERY_MK2;
+                            let pct = ((cur as i64 * 1000) / cap.max(1) as i64) as u32;
+                            // False < True so tools/armor come BEFORE batteries, then lowest % first
+                            candidates.push((is_battery, pct, idx, cur, cap));
                         }
                     }
                 }
+            }
+            candidates.sort_by_key(|c| (c.0, c.1));
+            let mut transferred = 0;
+            for (_, _, idx, cur, cap) in candidates {
                 if transferred >= state.energy {
                     break;
+                }
+                if let Some(Some(st)) = game.inventory.get_mut(idx) {
+                    let add = 500.min(cap - cur).min(state.energy - transferred);
+                    if add > 0 {
+                        set_item_energy(st, cur + add);
+                        transferred += add;
+                    }
                 }
             }
             state.energy -= transferred;
@@ -4767,5 +4778,118 @@ pub(in crate::game) fn tooltip(
             Text::legacy(&format!("§e⛏ Modo actual: §f{mode}")),
             0xFFFF_D038,
         ));
+    }
+}
+
+pub(in crate::game) fn hud(
+    game: &mut Game<'_>,
+    batch: &mut HudBatch,
+    corners: &mut horizon_client::extras_hud::Corners,
+) {
+    if !game.native_on(rules::ID) {
+        return;
+    }
+
+    // 1. Collect held tech item (tool or portable battery)
+    let held_entry: Option<(String, i32, i32)> = game.held().and_then(|st| {
+        let cap = rules::battery_capacity(st.item.as_ref())?;
+        let cur = get_item_energy(st);
+        let label = match st.item.as_ref() {
+            rules::ITEM_MINING_DRILL => {
+                let m = if is_drill_3x3(st) { "3x3" } else { "1x1" };
+                format!("Taladro ({m})")
+            }
+            rules::ITEM_MINING_LASER => "Láser Minero".to_owned(),
+            rules::ITEM_BATTERY => "Batería MK1".to_owned(),
+            rules::ITEM_BATTERY_MK2 => "Batería MK2".to_owned(),
+            rules::ITEM_JETPACK => "Jetpack".to_owned(),
+            rules::ITEM_JET_BOOTS => "Botas Cohete".to_owned(),
+            rules::ITEM_SOLAR_HELMET => "Casco Solar".to_owned(),
+            _ => "Equipo Tech".to_owned(),
+        };
+        Some((label, cur, cap))
+    });
+
+    // 2. Collect equipped tech armor (slots 36..40)
+    let mut armor_cur: i32 = 0;
+    let mut armor_cap: i32 = 0;
+    let mut armor_pieces: usize = 0;
+    for slot in game.inventory.iter().skip(36).take(4) {
+        if let Some(st) = slot.as_ref() {
+            if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
+                armor_cur += get_item_energy(st);
+                armor_cap += cap;
+                armor_pieces += 1;
+            }
+        }
+    }
+
+    // 3. Collect reserve portable batteries in inventory
+    let mut bat_cur: i32 = 0;
+    let mut bat_cap: i32 = 0;
+    for slot in game.inventory.iter().take(36) {
+        if let Some(st) = slot.as_ref() {
+            if st.item.as_ref() == rules::ITEM_BATTERY || st.item.as_ref() == rules::ITEM_BATTERY_MK2 {
+                bat_cur += get_item_energy(st);
+                bat_cap += rules::battery_capacity(st.item.as_ref()).unwrap_or(50_000);
+            }
+        }
+    }
+
+    if held_entry.is_none() && armor_pieces == 0 {
+        return;
+    }
+
+    let mut rows = 1usize; // Title
+    if held_entry.is_some() {
+        rows += 1;
+    }
+    if armor_pieces > 0 {
+        rows += 1;
+    }
+    if bat_cap > 0 {
+        rows += 1;
+    }
+
+    let w = 148.0_f32;
+    let h = 10.0 + rows as f32 * 18.0;
+    let (x, y) = corners.place(horizon_client::extras::Corner::BottomRight, w, h);
+
+    // Dark industrial background + cyan border
+    game.native_fill(batch, [x, y, w, h], 0xB812_161E);
+    game.native_fill(batch, [x, y, w, 1.5], 0xFF38_F2FF);
+    game.native_fill(batch, [x, y + h - 1.5, w, 1.5], 0xFF28_5066);
+    game.native_fill(batch, [x, y, 1.5, h], 0xFF38_F2FF);
+    game.native_fill(batch, [x + w - 1.5, y, 1.5, h], 0xFF28_5066);
+
+    game.native_text(batch, "⚡ ENERGÍA TECH", [x + 6.0, y + 5.0], 0xFF38_F2FF, true);
+
+    let mut ry = y + 18.0;
+    let draw_bar = |g: &Game<'_>, b: &mut HudBatch, label: &str, cur: i32, cap: i32, row_y: f32, col: u32| {
+        let pct = ((cur as f32 / cap.max(1) as f32) * 100.0).clamp(0.0, 100.0);
+        g.native_text(
+            b,
+            &format!("{label}: {}%", pct as i32),
+            [x + 6.0, row_y],
+            0xFFE8_EEF8,
+            true,
+        );
+        g.native_fill(b, [x + 6.0, row_y + 10.0, w - 12.0, 4.0], 0xFF22_2834);
+        let fill_w = ((w - 12.0) * (pct / 100.0)).clamp(0.0, w - 12.0);
+        if fill_w > 0.5 {
+            g.native_fill(b, [x + 6.0, row_y + 10.0, fill_w, 4.0], col);
+        }
+    };
+
+    if let Some((ref label, cur, cap)) = held_entry {
+        draw_bar(game, batch, label, cur, cap, ry, 0xFF38_F2FF);
+        ry += 18.0;
+    }
+    if armor_pieces > 0 {
+        draw_bar(game, batch, &format!("Armadura ({armor_pieces}p)"), armor_cur, armor_cap, ry, 0xFF55_FF88);
+        ry += 18.0;
+    }
+    if bat_cap > 0 {
+        draw_bar(game, batch, "Baterías", bat_cur, bat_cap, ry, 0xFFFF_C800);
     }
 }

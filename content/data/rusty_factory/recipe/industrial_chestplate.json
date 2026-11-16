@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "S S",
+    "SBS",
+    "PEP"
+  ],
+  "key": {
+    "S": "rusty_factory:steel_ingot",
+    "B": "rusty_factory:energy_battery",
+    "P": "rusty_factory:iron_plate",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:industrial_chestplate",
+    "count": 1
+  }
+}

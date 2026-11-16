@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "GCG",
+    "BEB",
+    "GCG"
+  ],
+  "key": {
+    "G": "rusty_factory:gold_plate",
+    "C": "rusty_factory:cable_gold",
+    "B": "rusty_factory:energy_battery",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:energy_battery_mk2",
+    "count": 1
+  }
+}

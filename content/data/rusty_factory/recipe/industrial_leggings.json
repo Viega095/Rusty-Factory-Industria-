@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "SSS",
+    "P P",
+    "G G"
+  ],
+  "key": {
+    "S": "rusty_factory:steel_ingot",
+    "P": "rusty_factory:iron_plate",
+    "G": "rusty_factory:steel_gear"
+  },
+  "result": {
+    "id": "rusty_factory:industrial_leggings",
+    "count": 1
+  }
+}

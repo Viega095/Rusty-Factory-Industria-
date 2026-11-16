@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "   ",
+    "S S",
+    "RGR"
+  ],
+  "key": {
+    "S": "rusty_factory:steel_ingot",
+    "R": "rusty_factory:rubber_sheet",
+    "G": "rusty_factory:steel_gear"
+  },
+  "result": {
+    "id": "rusty_factory:industrial_boots",
+    "count": 1
+  }
+}

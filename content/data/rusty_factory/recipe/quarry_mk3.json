@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "RER",
+    "NQN",
+    "CBC"
+  ],
+  "key": {
+    "R": "rusty_factory:cable_red",
+    "E": "rusty_factory:electronic_circuit",
+    "N": "minecraft:netherite_ingot",
+    "Q": "rusty_factory:quarry_mk2",
+    "C": "rusty_factory:diamond_drill_head",
+    "B": "rusty_factory:energy_battery_mk2"
+  },
+  "result": {
+    "id": "rusty_factory:quarry_mk3",
+    "count": 1
+  }
+}

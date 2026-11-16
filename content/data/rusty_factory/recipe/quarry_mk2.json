@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "EDE",
+    "CQC",
+    "GSG"
+  ],
+  "key": {
+    "E": "rusty_factory:electronic_circuit",
+    "D": "rusty_factory:diamond_drill_head",
+    "C": "rusty_factory:cable_gold",
+    "Q": "rusty_factory:quarry",
+    "G": "rusty_factory:steel_gear",
+    "S": "rusty_factory:energy_battery"
+  },
+  "result": {
+    "id": "rusty_factory:quarry_mk2",
+    "count": 1
+  }
+}
