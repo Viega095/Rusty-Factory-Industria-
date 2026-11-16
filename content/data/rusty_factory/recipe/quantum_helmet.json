@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "NRN",
+    "IHI",
+    "EBE"
+  ],
+  "key": {
+    "N": "minecraft:netherite_ingot",
+    "R": "rusty_factory:cable_red",
+    "I": "rusty_factory:industrial_helmet",
+    "H": "rusty_factory:solar_helmet",
+    "E": "rusty_factory:electronic_circuit",
+    "B": "rusty_factory:energy_battery_mk2"
+  },
+  "result": {
+    "id": "rusty_factory:quantum_helmet",
+    "count": 1
+  }
+}

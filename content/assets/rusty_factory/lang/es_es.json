@@ -108,5 +108,13 @@
   "item.rusty_factory.silo_upgrade_5k": "Mejora de Silo (+5K)",
   "item.rusty_factory.silo_upgrade_10k": "Mejora de Silo (+10K)",
   "item.rusty_factory.silo_upgrade_100k": "Mejora de Silo (+100K)",
-  "item.rusty_factory.silo_upgrade_500k": "Mejora de Silo (+500K)"
+  "item.rusty_factory.silo_upgrade_500k": "Mejora de Silo (+500K)",
+  "item.rusty_factory.steel_helmet": "Casco de Acero (Tier 1)",
+  "item.rusty_factory.steel_chestplate": "Pechera de Acero (Tier 1)",
+  "item.rusty_factory.steel_leggings": "Pantalones de Acero (Tier 1)",
+  "item.rusty_factory.steel_boots": "Botas de Acero (Tier 1)",
+  "item.rusty_factory.quantum_helmet": "Casco Cuántico (Tier 3)",
+  "item.rusty_factory.quantum_chestplate": "Pechera Cuántica (Tier 3)",
+  "item.rusty_factory.quantum_leggings": "Pantalones Cuánticos (Tier 3)",
+  "item.rusty_factory.quantum_boots": "Botas Cuánticas (Tier 3)"
 }

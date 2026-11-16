@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "NRN",
+    "IJI",
+    "EBE"
+  ],
+  "key": {
+    "N": "minecraft:netherite_ingot",
+    "R": "rusty_factory:cable_red",
+    "I": "rusty_factory:industrial_boots",
+    "J": "rusty_factory:jet_boots",
+    "E": "rusty_factory:electronic_circuit",
+    "B": "rusty_factory:energy_battery_mk2"
+  },
+  "result": {
+    "id": "rusty_factory:quantum_boots",
+    "count": 1
+  }
+}

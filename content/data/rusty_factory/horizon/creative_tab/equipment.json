@@ -21,6 +21,14 @@
     "rusty_factory:electric_chainsaw",
     "rusty_factory:battery_pack",
     "rusty_factory:jetpack_mk2",
-    "rusty_factory:energy_scanner"
+    "rusty_factory:energy_scanner",
+    "rusty_factory:steel_helmet",
+    "rusty_factory:steel_chestplate",
+    "rusty_factory:steel_leggings",
+    "rusty_factory:steel_boots",
+    "rusty_factory:quantum_helmet",
+    "rusty_factory:quantum_chestplate",
+    "rusty_factory:quantum_leggings",
+    "rusty_factory:quantum_boots"
   ]
 }

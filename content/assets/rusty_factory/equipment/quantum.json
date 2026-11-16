@@ -1,0 +1,14 @@
+{
+  "layers": {
+    "humanoid": [
+      {
+        "texture": "rusty_factory:quantum"
+      }
+    ],
+    "humanoid_leggings": [
+      {
+        "texture": "rusty_factory:quantum"
+      }
+    ]
+  }
+}

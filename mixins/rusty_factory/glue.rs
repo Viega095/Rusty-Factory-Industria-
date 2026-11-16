@@ -2249,7 +2249,19 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             }
         }
         if player_on_pad && state.energy > 0 {
-            let mut candidates: Vec<(bool, u32, usize, i32, i32)> = Vec::new();
+            // (is_battery, pct, is_armor, idx, cur, cap)
+            let mut candidates: Vec<(bool, u32, bool, usize, i32, i32)> = Vec::new();
+            for (idx, slot) in game.armor.iter().enumerate() {
+                if let Some(st) = slot.as_ref() {
+                    if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
+                        let cur = get_item_energy(st);
+                        if cur < cap {
+                            let pct = ((cur as i64 * 1000) / cap.max(1) as i64) as u32;
+                            candidates.push((false, pct, true, idx, cur, cap));
+                        }
+                    }
+                }
+            }
             for (idx, slot) in game.inventory.iter().enumerate() {
                 if let Some(st) = slot.as_ref() {
                     if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
@@ -2257,19 +2269,23 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                         if cur < cap {
                             let is_battery = rules::is_battery_item(st.item.as_ref());
                             let pct = ((cur as i64 * 1000) / cap.max(1) as i64) as u32;
-                            // False < True so tools/armor come BEFORE batteries, then lowest % first
-                            candidates.push((is_battery, pct, idx, cur, cap));
+                            candidates.push((is_battery, pct, false, idx, cur, cap));
                         }
                     }
                 }
             }
             candidates.sort_by_key(|c| (c.0, c.1));
             let mut transferred = 0;
-            for (_, _, idx, cur, cap) in candidates {
+            for (_, _, is_armor, idx, cur, cap) in candidates {
                 if transferred >= state.energy {
                     break;
                 }
-                if let Some(Some(st)) = game.inventory.get_mut(idx) {
+                let slot_opt = if is_armor {
+                    game.armor.get_mut(idx)
+                } else {
+                    game.inventory.get_mut(idx)
+                };
+                if let Some(Some(st)) = slot_opt {
                     let add = 500.min(cap - cur).min(state.energy - transferred);
                     if add > 0 {
                         set_item_energy(st, cur + add);
@@ -5337,26 +5353,29 @@ fn tick_player_equipment(game: &mut Game<'_>) {
     }
     LAST_EQUIP_TICK.store(now, std::sync::atomic::Ordering::Relaxed);
 
-    // 1. Solar Helmet passive daytime charge into inventory batteries & tools
-    let has_solar_helmet = game.inventory.iter().any(|s| {
-        s.as_ref().is_some_and(|st| st.item.as_ref() == rules::ITEM_SOLAR_HELMET)
+    // 1. Solar / Quantum Helmet passive daytime charge into worn armor, batteries & tools
+    let has_solar_helmet = game.armor[0].as_ref().is_some_and(|st| {
+        st.item.as_ref() == rules::ITEM_SOLAR_HELMET || st.item.as_ref() == rules::ITEM_QUANTUM_HELMET
     });
     let is_day = (game.native_day_time().rem_euclid(24_000)) < 12_000;
     if has_solar_helmet && is_day {
-        for slot in game.inventory.iter_mut() {
+        let mut charged = false;
+        for slot in game.armor.iter_mut().chain(game.inventory.iter_mut()) {
             if let Some(st) = slot.as_mut() {
                 if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
                     let cur = get_item_energy(st);
                     if cur < cap {
-                        set_item_energy(st, cur + 40);
+                        set_item_energy(st, cur + 50);
+                        charged = true;
                         break;
                     }
                 }
             }
         }
+        let _ = charged;
     }
 
-    // 2. Portable Batteries in inventory automatically recharge tools & armor
+    // 2. Portable Batteries in inventory automatically recharge worn armor & tools
     let mut available = 0;
     for slot in game.inventory.iter() {
         if let Some(st) = slot.as_ref() {
@@ -5368,7 +5387,7 @@ fn tick_player_equipment(game: &mut Game<'_>) {
     if available > 0 {
         let mut used = 0;
         let budget = available.min(400);
-        for slot in game.inventory.iter_mut() {
+        for slot in game.armor.iter_mut().chain(game.inventory.iter_mut()) {
             if let Some(st) = slot.as_mut() {
                 let id = st.item.as_ref();
                 if !rules::is_battery_item(id) {
@@ -5408,29 +5427,39 @@ fn tick_player_equipment(game: &mut Game<'_>) {
         }
     }
 
-    // 3. Industrial Armor + Installed Modules + Jetpack MK2 Hover
-    let mut has_ind_boots = false;
-    let mut has_ind_legs = false;
-    let mut has_ind_chest = false;
-    let mut has_ind_helm = false;
-    let mut has_mod_nv = false;
-    let mut has_mod_mag = false;
+    // 3. Worn Armor Tiers (Steel / Industrial / Quantum) + Installed Modules + Jetpack MK2 Hover
+    let mut jump_lvl: i32 = -1;
+    let mut speed_lvl: i32 = -1;
+    let mut res_lvl: i32 = -1;
+    let mut has_nv = false;
+    let mut has_mag = false;
     let mut has_hover = false;
-    for slot in game.inventory.iter().skip(36).take(4) {
+    let mut has_fire_res = false;
+    for slot in game.armor.iter() {
         if let Some(st) = slot.as_ref() {
             match st.item.as_ref() {
-                rules::ITEM_INDUSTRIAL_BOOTS => has_ind_boots = true,
-                rules::ITEM_INDUSTRIAL_LEGGINGS => has_ind_legs = true,
-                rules::ITEM_INDUSTRIAL_CHESTPLATE => has_ind_chest = true,
-                rules::ITEM_INDUSTRIAL_HELMET => has_ind_helm = true,
+                rules::ITEM_INDUSTRIAL_BOOTS => jump_lvl = jump_lvl.max(0),
+                rules::ITEM_INDUSTRIAL_LEGGINGS => speed_lvl = speed_lvl.max(0),
+                rules::ITEM_INDUSTRIAL_CHESTPLATE => res_lvl = res_lvl.max(0),
+                rules::ITEM_INDUSTRIAL_HELMET => has_nv = true,
+                rules::ITEM_QUANTUM_BOOTS => {
+                    jump_lvl = jump_lvl.max(1);
+                    has_hover = true;
+                }
+                rules::ITEM_QUANTUM_LEGGINGS => speed_lvl = speed_lvl.max(1),
+                rules::ITEM_QUANTUM_CHESTPLATE => {
+                    res_lvl = res_lvl.max(1);
+                    has_fire_res = true;
+                }
+                rules::ITEM_QUANTUM_HELMET => has_nv = true,
                 rules::ITEM_JETPACK_MK2 if is_jetpack_hover(st) => has_hover = true,
                 _ => {}
             }
             if has_item_module(st, "nv") {
-                has_mod_nv = true;
+                has_nv = true;
             }
             if has_item_module(st, "mag") {
-                has_mod_mag = true;
+                has_mag = true;
             }
         }
     }
@@ -5438,19 +5467,22 @@ fn tick_player_equipment(game: &mut Game<'_>) {
         game.native_run_command("effect give @s minecraft:slow_falling 2 0 true");
     }
     if now % 40 == 0 {
-        if has_ind_boots {
-            game.native_run_command("effect give @s minecraft:jump_boost 3 0 true");
+        if jump_lvl >= 0 {
+            game.native_run_command(&format!("effect give @s minecraft:jump_boost 3 {jump_lvl} true"));
         }
-        if has_ind_legs {
-            game.native_run_command("effect give @s minecraft:speed 3 0 true");
+        if speed_lvl >= 0 {
+            game.native_run_command(&format!("effect give @s minecraft:speed 3 {speed_lvl} true"));
         }
-        if has_ind_chest {
-            game.native_run_command("effect give @s minecraft:resistance 3 0 true");
+        if res_lvl >= 0 {
+            game.native_run_command(&format!("effect give @s minecraft:resistance 3 {res_lvl} true"));
         }
-        if has_ind_helm || has_mod_nv {
+        if has_fire_res {
+            game.native_run_command("effect give @s minecraft:fire_resistance 3 0 true");
+        }
+        if has_nv {
             game.native_run_command("effect give @s minecraft:night_vision 12 0 true");
         }
-        if has_mod_mag {
+        if has_mag {
             game.native_run_command("tp @e[type=item,distance=..8] @s");
         }
     }
@@ -5532,6 +5564,13 @@ pub(in crate::game) fn tooltip(
         rules::ITEM_INDUSTRIAL_CHESTPLATE => &["§7Pechera blindada con resistencia industrial."],
         rules::ITEM_INDUSTRIAL_LEGGINGS => &["§7Pantalones motorizados con aumento de velocidad."],
         rules::ITEM_INDUSTRIAL_BOOTS => &["§7Botas hidráulicas con impulso de salto."],
+        rules::ITEM_STEEL_HELMET | rules::ITEM_STEEL_CHESTPLATE | rules::ITEM_STEEL_LEGGINGS | rules::ITEM_STEEL_BOOTS => &[
+            "§7Armadura de Acero (Tier 1): protección robusta con 25,000 FE.",
+        ],
+        rules::ITEM_QUANTUM_HELMET => &["§dCasco Cuántico (Tier 3): Visión Nocturna + carga solar."],
+        rules::ITEM_QUANTUM_CHESTPLATE => &["§dPechera Cuántica (Tier 3): Resistencia II + Ignífugo."],
+        rules::ITEM_QUANTUM_LEGGINGS => &["§dPantalones Cuánticos (Tier 3): Velocidad II motorizada."],
+        rules::ITEM_QUANTUM_BOOTS => &["§dBotas Cuánticas (Tier 3): Salto II + caída lenta."],
         rules::ITEM_ITEM_MAGNET => &["§7Atrae ítems y experiencia cercanos hacia vos."],
         rules::ITEM_WRENCH => &["§7Rota máquinas/cintas o desmantela con Shift + Clic Derecho."],
         rules::ITEM_TREETAP => &["§7Extrae savia manualmente de árboles de caucho."],
@@ -5636,29 +5675,37 @@ pub(in crate::game) fn hud(
         Some((label, cur, cap))
     });
 
-    // 2. Collect per-piece equipped tech armor (39=Head, 38=Chest, 37=Legs, 36=Feet)
+    // 2. Collect per-piece equipped tech armor from `game.armor` (0=Head, 1=Chest, 2=Legs, 3=Feet)
     let read_armor_slot = |slot_idx: usize| -> Option<(&'static str, i32, i32)> {
-        let st = game.inventory.get(slot_idx)?.as_ref()?;
+        let st = game.armor.get(slot_idx)?.as_ref()?;
         let cap = rules::battery_capacity(st.item.as_ref())?;
         let cur = get_item_energy(st);
         let short_name = match st.item.as_ref() {
             rules::ITEM_SOLAR_HELMET => "Solar",
+            rules::ITEM_STEEL_HELMET => "Acero",
             rules::ITEM_INDUSTRIAL_HELMET => "Casco",
+            rules::ITEM_QUANTUM_HELMET => "Cuánt.",
             rules::ITEM_JETPACK => "Jetpack",
             rules::ITEM_JETPACK_MK2 => "Jet MK2",
+            rules::ITEM_STEEL_CHESTPLATE => "Acero",
             rules::ITEM_INDUSTRIAL_CHESTPLATE => "Pecho",
+            rules::ITEM_QUANTUM_CHESTPLATE => "Cuánt.",
+            rules::ITEM_STEEL_LEGGINGS => "Acero",
             rules::ITEM_INDUSTRIAL_LEGGINGS => "Piernas",
+            rules::ITEM_QUANTUM_LEGGINGS => "Cuánt.",
             rules::ITEM_JET_BOOTS => "Cohete",
+            rules::ITEM_STEEL_BOOTS => "Acero",
             rules::ITEM_INDUSTRIAL_BOOTS => "Botas",
+            rules::ITEM_QUANTUM_BOOTS => "Cuánt.",
             _ => "Tech",
         };
         Some((short_name, cur, cap))
     };
 
-    let head = read_armor_slot(39);
-    let chest = read_armor_slot(38);
-    let legs = read_armor_slot(37);
-    let feet = read_armor_slot(36);
+    let head = read_armor_slot(0);
+    let chest = read_armor_slot(1);
+    let legs = read_armor_slot(2);
+    let feet = read_armor_slot(3);
     let has_any_armor = head.is_some() || chest.is_some() || legs.is_some() || feet.is_some();
 
     // 3. Collect reserve portable batteries in inventory

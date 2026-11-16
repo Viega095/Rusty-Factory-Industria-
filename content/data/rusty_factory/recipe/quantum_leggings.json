@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "NRN",
+    "ILI",
+    "EBE"
+  ],
+  "key": {
+    "N": "minecraft:netherite_ingot",
+    "R": "rusty_factory:cable_red",
+    "I": "rusty_factory:electronic_circuit",
+    "L": "rusty_factory:industrial_leggings",
+    "E": "rusty_factory:steel_gear",
+    "B": "rusty_factory:energy_battery_mk2"
+  },
+  "result": {
+    "id": "rusty_factory:quantum_leggings",
+    "count": 1
+  }
+}

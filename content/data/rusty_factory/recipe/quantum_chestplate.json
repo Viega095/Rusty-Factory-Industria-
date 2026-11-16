@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "NRN",
+    "CJC",
+    "EBE"
+  ],
+  "key": {
+    "N": "minecraft:netherite_ingot",
+    "R": "rusty_factory:cable_red",
+    "C": "rusty_factory:industrial_chestplate",
+    "J": "rusty_factory:jetpack_mk2",
+    "E": "rusty_factory:electronic_circuit",
+    "B": "rusty_factory:battery_pack"
+  },
+  "result": {
+    "id": "rusty_factory:quantum_chestplate",
+    "count": 1
+  }
+}

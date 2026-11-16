@@ -108,5 +108,13 @@
   "item.rusty_factory.silo_upgrade_5k": "Silo Upgrade (+5K)",
   "item.rusty_factory.silo_upgrade_10k": "Silo Upgrade (+10K)",
   "item.rusty_factory.silo_upgrade_100k": "Silo Upgrade (+100K)",
-  "item.rusty_factory.silo_upgrade_500k": "Silo Upgrade (+500K)"
+  "item.rusty_factory.silo_upgrade_500k": "Silo Upgrade (+500K)",
+  "item.rusty_factory.steel_helmet": "Steel Helmet (Tier 1)",
+  "item.rusty_factory.steel_chestplate": "Steel Chestplate (Tier 1)",
+  "item.rusty_factory.steel_leggings": "Steel Leggings (Tier 1)",
+  "item.rusty_factory.steel_boots": "Steel Boots (Tier 1)",
+  "item.rusty_factory.quantum_helmet": "Quantum Helmet (Tier 3)",
+  "item.rusty_factory.quantum_chestplate": "Quantum Chestplate (Tier 3)",
+  "item.rusty_factory.quantum_leggings": "Quantum Leggings (Tier 3)",
+  "item.rusty_factory.quantum_boots": "Quantum Boots (Tier 3)"
 }

@@ -144,6 +144,14 @@ pub const ITEM_SILO_UPGRADE_5K: &str = "rusty_factory:silo_upgrade_5k";
 pub const ITEM_SILO_UPGRADE_10K: &str = "rusty_factory:silo_upgrade_10k";
 pub const ITEM_SILO_UPGRADE_100K: &str = "rusty_factory:silo_upgrade_100k";
 pub const ITEM_SILO_UPGRADE_500K: &str = "rusty_factory:silo_upgrade_500k";
+pub const ITEM_STEEL_HELMET: &str = "rusty_factory:steel_helmet";
+pub const ITEM_STEEL_CHESTPLATE: &str = "rusty_factory:steel_chestplate";
+pub const ITEM_STEEL_LEGGINGS: &str = "rusty_factory:steel_leggings";
+pub const ITEM_STEEL_BOOTS: &str = "rusty_factory:steel_boots";
+pub const ITEM_QUANTUM_HELMET: &str = "rusty_factory:quantum_helmet";
+pub const ITEM_QUANTUM_CHESTPLATE: &str = "rusty_factory:quantum_chestplate";
+pub const ITEM_QUANTUM_LEGGINGS: &str = "rusty_factory:quantum_leggings";
+pub const ITEM_QUANTUM_BOOTS: &str = "rusty_factory:quantum_boots";
 
 pub fn is_battery_item(item: &str) -> bool {
     matches!(item, ITEM_BATTERY | ITEM_BATTERY_MK2 | ITEM_BATTERY_PACK)
@@ -177,6 +185,8 @@ pub fn battery_capacity(item: &str) -> Option<i32> {
         ITEM_MINING_DRILL_MK2 => Some(100_000),
         ITEM_MINING_DRILL_MK3 => Some(250_000),
         ITEM_JETPACK_MK2 => Some(500_000),
+        ITEM_STEEL_HELMET | ITEM_STEEL_CHESTPLATE | ITEM_STEEL_LEGGINGS | ITEM_STEEL_BOOTS => Some(25_000),
+        ITEM_QUANTUM_HELMET | ITEM_QUANTUM_CHESTPLATE | ITEM_QUANTUM_LEGGINGS | ITEM_QUANTUM_BOOTS => Some(250_000),
         ITEM_MINING_DRILL | ITEM_MINING_LASER | ITEM_CHAINSAW | ITEM_JETPACK | ITEM_JET_BOOTS
         | ITEM_SOLAR_HELMET | ITEM_INDUSTRIAL_HELMET | ITEM_INDUSTRIAL_CHESTPLATE
         | ITEM_INDUSTRIAL_LEGGINGS | ITEM_INDUSTRIAL_BOOTS => Some(50_000),
