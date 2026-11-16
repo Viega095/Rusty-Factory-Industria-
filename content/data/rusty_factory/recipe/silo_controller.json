@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "SCS",
+    "ERE",
+    "SIS"
+  ],
+  "key": {
+    "S": "rusty_factory:steel_ingot",
+    "C": "rusty_factory:electronic_circuit",
+    "E": "minecraft:ender_pearl",
+    "R": "rusty_factory:cable_gold",
+    "I": "rusty_factory:industrial_silo"
+  },
+  "result": {
+    "id": "rusty_factory:silo_controller",
+    "count": 1
+  }
+}

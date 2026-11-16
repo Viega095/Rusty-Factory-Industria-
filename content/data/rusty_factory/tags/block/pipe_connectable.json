@@ -32,6 +32,7 @@
     "minecraft:dispenser",
     "rusty_factory:industrial_silo",
     "rusty_factory:tesseract",
-    "rusty_factory:recycler"
+    "rusty_factory:recycler",
+    "rusty_factory:silo_controller"
   ]
 }

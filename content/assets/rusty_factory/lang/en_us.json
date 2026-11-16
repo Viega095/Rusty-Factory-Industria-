@@ -116,5 +116,6 @@
   "item.rusty_factory.quantum_helmet": "Quantum Helmet (Tier 3)",
   "item.rusty_factory.quantum_chestplate": "Quantum Chestplate (Tier 3)",
   "item.rusty_factory.quantum_leggings": "Quantum Leggings (Tier 3)",
-  "item.rusty_factory.quantum_boots": "Quantum Boots (Tier 3)"
+  "item.rusty_factory.quantum_boots": "Quantum Boots (Tier 3)",
+  "block.rusty_factory.silo_controller": "Silo Controller"
 }

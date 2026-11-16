@@ -104,6 +104,7 @@ pub const BLOCK_GEOTHERMAL: &str = "rusty_factory:geothermal_generator";
 pub const BLOCK_STEAM_TURBINE: &str = "rusty_factory:steam_turbine";
 pub const BLOCK_TESSERACT: &str = "rusty_factory:tesseract";
 pub const BLOCK_INDUSTRIAL_SILO: &str = "rusty_factory:industrial_silo";
+pub const BLOCK_SILO_CONTROLLER: &str = "rusty_factory:silo_controller";
 pub const BLOCK_RECYCLER: &str = "rusty_factory:recycler";
 
 // Item IDs (29 items)
@@ -254,6 +255,7 @@ pub enum MachineKind {
     SteamTurbine,
     Tesseract,
     IndustrialSilo,
+    SiloController,
     Recycler,
 }
 
@@ -292,6 +294,7 @@ impl MachineKind {
             BLOCK_STEAM_TURBINE => Some(Self::SteamTurbine),
             BLOCK_TESSERACT => Some(Self::Tesseract),
             BLOCK_INDUSTRIAL_SILO => Some(Self::IndustrialSilo),
+            BLOCK_SILO_CONTROLLER => Some(Self::SiloController),
             BLOCK_RECYCLER => Some(Self::Recycler),
             _ => None,
         }
@@ -328,6 +331,7 @@ impl MachineKind {
             | Self::GeothermalGenerator
             | Self::SteamTurbine
             | Self::Tesseract
+            | Self::SiloController
             | Self::Recycler => MachineTier::Tier2,
 
             Self::EnergyBank | Self::EnergyMonitor | Self::FluidTank | Self::IndustrialSilo => MachineTier::Storage,
@@ -366,6 +370,7 @@ impl MachineKind {
             Self::SteamTurbine => 30_000,
             Self::Tesseract => 100_000,
             Self::IndustrialSilo => 0,
+            Self::SiloController => 0,
             Self::Recycler => 4_000,
         }
     }
@@ -387,7 +392,8 @@ impl MachineKind {
             | Self::GeothermalGenerator
             | Self::SteamTurbine
             | Self::Tesseract
-            | Self::IndustrialSilo => 1,
+            | Self::IndustrialSilo
+            | Self::SiloController => 1,
             Self::Recycler => 20,
             Self::ItemExtractor => 10,
             Self::ElectricCrusher => 70,
@@ -429,7 +435,7 @@ impl MachineKind {
             Self::GeothermalGenerator => 120,
             Self::SteamTurbine => 160,
             Self::Recycler => 10,
-            Self::UpgradeStation | Self::Tesseract | Self::IndustrialSilo => 0,
+            Self::UpgradeStation | Self::Tesseract | Self::IndustrialSilo | Self::SiloController => 0,
         }
     }
 
@@ -490,6 +496,7 @@ impl MachineKind {
             Self::SteamTurbine => "block.rusty_factory.steam_turbine",
             Self::Tesseract => "block.rusty_factory.tesseract",
             Self::IndustrialSilo => "block.rusty_factory.industrial_silo",
+            Self::SiloController => "block.rusty_factory.silo_controller",
             Self::Recycler => "block.rusty_factory.recycler",
         }
     }
@@ -520,7 +527,7 @@ impl MachineKind {
             Self::VoidTrashCan => "rusty_factory:gui/void_trash_can",
             Self::ItemPipe | Self::FluidPipe | Self::ItemSplitter | Self::EnergyMonitor | Self::EnergyRelay
             | Self::UpgradeStation | Self::GeothermalGenerator | Self::SteamTurbine | Self::Tesseract
-            | Self::IndustrialSilo | Self::Recycler => "rusty_factory:gui/machine",
+            | Self::IndustrialSilo | Self::SiloController | Self::Recycler => "rusty_factory:gui/machine",
         }
     }
 }
@@ -1024,6 +1031,7 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
         | MachineKind::SteamTurbine
         | MachineKind::Tesseract
         | MachineKind::IndustrialSilo
+        | MachineKind::SiloController
         | MachineKind::Recycler => None,
     }
 }
@@ -1391,6 +1399,7 @@ pub fn step_machine(
         | MachineKind::SteamTurbine
         | MachineKind::Tesseract
         | MachineKind::IndustrialSilo
+        | MachineKind::SiloController
         | MachineKind::Recycler => StepOutcome {
             status: StepStatus::Idle,
             consume_input: false,

@@ -22,6 +22,7 @@
     "rusty_factory:charging_pad",
     "rusty_factory:industrial_silo",
     "rusty_factory:tesseract",
-    "rusty_factory:belt_filter_advanced"
+    "rusty_factory:belt_filter_advanced",
+    "rusty_factory:silo_controller"
   ]
 }

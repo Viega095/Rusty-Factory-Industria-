@@ -116,5 +116,6 @@
   "item.rusty_factory.quantum_helmet": "Casco Cuántico (Tier 3)",
   "item.rusty_factory.quantum_chestplate": "Pechera Cuántica (Tier 3)",
   "item.rusty_factory.quantum_leggings": "Pantalones Cuánticos (Tier 3)",
-  "item.rusty_factory.quantum_boots": "Botas Cuánticas (Tier 3)"
+  "item.rusty_factory.quantum_boots": "Botas Cuánticas (Tier 3)",
+  "block.rusty_factory.silo_controller": "Controlador de Silos"
 }

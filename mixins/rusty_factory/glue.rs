@@ -106,7 +106,8 @@ pub(in crate::game) fn container(block: &str, container: &mut Option<ModContaine
             | MachineKind::FluidPump
             | MachineKind::GeothermalGenerator
             | MachineKind::SteamTurbine
-            | MachineKind::IndustrialSilo => {
+            | MachineKind::IndustrialSilo
+            | MachineKind::SiloController => {
                 *container = Some(ModContainer {
                     slots: 1,
                     faces: std::array::from_fn(|_| vec![0]),
@@ -206,6 +207,7 @@ fn is_item_container_block(block_id: &str) -> bool {
             | rules::BLOCK_CHARGING_PAD
             | rules::BLOCK_ALLOY_SMELTER
             | rules::BLOCK_INDUSTRIAL_SILO
+            | rules::BLOCK_SILO_CONTROLLER
             | rules::BLOCK_TESSERACT
             | rules::BLOCK_RECYCLER
     )
@@ -241,6 +243,110 @@ fn grow_rubber_tree(game: &mut Game<'_>, pos: [i32; 3]) {
             }
         }
     }
+}
+
+/// Scans all connected `industrial_silo`s / `silo_controller`s and adjacent chests/barrels.
+fn collect_silo_network(game: &Game<'_>, start: [i32; 3]) -> (Vec<[i32; 3]>, Vec<[i32; 3]>) {
+    let mut silos = Vec::new();
+    let mut chests = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut q = std::collections::VecDeque::new();
+    visited.insert(start);
+    q.push_back(start);
+
+    while let Some(cur) = q.pop_front() {
+        if silos.len() + chests.len() >= 128 {
+            break;
+        }
+        for [dx, dy, dz] in rules::NEIGHBORS_6 {
+            let nb = [cur[0] + dx, cur[1] + dy, cur[2] + dz];
+            if !visited.insert(nb) {
+                continue;
+            }
+            let b = game.native_block(nb);
+            if b == rules::BLOCK_INDUSTRIAL_SILO {
+                silos.push(nb);
+                q.push_back(nb);
+            } else if b == rules::BLOCK_SILO_CONTROLLER {
+                q.push_back(nb);
+            } else if matches!(b.as_str(), "minecraft:chest" | "minecraft:trapped_chest" | "minecraft:barrel") {
+                chests.push(nb);
+            }
+        }
+    }
+    (silos, chests)
+}
+
+/// Aggregates all items across connected Silos and nearby Chests, sorted by total count descending.
+fn aggregate_silo_network(game: &Game<'_>, start: [i32; 3]) -> (Vec<(String, u32, bool)>, usize, usize) {
+    let (silos, chests) = collect_silo_network(game, start);
+    let mut map: std::collections::BTreeMap<String, (u32, bool)> = std::collections::BTreeMap::new();
+
+    for sp in &silos {
+        if let Some(BlockEntity::Mod(ent)) = game.world.block_entities.get(&(sp[0], sp[1], sp[2])) {
+            if let Some(st) = load_state(ent) {
+                if !st.belt_item.is_empty() && st.belt_count > 0 {
+                    let e = map.entry(st.belt_item).or_insert((0, true));
+                    e.0 = e.0.saturating_add(st.belt_count);
+                    e.1 = true;
+                }
+            }
+        }
+    }
+    for cp in &chests {
+        if let Some(BlockEntity::Chest(slots)) = game.world.block_entities.get(&(cp[0], cp[1], cp[2])) {
+            for slot in slots.iter().flatten() {
+                let e = map.entry(slot.item.to_string()).or_insert((0, false));
+                e.0 = e.0.saturating_add(slot.count);
+            }
+        }
+    }
+    let mut list: Vec<(String, u32, bool)> = map.into_iter().map(|(k, (v, s))| (k, v, s)).collect();
+    list.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    (list, silos.len(), chests.len())
+}
+
+/// Routes `stack` through a `silo_controller` into matching Silos, then empty Silos, then connected Chests.
+fn insert_into_silo_controller(game: &mut Game<'_>, pos: [i32; 3], mut stack: ItemStack) -> Option<ItemStack> {
+    let (silos, chests) = collect_silo_network(game, pos);
+    // 1. Silos already holding this exact item
+    for &sp in &silos {
+        let matches_item = game
+            .world
+            .block_entities
+            .get(&(sp[0], sp[1], sp[2]))
+            .and_then(|be| if let BlockEntity::Mod(e) = be { load_state(e) } else { None })
+            .is_some_and(|st| st.belt_item == stack.item.as_ref());
+        if matches_item {
+            match insert_into_silo(game, sp, stack) {
+                None => return None,
+                Some(rest) => stack = rest,
+            }
+        }
+    }
+    // 2. Empty Silos
+    for &sp in &silos {
+        let is_empty = game
+            .world
+            .block_entities
+            .get(&(sp[0], sp[1], sp[2]))
+            .and_then(|be| if let BlockEntity::Mod(e) = be { load_state(e) } else { None })
+            .is_some_and(|st| st.belt_item.is_empty());
+        if is_empty {
+            match insert_into_silo(game, sp, stack) {
+                None => return None,
+                Some(rest) => stack = rest,
+            }
+        }
+    }
+    // 3. Connected Chests
+    for &cp in &chests {
+        match game.native_insert_item(cp, Direction::Up, stack) {
+            None => return None,
+            Some(rest) => stack = rest,
+        }
+    }
+    Some(stack)
 }
 
 /// Inserts `stack` into an `industrial_silo` ONLY if it is empty or already holds that exact item type.
@@ -371,6 +477,8 @@ fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
             insert_into_pipe(game, pos, target, stack.clone(), None)
         } else if tb == rules::BLOCK_INDUSTRIAL_SILO {
             insert_into_silo(game, target, stack.clone())
+        } else if tb == rules::BLOCK_SILO_CONTROLLER {
+            insert_into_silo_controller(game, target, stack.clone())
         } else if is_item_container_block(&tb) {
             match game.native_insert_item(target, Direction::Up, stack.clone()) {
                 None => None,
@@ -471,6 +579,11 @@ fn route_item_from(game: &mut Game<'_>, source_pos: [i32; 3], mut stack: ItemSta
         let blk = game.native_block(adj);
         if blk == rules::BLOCK_INDUSTRIAL_SILO {
             match insert_into_silo(game, adj, stack) {
+                None => return None,
+                Some(rest) => stack = rest,
+            }
+        } else if blk == rules::BLOCK_SILO_CONTROLLER {
+            match insert_into_silo_controller(game, adj, stack) {
                 None => return None,
                 Some(rest) => stack = rest,
             }
@@ -677,6 +790,8 @@ fn tick_item_pipe(
         insert_into_splitter(game, step_pos, stack.clone())
     } else if step_block == rules::BLOCK_INDUSTRIAL_SILO {
         insert_into_silo(game, step_pos, stack.clone())
+    } else if step_block == rules::BLOCK_SILO_CONTROLLER {
+        insert_into_silo_controller(game, step_pos, stack.clone())
     } else if rules::is_conveyor_block(&step_block) {
         insert_into_conveyor(game, step_pos, stack.clone())
     } else {
@@ -729,6 +844,8 @@ fn tick_item_pipe(
                         insert_into_splitter(game, alt_step, stack.clone())
                     } else if alt_blk == rules::BLOCK_INDUSTRIAL_SILO {
                         insert_into_silo(game, alt_step, stack.clone())
+                    } else if alt_blk == rules::BLOCK_SILO_CONTROLLER {
+                        insert_into_silo_controller(game, alt_step, stack.clone())
                     } else if rules::is_conveyor_block(&alt_blk) {
                         insert_into_conveyor(game, alt_step, stack.clone())
                     } else {
@@ -934,6 +1051,8 @@ fn tick_conveyor(
         insert_into_pipe(game, pos, front_pos, stack, None)
     } else if front_block == rules::BLOCK_INDUSTRIAL_SILO {
         insert_into_silo(game, front_pos, stack)
+    } else if front_block == rules::BLOCK_SILO_CONTROLLER {
+        insert_into_silo_controller(game, front_pos, stack)
     } else if is_item_container_block(&front_block) {
         match game.native_insert_item(front_pos, Direction::Up, stack) {
             None => None,
@@ -1281,7 +1400,34 @@ fn tick_extractor(
         for [dx, dy, dz] in rules::NEIGHBORS_6 {
             let adj = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
             let adj_block = game.native_block(adj);
-            if matches!(
+            if adj_block == rules::BLOCK_INDUSTRIAL_SILO {
+                let mut extracted: Option<ItemStack> = None;
+                game.native_with_mod_block_entity(adj, |sent| {
+                    if let Some(mut sst) = load_state(sent) {
+                        let matches_filter = filter_item
+                            .as_deref()
+                            .is_none_or(|f| f == sst.belt_item);
+                        if matches_filter && !sst.belt_item.is_empty() && sst.belt_count > 0 {
+                            let take = sst.belt_count.min(batch_size);
+                            extracted = Some(ItemStack::new(&sst.belt_item, take));
+                            sst.belt_count -= take;
+                            if sst.belt_count == 0 {
+                                sst.belt_item.clear();
+                            }
+                            store_state(sent, &sst);
+                        }
+                    }
+                });
+                if let Some(st_out) = extracted {
+                    game.native_block_entity_sync(adj);
+                    if let Some(rest) = route_item_from(game, pos, st_out) {
+                        let _ = insert_into_silo(game, adj, rest);
+                    } else {
+                        state.quarry_mined += 1;
+                    }
+                    return StepStatus::Working;
+                }
+            } else if matches!(
                 adj_block.as_str(),
                 "minecraft:chest"
                     | "minecraft:trapped_chest"
@@ -1979,6 +2125,99 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             cap as i32,
             pct,
             0, 1, 1, 0, 0, 0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
+    if kind == MachineKind::SiloController {
+        if let Some(in_stack) = entity.items.first_mut().and_then(|s| s.take()) {
+            if let Some(rest) = insert_into_silo_controller(game, pos, in_stack) {
+                entity.items[0] = Some(rest);
+            }
+        }
+        let (list, silos_n, chests_n) = aggregate_silo_network(game, pos);
+        let max_page = (list.len().saturating_sub(1) / 4) as i32;
+        if state.quarry_cursor > max_page {
+            state.quarry_cursor = max_page;
+        }
+        let page = state.quarry_cursor.max(0) as usize;
+
+        // Handle pending row click withdrawal (`state.quarry_y_offset == 1..=4`)
+        if state.quarry_y_offset > 0 {
+            let row_idx = (state.quarry_y_offset - 1) as usize;
+            state.quarry_y_offset = 0;
+            if let Some((target_item, _, _)) = list.get(page * 4 + row_idx) {
+                let (silos, chests) = collect_silo_network(game, pos);
+                let mut need = 64u32;
+                let mut taken = 0u32;
+                for &sp in &silos {
+                    if need == 0 {
+                        break;
+                    }
+                    let mut took = 0u32;
+                    game.native_with_mod_block_entity(sp, |sent| {
+                        if let Some(mut sst) = load_state(sent) {
+                            if sst.belt_item == *target_item && sst.belt_count > 0 {
+                                took = sst.belt_count.min(need);
+                                sst.belt_count -= took;
+                                if sst.belt_count == 0 {
+                                    sst.belt_item.clear();
+                                }
+                                store_state(sent, &sst);
+                            }
+                        }
+                    });
+                    if took > 0 {
+                        game.native_block_entity_sync(sp);
+                        need -= took;
+                        taken += took;
+                    }
+                }
+                for &cp in &chests {
+                    if need == 0 {
+                        break;
+                    }
+                    let mut took = 0u32;
+                    if let Some(BlockEntity::Chest(slots)) = game.world.block_entities.get_mut(&(cp[0], cp[1], cp[2])) {
+                        for slot in slots.iter_mut() {
+                            if need == 0 {
+                                break;
+                            }
+                            if let Some(st) = slot.as_mut() {
+                                if st.item.as_ref() == target_item.as_str() {
+                                    let amt = st.count.min(need);
+                                    took += amt;
+                                    need -= amt;
+                                    if st.count > amt {
+                                        st.count -= amt;
+                                    } else {
+                                        *slot = None;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    taken += took;
+                }
+                if taken > 0 {
+                    game.native_give_items(target_item, taken);
+                }
+            }
+        }
+
+        update_lit_state(game, pos, silos_n + chests_n > 0);
+        entity.data = vec![
+            if silos_n + chests_n > 0 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
+            silos_n as i32,
+            chests_n as i32,
+            list.len() as i32,
+            0,
+            1,
+            page as i32,
+            pos[0],
+            pos[1],
+            pos[2],
         ];
         store_state(entity, &state);
         return;
@@ -2753,6 +2992,24 @@ pub(in crate::game) fn submit(
     let Some(st) = load_state(entity) else {
         return;
     };
+    // Render 3D filtered item icon floating above the belt filter arch
+    if st.belt_filter_attached && !st.splitter_filters[0].is_empty() {
+        let first_f = st.splitter_filters[0].split(',').next().unwrap_or("").trim();
+        if !first_f.is_empty() {
+            let fstack = ItemStack::new(first_f, 1);
+            draw.push();
+            draw.translate([0.5, 0.72, 0.5]);
+            draw.scale([0.36, 0.36, 0.36]);
+            let _ = game.native_draw_item(
+                draw,
+                &fstack,
+                DisplayContext::Fixed,
+                None,
+                pos[0].wrapping_mul(17) ^ pos[2],
+            );
+            draw.pop();
+        }
+    }
     if st.belt_item.is_empty() {
         return;
     }
@@ -4685,6 +4942,15 @@ pub(in crate::game) fn menu_button(entity: &mut ModBlockEntity, id: i32) {
                 state.quarry_y_offset = 0;
                 state.quarry_cursor = 0;
             }
+            20 if kind == MachineKind::SiloController => {
+                state.quarry_cursor = (state.quarry_cursor - 1).max(0);
+            }
+            21 if kind == MachineKind::SiloController => {
+                state.quarry_cursor += 1;
+            }
+            30..=33 if kind == MachineKind::SiloController => {
+                state.quarry_y_offset = 1 + (id - 30);
+            }
             _ => {}
         }
         store_state(entity, &state);
@@ -4703,8 +4969,15 @@ pub(in crate::game) fn screen(block: &str, screen: &mut Option<NativeScreen>) {
             MachineKind::SolarGenerator | MachineKind::EnergyBank => {
                 vec![Some([124.0, 34.0])] // Right-side recharge / battery slot
             }
-            MachineKind::ChargingPad | MachineKind::VoidTrashCan => {
-                vec![Some([80.0, 34.0])] // Centered induction / void slot
+            MachineKind::ChargingPad
+            | MachineKind::VoidTrashCan
+            | MachineKind::IndustrialSilo
+            | MachineKind::GeothermalGenerator
+            | MachineKind::SteamTurbine => {
+                vec![Some([80.0, 34.0])] // Centered 1-slot
+            }
+            MachineKind::SiloController => {
+                vec![Some([150.0, 14.0])] // Top-right deposit slot
             }
             MachineKind::FluidPump => {
                 vec![Some([143.0, 35.0])] // Right-side speed upgrade slot
@@ -5079,6 +5352,54 @@ pub(in crate::game) fn screen_draw(
         let line2 = format!("Fundición de alta temperatura: {progress_pct}%");
         game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
         game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF_8844, false);
+    } else if kind == MachineKind::SiloController {
+        let ctrl_pos = [get(7), get(8), get(9)];
+        let page = get(6).max(0) as usize;
+        let (list, silos_n, chests_n) = aggregate_silo_network(game, ctrl_pos);
+        let total_pages = ((list.len().saturating_sub(1)) / 4) + 1;
+        game.native_text(
+            batch,
+            &format!("Silos: {silos_n} | Cofres: {chests_n} | Pág {}/{total_pages}", (page + 1).min(total_pages)),
+            [x + 8.0, y + 18.0],
+            0xFF38_F2FF,
+            false,
+        );
+        for row in 0..4 {
+            let ry = y + 34.0 + row as f32 * 24.0;
+            game.native_fill(batch, [x + 8.0, ry, 160.0, 21.0], 0xFF1A_202A);
+            if let Some((item_id, cnt, is_silo)) = list.get(page * 4 + row) {
+                let short = item_id.split(':').nth(1).unwrap_or(item_id);
+                let tag = if *is_silo { "[Silo]" } else { "[Cofre]" };
+                let col = if *is_silo { 0xFF55_FF88 } else { 0xFFFF_C800 };
+                game.native_text(batch, &format!("{short}"), [x + 12.0, ry + 3.0], 0xFFE8_EEF8, false);
+                game.native_text(batch, &format!("x{cnt} {tag} (Clic: -64)"), [x + 12.0, ry + 12.0], col, false);
+            } else {
+                game.native_text(batch, "---", [x + 12.0, ry + 7.0], 0xFF55_6070, false);
+            }
+        }
+        draw_button(game, batch, [x, y], [8.0, 134.0, 48.0, 14.0], "◀ Ant", 0xFF28_5066);
+        draw_button(game, batch, [x, y], [120.0, 134.0, 48.0, 14.0], "Sig ▶", 0xFF28_5066);
+        return;
+    } else if kind == MachineKind::GeothermalGenerator {
+        let line1 = format!("FE: {energy}/{max_energy} (+{rate}/t)");
+        let line2 = format!("Lava interna: {progress_pct}%");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFFFF_8833, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFFF_B820, false);
+    } else if kind == MachineKind::SteamTurbine {
+        let line1 = format!("FE: {energy}/{max_energy} (+{rate}/t)");
+        let line2 = format!("Vapor interno: {progress_pct}%");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF38_F2FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFD0_F4FF, false);
+    } else if kind == MachineKind::Recycler {
+        let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
+        let line2 = format!("Reciclaje de Chatarra: {progress_pct}%");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF55_FF88, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFAA_EEAA, false);
+    } else if kind == MachineKind::Tesseract {
+        let line1 = format!("FE: {energy}/{max_energy} (Inalámbrico)");
+        let line2 = "Transmite FE e ítems entre Tesseracts";
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF38_F2FF, false);
+        game.native_text(batch, line2, [x + 10.0, y + 70.0], 0xFFAA_88FF, false);
     } else if kind == MachineKind::IndustrialSilo {
         let bar_col = if progress_pct >= 90 {
             0xFFE6_3232
@@ -5168,6 +5489,22 @@ pub(in crate::game) fn screen_click(
     if right {
         return;
     };
+    if kind == MachineKind::SiloController {
+        if in_rect(at, [8.0, 134.0, 48.0, 14.0]) {
+            *button = Some(20);
+        } else if in_rect(at, [120.0, 134.0, 48.0, 14.0]) {
+            *button = Some(21);
+        } else {
+            for row in 0..4 {
+                let ry = 34.0 + row as f32 * 24.0;
+                if in_rect(at, [8.0, ry, 160.0, 21.0]) {
+                    *button = Some(30 + row as i32);
+                    break;
+                }
+            }
+        }
+        return;
+    }
     if in_rect(at, POWER_BTN_RECT)
         && !matches!(kind, MachineKind::FluidTank | MachineKind::VoidTrashCan)
     {
@@ -5700,6 +6037,7 @@ pub(in crate::game) fn tooltip(
         rules::BLOCK_STEAM_TURBINE => &["§7Turbina de Vapor: genera +160 FE/t con vapor de la caldera."],
         rules::BLOCK_TESSERACT => &["§7Tesseract: transmite energía e ítems a distancia sin cables."],
         rules::BLOCK_INDUSTRIAL_SILO => &["§7Silo de Alta Capacidad (2K base, ampliable hasta 500K+)."],
+        rules::BLOCK_SILO_CONTROLLER => &["§7Controlador de Silos: muestra todos los ítems de silos y cofres conectados."],
         rules::BLOCK_RECYCLER => &["§7Recicla bloques sobrantes en polvo metálico y materiales."],
         rules::ITEM_MINING_DRILL_MK2 => &["§7Taladro MK2: excava planos 3x3 con menor consumo (25 FE)."],
         rules::ITEM_MINING_DRILL_MK3 => &["§7Taladro MK3: excava planos 5x5 a gran velocidad (15 FE)."],
