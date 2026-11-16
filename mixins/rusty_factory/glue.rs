@@ -306,6 +306,26 @@ fn aggregate_silo_network(game: &Game<'_>, start: [i32; 3]) -> (Vec<(String, u32
     (list, silos.len(), chests.len())
 }
 
+fn sorted_silo_network(
+    game: &Game<'_>,
+    start: [i32; 3],
+    sort_by_name: bool,
+    ascending: bool,
+) -> (Vec<(String, u32, bool)>, usize, usize) {
+    let (mut list, silos_n, chests_n) = aggregate_silo_network(game, start);
+    list.sort_by(|a, b| {
+        let ord = if sort_by_name {
+            let sa = a.0.split(':').nth(1).unwrap_or(&a.0);
+            let sb = b.0.split(':').nth(1).unwrap_or(&b.0);
+            sa.cmp(sb).then_with(|| a.1.cmp(&b.1))
+        } else {
+            a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0))
+        };
+        if ascending { ord } else { ord.reverse() }
+    });
+    (list, silos_n, chests_n)
+}
+
 /// Routes `stack` through a `silo_controller` into matching Silos, then empty Silos, then connected Chests.
 fn insert_into_silo_controller(game: &mut Game<'_>, pos: [i32; 3], mut stack: ItemStack) -> Option<ItemStack> {
     let (silos, chests) = collect_silo_network(game, pos);
@@ -2136,18 +2156,18 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 entity.items[0] = Some(rest);
             }
         }
-        let (list, silos_n, chests_n) = aggregate_silo_network(game, pos);
-        let max_page = (list.len().saturating_sub(1) / 4) as i32;
+        let (list, silos_n, chests_n) = sorted_silo_network(game, pos, state.auto_io, state.enabled);
+        let max_page = (list.len().saturating_sub(1) / 27) as i32;
         if state.quarry_cursor > max_page {
             state.quarry_cursor = max_page;
         }
         let page = state.quarry_cursor.max(0) as usize;
 
-        // Handle pending row click withdrawal (`state.quarry_y_offset == 1..=4`)
+        // Handle pending grid slot click withdrawal (`state.quarry_y_offset == 1..=27`)
         if state.quarry_y_offset > 0 {
-            let row_idx = (state.quarry_y_offset - 1) as usize;
+            let slot_idx = (state.quarry_y_offset - 1) as usize;
             state.quarry_y_offset = 0;
-            if let Some((target_item, _, _)) = list.get(page * 4 + row_idx) {
+            if let Some((target_item, _, _)) = list.get(page * 27 + slot_idx) {
                 let (silos, chests) = collect_silo_network(game, pos);
                 let mut need = 64u32;
                 let mut taken = 0u32;
@@ -2212,8 +2232,8 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             silos_n as i32,
             chests_n as i32,
             list.len() as i32,
-            0,
-            1,
+            if state.auto_io { 1 } else { 0 },
+            if state.enabled { 1 } else { 0 },
             page as i32,
             pos[0],
             pos[1],
@@ -2883,14 +2903,16 @@ pub(in crate::game) fn submit(
                 _ => 0.0,
             };
             let stack = ItemStack::new(&st.belt_item, 1);
+            let prev_light = draw.light;
+            draw.light = 240 | (240 << 8);
             draw.push();
             draw.translate([
-                0.5 + front_off[0] as f32 * 0.52,
+                0.5 + front_off[0] as f32 * 0.535,
                 0.60,
-                0.5 + front_off[2] as f32 * 0.52,
+                0.5 + front_off[2] as f32 * 0.535,
             ]);
             draw.rotate_about([0.0, 1.0, 0.0], yaw, [0.0, 0.0, 0.0]);
-            draw.scale([0.46, 0.46, 0.46]);
+            draw.scale([0.44, 0.44, 0.08]);
             let _ = game.native_draw_item(
                 draw,
                 &stack,
@@ -2899,6 +2921,7 @@ pub(in crate::game) fn submit(
                 pos[0].wrapping_mul(31) ^ pos[2],
             );
             draw.pop();
+            draw.light = prev_light;
         }
         return;
     }
@@ -5066,7 +5089,13 @@ pub(in crate::game) fn menu_button(entity: &mut ModBlockEntity, id: i32) {
             21 if kind == MachineKind::SiloController => {
                 state.quarry_cursor += 1;
             }
-            30..=33 if kind == MachineKind::SiloController => {
+            22 if kind == MachineKind::SiloController => {
+                state.enabled = !state.enabled;
+            }
+            23 if kind == MachineKind::SiloController => {
+                state.auto_io = !state.auto_io;
+            }
+            30..=56 if kind == MachineKind::SiloController => {
                 state.quarry_y_offset = 1 + (id - 30);
             }
             _ => {}
@@ -5095,7 +5124,7 @@ pub(in crate::game) fn screen(block: &str, screen: &mut Option<NativeScreen>) {
                 vec![Some([80.0, 34.0])] // Centered 1-slot
             }
             MachineKind::SiloController => {
-                vec![Some([150.0, 14.0])] // Top-right deposit slot
+                vec![Some([134.0, 100.0])] // Deposit slot next to crafting/arrow section
             }
             MachineKind::FluidPump => {
                 vec![Some([143.0, 35.0])] // Right-side speed upgrade slot
@@ -5126,11 +5155,16 @@ pub(in crate::game) fn screen(block: &str, screen: &mut Option<NativeScreen>) {
             }
         };
 
+        let (height, inventory_y) = if kind == MachineKind::SiloController {
+            (222.0, 140.0)
+        } else {
+            (166.0, 84.0)
+        };
         *screen = Some(NativeScreen {
             width: 176.0,
-            height: 166.0,
+            height,
             slots,
-            inventory_y: 84.0,
+            inventory_y,
             inventory_x: 8.0,
             own_labels: true,
             own_background: true,
@@ -5183,14 +5217,94 @@ pub(in crate::game) fn screen_draw(
         return;
     };
     let [x, y] = origin;
+    let get = |i: usize| data.get(i).copied().unwrap_or(0);
+
+    if kind == MachineKind::SiloController {
+        // AE2 / Terminal-style Silo Controller GUI (176 x 222)
+        // Outer Minecraft-style light gray panel with bevel
+        game.native_fill(batch, [x, y, 176.0, 222.0], 0xFFC6_C6C6);
+        game.native_fill(batch, [x, y, 176.0, 2.0], 0xFFFF_FFFF);
+        game.native_fill(batch, [x, y, 2.0, 222.0], 0xFFFF_FFFF);
+        game.native_fill(batch, [x, y + 220.0, 176.0, 2.0], 0xFF55_5555);
+        game.native_fill(batch, [x + 174.0, y, 2.0, 222.0], 0xFF55_5555);
+
+        // Top 9x3 Dark Storage Grid [7, 7, 162, 54]
+        game.native_fill(batch, [x + 6.0, y + 6.0, 164.0, 56.0], 0xFF1E_1E1E);
+        game.native_fill(batch, [x + 7.0, y + 7.0, 162.0, 54.0], 0xFF37_3737);
+
+        let sort_by_name = get(4) != 0;
+        let ascending = get(5) != 0;
+        let ctrl_pos = [get(7), get(8), get(9)];
+        let page = get(6).max(0) as usize;
+        let (list, silos_n, chests_n) = sorted_silo_network(game, ctrl_pos, sort_by_name, ascending);
+        let total_pages = ((list.len().saturating_sub(1)) / 27) + 1;
+        let cur_page = page.min(total_pages - 1);
+
+        for row in 0..3 {
+            for col in 0..9 {
+                let idx = cur_page * 27 + row * 9 + col;
+                let sx = x + 7.0 + col as f32 * 18.0;
+                let sy = y + 7.0 + row as f32 * 18.0;
+                if let Some((item_id, cnt, is_silo)) = list.get(idx) {
+                    game.native_fill(batch, [sx + 0.5, sy + 0.5, 17.0, 17.0], 0xFF42_4242);
+                    game.native_item(batch, item_id, [sx + 1.0, sy + 1.0], 16.0);
+                    let cnt_str = if *cnt >= 1_000_000 {
+                        format!("{}M", cnt / 1_000_000)
+                    } else if *cnt >= 10_000 {
+                        format!("{}K", cnt / 1_000)
+                    } else if *cnt >= 1_000 {
+                        format!("{:.1}K", *cnt as f32 / 1_000.0)
+                    } else {
+                        cnt.to_string()
+                    };
+                    let col_txt = if *is_silo { 0xFF88_FFAA } else { 0xFFFF_FFFF };
+                    let tw = cnt_str.len() as f32 * 5.0;
+                    game.native_text(batch, &cnt_str, [sx + 17.0 - tw, sy + 10.0], col_txt, true);
+                }
+            }
+        }
+
+        // Middle Control Bar (y + 64)
+        let dir_lbl = if ascending { "↑" } else { "↓" };
+        let sort_lbl = if sort_by_name { "A" } else { "#" };
+        draw_button(game, batch, origin, [7.0, 64.0, 13.0, 13.0], dir_lbl, 0xFF5A_5A5A);
+        draw_button(game, batch, origin, [22.0, 64.0, 13.0, 13.0], sort_lbl, 0xFF5A_5A5A);
+        draw_button(game, batch, origin, [37.0, 64.0, 13.0, 13.0], "◀", 0xFF5A_5A5A);
+        draw_button(game, batch, origin, [52.0, 64.0, 13.0, 13.0], "▶", 0xFF5A_5A5A);
+
+        // Dark search/status bar [68, 64, 101, 13]
+        game.native_fill(batch, [x + 68.0, y + 64.0, 101.0, 13.0], 0xFF14_1414);
+        game.native_text(
+            batch,
+            &format!("S:{silos_n} C:{chests_n}  P.{}/{total_pages}", cur_page + 1),
+            [x + 71.0, y + 66.5],
+            0xFF55_FFAA,
+            false,
+        );
+
+        // Lower 3x3 Visual Grid + Arrow + Deposit Slot
+        for r in 0..3 {
+            for c in 0..3 {
+                let gx = x + 18.0 + c as f32 * 18.0;
+                let gy = y + 82.0 + r as f32 * 18.0;
+                game.native_fill(batch, [gx, gy, 17.0, 17.0], 0xFF37_3737);
+                game.native_fill(batch, [gx + 1.0, gy + 1.0, 16.0, 16.0], 0xFF8B_8B8B);
+            }
+        }
+        game.native_text(batch, "→", [x + 88.0, y + 104.0], 0xFF55_5555, false);
+        game.native_text(batch, "Depositar", [x + 120.0, y + 88.0], 0xFF3A_3A3A, false);
+        game.native_fill(batch, [x + 133.0, y + 99.0, 18.0, 18.0], 0xFF37_3737);
+        game.native_fill(batch, [x + 134.0, y + 100.0, 17.0, 17.0], 0xFF8B_8B8B);
+        game.native_text(batch, "Clic = -64", [x + 118.0, y + 123.0], 0xFF50_5050, false);
+        return;
+    }
+
     game.native_sprite(
         batch,
         kind.gui_sprite(),
         [0.0, 0.0, 176.0, 166.0],
         [x, y, 176.0, 166.0],
     );
-
-    let get = |i: usize| data.get(i).copied().unwrap_or(0);
     let status_code = get(0);
     let energy = get(1);
     let max_energy = get(2).max(1);
@@ -5608,16 +5722,23 @@ pub(in crate::game) fn screen_click(
         return;
     };
     if kind == MachineKind::SiloController {
-        if in_rect(at, [8.0, 134.0, 48.0, 14.0]) {
+        if in_rect(at, [7.0, 64.0, 13.0, 13.0]) {
+            *button = Some(22);
+        } else if in_rect(at, [22.0, 64.0, 13.0, 13.0]) {
+            *button = Some(23);
+        } else if in_rect(at, [37.0, 64.0, 13.0, 13.0]) {
             *button = Some(20);
-        } else if in_rect(at, [120.0, 134.0, 48.0, 14.0]) {
+        } else if in_rect(at, [52.0, 64.0, 13.0, 13.0]) {
             *button = Some(21);
         } else {
-            for row in 0..4 {
-                let ry = 34.0 + row as f32 * 24.0;
-                if in_rect(at, [8.0, ry, 160.0, 21.0]) {
-                    *button = Some(30 + row as i32);
-                    break;
+            for row in 0..3 {
+                for col in 0..9 {
+                    let sx = 7.0 + col as f32 * 18.0;
+                    let sy = 7.0 + row as f32 * 18.0;
+                    if in_rect(at, [sx, sy, 18.0, 18.0]) {
+                        *button = Some(30 + (row * 9 + col) as i32);
+                        return;
+                    }
                 }
             }
         }
