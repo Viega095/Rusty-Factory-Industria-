@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " C ",
+    "GEG",
+    " S "
+  ],
+  "key": {
+    "C": "rusty_factory:cable_gold",
+    "G": "minecraft:glass",
+    "E": "rusty_factory:electronic_circuit",
+    "S": "rusty_factory:steel_ingot"
+  },
+  "result": {
+    "id": "rusty_factory:energy_scanner",
+    "count": 1
+  }
+}

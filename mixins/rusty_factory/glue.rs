@@ -103,7 +103,9 @@ pub(in crate::game) fn container(block: &str, container: &mut Option<ModContaine
             | MachineKind::VoidTrashCan
             | MachineKind::ChargingPad
             | MachineKind::FluidTank
-            | MachineKind::FluidPump => {
+            | MachineKind::FluidPump
+            | MachineKind::GeothermalGenerator
+            | MachineKind::SteamTurbine => {
                 *container = Some(ModContainer {
                     slots: 1,
                     faces: std::array::from_fn(|_| vec![0]),
@@ -117,7 +119,9 @@ pub(in crate::game) fn container(block: &str, container: &mut Option<ModContaine
             | MachineKind::ConveyorBelt
             | MachineKind::ItemPipe
             | MachineKind::FluidPipe
-            | MachineKind::ItemSplitter => {
+            | MachineKind::ItemSplitter
+            | MachineKind::UpgradeStation
+            | MachineKind::IndustrialSilo => {
                 *container = None;
             }
             MachineKind::EnergyBank => {
@@ -201,6 +205,9 @@ fn is_item_container_block(block_id: &str) -> bool {
             | rules::BLOCK_TRASH_CAN
             | rules::BLOCK_CHARGING_PAD
             | rules::BLOCK_ALLOY_SMELTER
+            | rules::BLOCK_INDUSTRIAL_SILO
+            | rules::BLOCK_TESSERACT
+            | rules::BLOCK_RECYCLER
     )
 }
 
@@ -797,11 +804,11 @@ fn tick_conveyor(
         state.progress += 1;
         store_state(entity, state);
         game.native_block_entity_sync(pos);
-        // If an inline Belt Filter is attached and item does NOT match filter, deflect to the side!
+        // If an inline Belt Filter is attached and item does NOT match filter (whitelist/blacklist), deflect to the side!
         if state.progress >= (max_ticks / 2).max(1)
             && state.belt_filter_attached
             && !state.splitter_filters[0].is_empty()
-            && state.belt_item != state.splitter_filters[0]
+            && !belt_filter_matches(&state.splitter_filters[0], &state.belt_item, state.belt_filter_blacklist)
         {
             let stack = ItemStack::new(&state.belt_item, state.belt_count.max(1));
             let side_offs = [
@@ -1734,6 +1741,275 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         return;
     }
 
+    if kind == MachineKind::UpgradeStation {
+        return;
+    }
+
+    if kind == MachineKind::GeothermalGenerator {
+        // Consume lava_bucket in slot 0 or pull lava from adjacent FluidTank/FluidPipe
+        if let Some(Some(slot0)) = entity.items.first_mut() {
+            if slot0.item.as_ref() == "minecraft:lava_bucket" && state.fluid_amount + 1000 <= rules::FLUID_TANK_MAX_MB {
+                state.fluid_kind = "lava".to_owned();
+                state.fluid_amount += 1000;
+                *slot0 = ItemStack::new("minecraft:bucket", 1);
+            }
+        }
+        if state.fluid_amount < 500 {
+            for d in rules::DIRS {
+                let adj = [pos[0] + d[0], pos[1] + d[1], pos[2] + d[2]];
+                if matches!(game.native_block(adj).as_str(), rules::BLOCK_FLUID_TANK | rules::BLOCK_FLUID_PIPE) {
+                    let mut pulled = 0;
+                    game.native_with_mod_block_entity(adj, |other| {
+                        if let Some(mut ost) = load_state(other) {
+                            if ost.fluid_kind == "lava" && ost.fluid_amount > 0 {
+                                let take = ost.fluid_amount.min(250);
+                                ost.fluid_amount -= take;
+                                if ost.fluid_amount == 0 {
+                                    ost.fluid_kind.clear();
+                                }
+                                store_state(other, &ost);
+                                pulled = take;
+                            }
+                        }
+                    });
+                    if pulled > 0 {
+                        state.fluid_kind = "lava".to_owned();
+                        state.fluid_amount += pulled;
+                        break;
+                    }
+                }
+            }
+        }
+        let mut net_rate = 0;
+        if state.enabled && state.fluid_kind == "lava" && state.fluid_amount >= 10 && state.energy < kind.max_energy() {
+            state.fluid_amount -= 10;
+            if state.fluid_amount == 0 {
+                state.fluid_kind.clear();
+            }
+            let produced_fe = 120.min(kind.max_energy() - state.energy);
+            state.energy += produced_fe;
+            net_rate = produced_fe;
+        }
+        if state.energy > 0 {
+            let sent = distribute_energy(game, pos, state.energy.min(240), false);
+            state.energy -= sent;
+        }
+        update_lit_state(game, pos, net_rate > 0);
+        entity.data = vec![
+            if net_rate > 0 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
+            state.energy,
+            kind.max_energy(),
+            (state.fluid_amount * 100 / rules::FLUID_TANK_MAX_MB).clamp(0, 100),
+            net_rate,
+            i32::from(state.enabled),
+            0, 0, 0, 0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
+    if kind == MachineKind::SteamTurbine {
+        if state.fluid_amount < 500 {
+            for d in rules::DIRS {
+                let adj = [pos[0] + d[0], pos[1] + d[1], pos[2] + d[2]];
+                if matches!(game.native_block(adj).as_str(), rules::BLOCK_STEAM_BOILER | rules::BLOCK_FLUID_TANK | rules::BLOCK_FLUID_PIPE) {
+                    let mut pulled = 0;
+                    game.native_with_mod_block_entity(adj, |other| {
+                        if let Some(mut ost) = load_state(other) {
+                            if ost.fluid_kind == "steam" && ost.fluid_amount > 0 {
+                                let take = ost.fluid_amount.min(300);
+                                ost.fluid_amount -= take;
+                                if ost.fluid_amount == 0 {
+                                    ost.fluid_kind.clear();
+                                }
+                                store_state(other, &ost);
+                                pulled = take;
+                            }
+                        }
+                    });
+                    if pulled > 0 {
+                        state.fluid_kind = "steam".to_owned();
+                        state.fluid_amount += pulled;
+                        break;
+                    }
+                }
+            }
+        }
+        let mut net_rate = 0;
+        if state.enabled && state.fluid_kind == "steam" && state.fluid_amount >= 15 && state.energy < kind.max_energy() {
+            state.fluid_amount -= 15;
+            if state.fluid_amount == 0 {
+                state.fluid_kind.clear();
+            }
+            let produced_fe = 160.min(kind.max_energy() - state.energy);
+            state.energy += produced_fe;
+            net_rate = produced_fe;
+        }
+        if state.energy > 0 {
+            let sent = distribute_energy(game, pos, state.energy.min(320), false);
+            state.energy -= sent;
+        }
+        update_lit_state(game, pos, net_rate > 0);
+        entity.data = vec![
+            if net_rate > 0 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
+            state.energy,
+            kind.max_energy(),
+            (state.fluid_amount * 100 / rules::FLUID_TANK_MAX_MB).clamp(0, 100),
+            net_rate,
+            i32::from(state.enabled),
+            0, 0, 0, 0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
+    if kind == MachineKind::Recycler {
+        let mut working = false;
+        if state.enabled && state.energy >= 10 && entity.items[rules::SLOT_INPUT].is_some() {
+            state.energy -= 10;
+            state.progress += 1;
+            working = true;
+            if state.progress >= 20 {
+                state.progress = 0;
+                if let Some(in_stack) = entity.items[rules::SLOT_INPUT].as_mut() {
+                    if in_stack.count > 1 {
+                        in_stack.count -= 1;
+                    } else {
+                        entity.items[rules::SLOT_INPUT] = None;
+                    }
+                }
+                const SCRAP_DROPS: [&str; 6] = [
+                    rules::ITEM_IRON_DUST,
+                    rules::ITEM_COPPER_DUST,
+                    rules::ITEM_SILICON,
+                    rules::ITEM_SULFUR_DUST,
+                    rules::ITEM_RAW_SAP,
+                    rules::ITEM_GOLD_DUST,
+                ];
+                let pick = SCRAP_DROPS[(state.quarry_mined as usize) % SCRAP_DROPS.len()];
+                state.quarry_mined += 1;
+                let prod = ItemStack::new(pick, 1);
+                store_or_route_output(game, pos, entity, state.auto_io, prod);
+            }
+        }
+        update_lit_state(game, pos, working);
+        entity.data = vec![
+            if working { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
+            state.energy,
+            kind.max_energy(),
+            (state.progress * 100 / 20).clamp(0, 100),
+            if working { -10 } else { 0 },
+            i32::from(state.enabled),
+            i32::from(state.auto_io),
+            0, 0, 0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
+    if kind == MachineKind::IndustrialSilo {
+        let cap = state.silo_capacity.max(2_048);
+        if let Some(in_stack) = entity.items[rules::SLOT_INPUT].take() {
+            let in_id = in_stack.item.to_string();
+            if state.belt_item.is_empty() || state.belt_item == in_id {
+                let space = cap.saturating_sub(state.belt_count);
+                let add = in_stack.count.min(space);
+                state.belt_item = in_id;
+                state.belt_count += add;
+                if in_stack.count > add {
+                    entity.items[rules::SLOT_INPUT] = Some(ItemStack::new(&in_stack.item, in_stack.count - add));
+                }
+            } else {
+                entity.items[rules::SLOT_INPUT] = Some(in_stack);
+            }
+        }
+        if entity.items[rules::SLOT_OUTPUT].is_none() && !state.belt_item.is_empty() && state.belt_count > 0 {
+            let take = state.belt_count.min(64);
+            state.belt_count -= take;
+            entity.items[rules::SLOT_OUTPUT] = Some(ItemStack::new(&state.belt_item, take));
+            if state.belt_count == 0 {
+                state.belt_item.clear();
+            }
+        }
+        store_state(entity, &state);
+        return;
+    }
+
+    if kind == MachineKind::Tesseract {
+        // 1. Wireless cross-world energy sharing with other Tesseracts
+        let mut peers: Vec<[i32; 3]> = Vec::new();
+        for (&(px, py, pz), be) in &game.world.block_entities {
+            if let BlockEntity::Mod(ent) = be {
+                if ent.id == rules::BLOCK_TESSERACT && [px, py, pz] != pos {
+                    peers.push([px, py, pz]);
+                }
+            }
+        }
+        if state.energy > 0 {
+            let sent = distribute_energy(game, pos, state.energy.min(500), false);
+            state.energy -= sent;
+        }
+        if !peers.is_empty() && state.energy > 100 {
+            let share = (state.energy / (peers.len() as i32 + 1)).min(1_000);
+            if share > 0 {
+                for peer in &peers {
+                    let mut accepted = 0;
+                    game.native_with_mod_block_entity(*peer, |pent| {
+                        if let Some(mut pst) = load_state(pent) {
+                            let room = kind.max_energy() - pst.energy;
+                            let give = share.min(room);
+                            if give > 0 {
+                                pst.energy += give;
+                                store_state(pent, &pst);
+                                accepted = give;
+                            }
+                        }
+                    });
+                    state.energy -= accepted;
+                }
+            }
+        }
+        // 2. Wireless item teleportation from SLOT_INPUT to another Tesseract's SLOT_OUTPUT
+        if !peers.is_empty() {
+            if let Some(in_stack) = entity.items[rules::SLOT_INPUT].take() {
+                let mut delivered = false;
+                for peer in &peers {
+                    game.native_with_mod_block_entity(*peer, |pent| {
+                        if pent.items[rules::SLOT_OUTPUT].is_none() {
+                            pent.items[rules::SLOT_OUTPUT] = Some(in_stack.clone());
+                            delivered = true;
+                        }
+                    });
+                    if delivered {
+                        break;
+                    }
+                }
+                if !delivered {
+                    entity.items[rules::SLOT_INPUT] = Some(in_stack);
+                }
+            }
+        }
+        if entity.items[rules::SLOT_OUTPUT].is_some() {
+            if let Some(out) = entity.items[rules::SLOT_OUTPUT].take() {
+                if let Some(rest) = route_item_from(game, pos, out) {
+                    entity.items[rules::SLOT_OUTPUT] = Some(rest);
+                }
+            }
+        }
+        update_lit_state(game, pos, !peers.is_empty() && state.energy > 0);
+        entity.data = vec![
+            if !peers.is_empty() { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
+            state.energy,
+            kind.max_energy(),
+            (state.energy * 100 / kind.max_energy().max(1)).clamp(0, 100),
+            0,
+            i32::from(state.enabled),
+            1, 0, 0, 0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
     if kind == MachineKind::EnergyRelay {
         if state.enabled && state.energy > 0 {
             let sent = distribute_energy(game, pos, state.energy.min(500), false);
@@ -1979,8 +2255,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                     if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
                         let cur = get_item_energy(st);
                         if cur < cap {
-                            let is_battery = st.item.as_ref() == rules::ITEM_BATTERY
-                                || st.item.as_ref() == rules::ITEM_BATTERY_MK2;
+                            let is_battery = rules::is_battery_item(st.item.as_ref());
                             let pct = ((cur as i64 * 1000) / cap.max(1) as i64) as u32;
                             // False < True so tools/armor come BEFORE batteries, then lowest % first
                             candidates.push((is_battery, pct, idx, cur, cap));
@@ -3027,6 +3302,199 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
         .as_ref()
         .is_some_and(|p| p.pose == horizon_client::pose::Pose::Crouching);
 
+    // Portable Energy Scanner: Inspect live telemetry of any Rusty Factory block
+    if held_info.as_ref().is_some_and(|(id, _, _)| id == rules::ITEM_ENERGY_SCANNER)
+        && block_id.starts_with("rusty_factory:")
+    {
+        *canceled = true;
+        let mut msg = format!("📡 [{block_id}]");
+        game.native_with_mod_block_entity(pos, |entity| {
+            if let Some(st) = load_state(entity) {
+                if let Some(kind) = MachineKind::from_block_id(&block_id) {
+                    if kind.max_energy() > 0 {
+                        msg.push_str(&format!(" | ⚡ {}/{} FE", st.energy, kind.max_energy()));
+                    }
+                }
+                if block_id == rules::BLOCK_INDUSTRIAL_SILO {
+                    let cap = st.silo_capacity.max(2_048);
+                    let item = if st.belt_item.is_empty() { "Vacío" } else { &st.belt_item };
+                    msg.push_str(&format!(" | 📦 {item}: {} / {cap}", st.belt_count));
+                } else if !st.fluid_kind.is_empty() || st.fluid_amount > 0 {
+                    msg.push_str(&format!(" | 🚰 {}: {} mB", st.fluid_kind, st.fluid_amount));
+                } else if st.belt_filter_attached {
+                    let mode = if st.belt_filter_blacklist { "Lista Negra" } else { "Lista Blanca" };
+                    let f = if st.splitter_filters[0].is_empty() { "Sin ítem" } else { &st.splitter_filters[0] };
+                    msg.push_str(&format!(" | 🔍 {mode}: {f}"));
+                } else if !st.belt_item.is_empty() {
+                    msg.push_str(&format!(" | 📦 {} x{}", st.belt_item, st.belt_count));
+                }
+            }
+        });
+        if let Some(who) = game.native_acting_player() {
+            game.native_action_bar(who.uuid, Text::literal(msg));
+        }
+        return;
+    }
+
+    // Industrial Silo: Direct deposit, withdraw, and capacity upgrades (+5K/+10K/+100K/+500K)
+    if block_id == rules::BLOCK_INDUSTRIAL_SILO {
+        *canceled = true;
+        if let Some((ref held_id, held_count, _)) = held_info {
+            if let Some(bonus) = rules::silo_upgrade_bonus(held_id) {
+                let mut new_cap = 0;
+                game.native_with_mod_block_entity(pos, |entity| {
+                    let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::IndustrialSilo));
+                    st.silo_capacity = st.silo_capacity.max(2_048).saturating_add(bonus);
+                    new_cap = st.silo_capacity;
+                    store_state(entity, &st);
+                });
+                if !game.creative {
+                    if let Some(held) = game.held_mut() {
+                        if held.count > 1 { held.count -= 1; } else { *game.held_mut() = None; }
+                    }
+                }
+                game.native_block_entity_sync(pos);
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(who.uuid, Text::literal(format!("📦 [Silo Industrial] Capacidad mejorada a {new_cap} ítems")));
+                }
+                return;
+            }
+            let item_id = held_id.clone();
+            let mut deposited = 0u32;
+            let mut total_now = 0u32;
+            let mut cap_now = 2_048u32;
+            game.native_with_mod_block_entity(pos, |entity| {
+                let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::IndustrialSilo));
+                cap_now = st.silo_capacity.max(2_048);
+                if st.belt_item.is_empty() || st.belt_item == item_id {
+                    let space = cap_now.saturating_sub(st.belt_count);
+                    deposited = held_count.min(space);
+                    if deposited > 0 {
+                        st.belt_item = item_id.clone();
+                        st.belt_count += deposited;
+                        store_state(entity, &st);
+                    }
+                }
+                total_now = st.belt_count;
+            });
+            if deposited > 0 {
+                if !game.creative {
+                    if let Some(held) = game.held_mut() {
+                        if held.count > deposited { held.count -= deposited; } else { *game.held_mut() = None; }
+                    }
+                }
+                game.native_block_entity_sync(pos);
+            }
+            if let Some(who) = game.native_acting_player() {
+                game.native_action_bar(who.uuid, Text::literal(format!("📦 [Silo] {total_now} / {cap_now} ({item_id})")));
+            }
+        } else {
+            let mut taken: Option<(String, u32)> = None;
+            let mut total_now = 0u32;
+            let mut cap_now = 2_048u32;
+            game.native_with_mod_block_entity(pos, |entity| {
+                if let Some(mut st) = load_state(entity) {
+                    cap_now = st.silo_capacity.max(2_048);
+                    if !st.belt_item.is_empty() && st.belt_count > 0 {
+                        let amt = st.belt_count.min(64);
+                        taken = Some((st.belt_item.clone(), amt));
+                        st.belt_count -= amt;
+                        if st.belt_count == 0 {
+                            st.belt_item.clear();
+                        }
+                        store_state(entity, &st);
+                    }
+                    total_now = st.belt_count;
+                }
+            });
+            if let Some((iid, amt)) = taken {
+                game.native_give_items(&iid, amt);
+                game.native_block_entity_sync(pos);
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(who.uuid, Text::literal(format!("📦 [Silo] Retirado x{amt} | Restante: {total_now} / {cap_now}")));
+                }
+            }
+        }
+        return;
+    }
+
+    // Equipment Upgrade Station: load a module_* or install loaded module onto held tech tool/armor
+    if block_id == rules::BLOCK_UPGRADE_STATION {
+        *canceled = true;
+        if let Some((ref held_id, _, _)) = held_info {
+            let mod_code = match held_id.as_str() {
+                rules::ITEM_MODULE_NIGHT_VISION => Some("nv"),
+                rules::ITEM_MODULE_MAGNET => Some("mag"),
+                rules::ITEM_MODULE_EFFICIENCY => Some("eff"),
+                _ => None,
+            };
+            if let Some(code) = mod_code {
+                game.native_with_mod_block_entity(pos, |entity| {
+                    let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::UpgradeStation));
+                    st.belt_item = code.to_owned();
+                    store_state(entity, &st);
+                });
+                if !game.creative {
+                    if let Some(held) = game.held_mut() {
+                        if held.count > 1 { held.count -= 1; } else { *game.held_mut() = None; }
+                    }
+                }
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(who.uuid, Text::literal(format!("🔧 [Estación de Mejora] Módulo '{code}' cargado. Clic con armadura o taladro para instalar.")));
+                }
+                return;
+            }
+            if rules::battery_capacity(held_id).is_some() {
+                let mut loaded_mod = String::new();
+                game.native_with_mod_block_entity(pos, |entity| {
+                    if let Some(mut st) = load_state(entity) {
+                        if !st.belt_item.is_empty() {
+                            loaded_mod = st.belt_item.clone();
+                            st.belt_item.clear();
+                            store_state(entity, &st);
+                        }
+                    }
+                });
+                if !loaded_mod.is_empty() {
+                    if let Some(held) = game.held_mut() {
+                        add_item_module(held, &loaded_mod);
+                    }
+                    if let Some(who) = game.native_acting_player() {
+                        game.native_action_bar(who.uuid, Text::literal(format!("✅ [Estación de Mejora] Módulo '{loaded_mod}' instalado en tu equipo")));
+                    }
+                } else if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(who.uuid, Text::literal("ℹ [Estación de Mejora] Primero cargá un Módulo haciendo clic con él."));
+                }
+                return;
+            }
+        }
+        return;
+    }
+
+    // Geothermal Generator: direct lava_bucket feed
+    if block_id == rules::BLOCK_GEOTHERMAL
+        && held_info.as_ref().is_some_and(|(id, _, _)| id == "minecraft:lava_bucket")
+    {
+        *canceled = true;
+        let mut ok = false;
+        game.native_with_mod_block_entity(pos, |entity| {
+            let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::GeothermalGenerator));
+            if st.fluid_amount + 1000 <= rules::FLUID_TANK_MAX_MB {
+                st.fluid_kind = "lava".to_owned();
+                st.fluid_amount += 1000;
+                store_state(entity, &st);
+                ok = true;
+            }
+        });
+        if ok && !game.creative {
+            if let Some(held) = game.held_mut() {
+                *held = ItemStack::new("minecraft:bucket", 1);
+            }
+            game.native_block_entity_sync(pos);
+        }
+        return;
+    }
+
     // Create-style per-face filter configuration on Item Splitter (no GUI!)
     if block_id == rules::BLOCK_ITEM_SPLITTER {
         let is_wrench = held_info.as_ref().is_some_and(|(id, _, _)| id == rules::ITEM_WRENCH);
@@ -3079,12 +3547,16 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
     // Direct hand interaction on Conveyor Belts (NO GUI!)
     if let Some((_, max_batch)) = rules::conveyor_tier(&block_id) {
         if let Some((ref held_id, _, _)) = held_info {
-            if held_id == rules::ITEM_BELT_FILTER {
+            if held_id == rules::ITEM_BELT_FILTER || held_id == rules::ITEM_BELT_FILTER_ADV {
                 *canceled = true;
+                let is_adv = held_id == rules::ITEM_BELT_FILTER_ADV;
                 let changed = game.native_with_mod_block_entity(pos, |entity| {
                     let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ConveyorBelt));
-                    if !st.belt_filter_attached {
+                    if !st.belt_filter_attached || (is_adv && !st.belt_filter_blacklist) {
                         st.belt_filter_attached = true;
+                        if is_adv {
+                            st.belt_filter_blacklist = true;
+                        }
                         store_state(entity, &st);
                         true
                     } else {
@@ -3103,10 +3575,12 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                     }
                     game.native_block_entity_sync(pos);
                     if let Some(who) = game.native_acting_player() {
-                        game.native_action_bar(
-                            who.uuid,
-                            Text::literal("🔍 [Cinta] Filtro acoplado. Clic con un ítem para configurarlo."),
-                        );
+                        let msg = if is_adv {
+                            "🔍 [Cinta] Filtro Avanzado acoplado (Shift+Mano Vacía alterna Lista Blanca/Negra)"
+                        } else {
+                            "🔍 [Cinta] Filtro acoplado. Clic con un ítem para configurarlo."
+                        };
+                        game.native_action_bar(who.uuid, Text::literal(msg));
                     }
                 }
                 return;
@@ -3270,6 +3744,30 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 return;
             }
         } else {
+            // Empty hand right-click: if crouching on a filtered belt, toggle Whitelist/Blacklist!
+            if is_crouching {
+                let mut toggled_mode: Option<bool> = None;
+                let toggled = game.native_with_mod_block_entity(pos, |entity| {
+                    if let Some(mut st) = load_state(entity) {
+                        if st.belt_filter_attached {
+                            st.belt_filter_blacklist = !st.belt_filter_blacklist;
+                            toggled_mode = Some(st.belt_filter_blacklist);
+                            store_state(entity, &st);
+                            return true;
+                        }
+                    }
+                    false
+                });
+                if toggled == Some(true) {
+                    *canceled = true;
+                    game.native_block_entity_sync(pos);
+                    if let (Some(who), Some(bl)) = (game.native_acting_player(), toggled_mode) {
+                        let label = if bl { "Lista Negra (bloquea filtro)" } else { "Lista Blanca (solo filtro)" };
+                        game.native_action_bar(who.uuid, Text::literal(format!("🔍 [Cinta] Modo: {label}")));
+                    }
+                    return;
+                }
+            }
             // Empty hand right-click: collect carried item from the conveyor belt!
             *canceled = true;
             let mut taken: Option<(String, u32)> = None;
@@ -3440,9 +3938,10 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
             return;
         }
 
-        // 3. Mining Drill: Crouch to toggle 1x1 / 3x3 mode; Click to excavate perpendicular 3x3 plane using FE
-        if held_id == rules::ITEM_MINING_DRILL {
+        // 3. Mining Drill (MK1 3x3, MK2 3x3, MK3 5x5): Crouch toggles area/1x1; Click excavates using FE
+        if let Some((tier, rad_half, base_cost)) = rules::drill_tier(held_id) {
             static DRILL_MODE_3X3: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+            let area_label = if rad_half >= 2 { "5x5" } else { "3x3" };
             if is_crouching {
                 *canceled = true;
                 let prev = DRILL_MODE_3X3.fetch_xor(true, std::sync::atomic::Ordering::Relaxed);
@@ -3452,20 +3951,22 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 }
                 if let Some(who) = game.native_acting_player() {
                     let msg = if mode_now {
-                        "⚡ [Taladro Minero] Modo: 3x3 Excavación Amplia"
+                        format!("⚡ [Taladro MK{tier}] Modo: {area_label} Excavación Amplia")
                     } else {
-                        "⚡ [Taladro Minero] Modo: 1x1 Precisión"
+                        format!("⚡ [Taladro MK{tier}] Modo: 1x1 Precisión")
                     };
                     game.native_action_bar(who.uuid, Text::literal(msg));
                 }
                 return;
             } else if DRILL_MODE_3X3.load(std::sync::atomic::Ordering::Relaxed) {
                 *canceled = true;
-                if !game.creative && !consume_player_energy(game, 45) {
+                let eff_mod = game.held().is_some_and(|h| has_item_module(h, "eff"));
+                let cost = if eff_mod { (base_cost / 2).max(5) } else { base_cost };
+                if !game.creative && !consume_player_energy(game, cost) {
                     if let Some(who) = game.native_acting_player() {
                         game.native_action_bar(
                             who.uuid,
-                            Text::literal("⚠ [Taladro Minero] Sin energía (recarga o lleva una Batería en el inventario)"),
+                            Text::literal("⚠ [Taladro] Sin energía (recarga o lleva una Batería en el inventario)"),
                         );
                     }
                     return;
@@ -3478,8 +3979,8 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 } else {
                     ([0, 0, 1], [0, 1, 0])
                 };
-                for u in -1..=1 {
-                    for v in -1..=1 {
+                for u in -rad_half..=rad_half {
+                    for v in -rad_half..=rad_half {
                         let p = [
                             cx + u_axes[0] * u + v_axes[0] * v,
                             cy + u_axes[1] * u + v_axes[1] * v,
@@ -3492,22 +3993,89 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                     }
                 }
                 if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal("⚡ [Taladro Minero] 3x3 Excavado (-45 FE)"));
+                    game.native_action_bar(who.uuid, Text::literal(format!("⚡ [Taladro MK{tier}] {area_label} Excavado (-{cost} FE)")));
                 }
                 return;
             }
         }
 
-        // 3b. Portable Batteries: Inspect charge in hand
-        if held_id == rules::ITEM_BATTERY || held_id == rules::ITEM_BATTERY_MK2 {
+        // 3a. Electric Chainsaw: Fell entire connected tree (up to 64 logs) using FE
+        if held_id == rules::ITEM_CHAINSAW {
+            let blk = game.native_block(pos);
+            if blk.ends_with("_log") || blk.ends_with("_stem") || blk == rules::BLOCK_RUBBER_LOG || blk == rules::BLOCK_RUBBER_SAP_LOG {
+                *canceled = true;
+                if !game.creative && !consume_player_energy(game, 30) {
+                    if let Some(who) = game.native_acting_player() {
+                        game.native_action_bar(who.uuid, Text::literal("⚠ [Motosierra] Sin energía (30 FE)"));
+                    }
+                    return;
+                }
+                let mut visited = std::collections::HashSet::new();
+                let mut q = std::collections::VecDeque::new();
+                q.push_back(pos);
+                visited.insert(pos);
+                let mut felled = 0;
+                while let Some(cur) = q.pop_front() {
+                    if felled >= 64 {
+                        break;
+                    }
+                    let cb = game.native_block(cur);
+                    if cb.ends_with("_log") || cb.ends_with("_stem") || cb == rules::BLOCK_RUBBER_LOG || cb == rules::BLOCK_RUBBER_SAP_LOG {
+                        game.native_run_command(&format!("setblock {} {} {} minecraft:air destroy", cur[0], cur[1], cur[2]));
+                        felled += 1;
+                        for dx in -1..=1 {
+                            for dy in 0..=1 {
+                                for dz in -1..=1 {
+                                    let nb = [cur[0] + dx, cur[1] + dy, cur[2] + dz];
+                                    if visited.insert(nb) {
+                                        q.push_back(nb);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(who.uuid, Text::literal(format!("🪓 [Motosierra] Árbol talado ({felled} troncos, -30 FE)")));
+                }
+                return;
+            }
+        }
+
+        // 3b. Portable Batteries & Dorsal Battery Pack: Inspect charge in hand
+        if rules::is_battery_item(held_id) {
             *canceled = true;
             let cap = rules::battery_capacity(held_id).unwrap_or(50_000);
             let cur = game.held().map_or(0, get_item_energy);
             if let Some(who) = game.native_acting_player() {
                 game.native_action_bar(
                     who.uuid,
-                    Text::literal(format!("🔋 [Batería Portátil] Carga: {cur} / {cap} FE (recarga tu equipo automáticamente)")),
+                    Text::literal(format!("🔋 [Batería] Carga: {cur} / {cap} FE (recarga tu equipo automáticamente)")),
                 );
+            }
+            return;
+        }
+
+        // 3b2. Jetpack MK2 (Hover): Shift toggles Hover mode, Click propels
+        if held_id == rules::ITEM_JETPACK_MK2 {
+            *canceled = true;
+            if is_crouching {
+                let mut now_hover = false;
+                if let Some(held) = game.held_mut() {
+                    now_hover = !is_jetpack_hover(held);
+                    set_jetpack_hover(held, now_hover);
+                }
+                if let Some(who) = game.native_acting_player() {
+                    let m = if now_hover { "ACTIVADO" } else { "DESACTIVADO" };
+                    game.native_action_bar(who.uuid, Text::literal(format!("🚀 [Jetpack MK2] Modo Hover {m}")));
+                }
+            } else {
+                game.native_run_command("playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.4 1.15");
+                game.native_run_command("effect give @s minecraft:levitation 1 16 true");
+                game.native_run_command("effect give @s minecraft:slow_falling 8 0 true");
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(who.uuid, Text::literal("🚀 [Jetpack MK2] Propulsión Avanzada"));
+                }
             }
             return;
         }
@@ -4641,7 +5209,7 @@ pub fn consume_player_energy(game: &mut Game<'_>, cost: i32) -> bool {
             let Some(st) = slot.as_mut() else {
                 continue;
             };
-            if st.item.as_ref() == rules::ITEM_BATTERY || st.item.as_ref() == rules::ITEM_BATTERY_MK2 {
+            if rules::is_battery_item(st.item.as_ref()) {
                 let cur = get_item_energy(st);
                 if cur > 0 {
                     let take = cur.min(needed);
@@ -4689,18 +5257,18 @@ fn tick_player_equipment(game: &mut Game<'_>) {
     let mut available = 0;
     for slot in game.inventory.iter() {
         if let Some(st) = slot.as_ref() {
-            if st.item.as_ref() == rules::ITEM_BATTERY || st.item.as_ref() == rules::ITEM_BATTERY_MK2 {
+            if rules::is_battery_item(st.item.as_ref()) {
                 available += get_item_energy(st);
             }
         }
     }
     if available > 0 {
         let mut used = 0;
-        let budget = available.min(200);
+        let budget = available.min(400);
         for slot in game.inventory.iter_mut() {
             if let Some(st) = slot.as_mut() {
                 let id = st.item.as_ref();
-                if id != rules::ITEM_BATTERY && id != rules::ITEM_BATTERY_MK2 {
+                if !rules::is_battery_item(id) {
                     if let Some(cap) = rules::battery_capacity(id) {
                         let cur = get_item_energy(st);
                         if cur < cap {
@@ -4721,7 +5289,7 @@ fn tick_player_equipment(game: &mut Game<'_>) {
             let mut left = used;
             for slot in game.inventory.iter_mut() {
                 if let Some(st) = slot.as_mut() {
-                    if st.item.as_ref() == rules::ITEM_BATTERY || st.item.as_ref() == rules::ITEM_BATTERY_MK2 {
+                    if rules::is_battery_item(st.item.as_ref()) {
                         let cur = get_item_energy(st);
                         let take = cur.min(left);
                         if take > 0 {
@@ -4737,23 +5305,36 @@ fn tick_player_equipment(game: &mut Game<'_>) {
         }
     }
 
-    // 3. Industrial Armor passive perks (when carrying industrial pieces + energy)
-    if now % 40 == 0 {
-        let mut has_ind_boots = false;
-        let mut has_ind_legs = false;
-        let mut has_ind_chest = false;
-        let mut has_ind_helm = false;
-        for slot in game.inventory.iter().skip(36) {
-            if let Some(st) = slot.as_ref() {
-                match st.item.as_ref() {
-                    rules::ITEM_INDUSTRIAL_BOOTS => has_ind_boots = true,
-                    rules::ITEM_INDUSTRIAL_LEGGINGS => has_ind_legs = true,
-                    rules::ITEM_INDUSTRIAL_CHESTPLATE => has_ind_chest = true,
-                    rules::ITEM_INDUSTRIAL_HELMET => has_ind_helm = true,
-                    _ => {}
-                }
+    // 3. Industrial Armor + Installed Modules + Jetpack MK2 Hover
+    let mut has_ind_boots = false;
+    let mut has_ind_legs = false;
+    let mut has_ind_chest = false;
+    let mut has_ind_helm = false;
+    let mut has_mod_nv = false;
+    let mut has_mod_mag = false;
+    let mut has_hover = false;
+    for slot in game.inventory.iter().skip(36).take(4) {
+        if let Some(st) = slot.as_ref() {
+            match st.item.as_ref() {
+                rules::ITEM_INDUSTRIAL_BOOTS => has_ind_boots = true,
+                rules::ITEM_INDUSTRIAL_LEGGINGS => has_ind_legs = true,
+                rules::ITEM_INDUSTRIAL_CHESTPLATE => has_ind_chest = true,
+                rules::ITEM_INDUSTRIAL_HELMET => has_ind_helm = true,
+                rules::ITEM_JETPACK_MK2 if is_jetpack_hover(st) => has_hover = true,
+                _ => {}
+            }
+            if has_item_module(st, "nv") {
+                has_mod_nv = true;
+            }
+            if has_item_module(st, "mag") {
+                has_mod_mag = true;
             }
         }
+    }
+    if has_hover {
+        game.native_run_command("effect give @s minecraft:slow_falling 2 0 true");
+    }
+    if now % 40 == 0 {
         if has_ind_boots {
             game.native_run_command("effect give @s minecraft:jump_boost 3 0 true");
         }
@@ -4763,8 +5344,11 @@ fn tick_player_equipment(game: &mut Game<'_>) {
         if has_ind_chest {
             game.native_run_command("effect give @s minecraft:resistance 3 0 true");
         }
-        if has_ind_helm {
+        if has_ind_helm || has_mod_nv {
             game.native_run_command("effect give @s minecraft:night_vision 12 0 true");
+        }
+        if has_mod_mag {
+            game.native_run_command("tp @e[type=item,distance=..8] @s");
         }
     }
 }
@@ -4850,6 +5434,26 @@ pub(in crate::game) fn tooltip(
         rules::ITEM_TREETAP => &["§7Extrae savia manualmente de árboles de caucho."],
         rules::ITEM_SPEED_UPGRADE => &["§7Mejora de velocidad para máquinas (+velocidad)."],
         rules::ITEM_FORTUNE_UPGRADE => &["§7Mejora de fortuna para Quarry (+drops de menas)."],
+        rules::BLOCK_UPGRADE_STATION => &["§7Instala módulos en tu armadura y taladros."],
+        rules::BLOCK_GEOTHERMAL => &["§7Reactor Geotérmico: genera +120 FE/t consumiendo lava."],
+        rules::BLOCK_STEAM_TURBINE => &["§7Turbina de Vapor: genera +160 FE/t con vapor de la caldera."],
+        rules::BLOCK_TESSERACT => &["§7Tesseract: transmite energía e ítems a distancia sin cables."],
+        rules::BLOCK_INDUSTRIAL_SILO => &["§7Silo de Alta Capacidad (2K base, ampliable hasta 500K+)."],
+        rules::BLOCK_RECYCLER => &["§7Recicla bloques sobrantes en polvo metálico y materiales."],
+        rules::ITEM_MINING_DRILL_MK2 => &["§7Taladro MK2: excava planos 3x3 con menor consumo (25 FE)."],
+        rules::ITEM_MINING_DRILL_MK3 => &["§7Taladro MK3: excava planos 5x5 a gran velocidad (15 FE)."],
+        rules::ITEM_CHAINSAW => &["§7Motosierra Eléctrica: tala árboles completos de un clic."],
+        rules::ITEM_BATTERY_PACK => &["§7Mochila Dorsal (1,000,000 FE): recarga todo tu equipo."],
+        rules::ITEM_JETPACK_MK2 => &["§7Jetpack MK2 con Modo Hover (Shift + Clic para flotar)."],
+        rules::ITEM_ENERGY_SCANNER => &["§7Escáner portátil: clic en máquinas/tubos para ver su estado."],
+        rules::ITEM_BELT_FILTER_ADV => &["§7Filtro avanzado de cinta con Lista Blanca / Lista Negra."],
+        rules::ITEM_MODULE_NIGHT_VISION => &["§7Módulo: añade Visión Nocturna a tu casco."],
+        rules::ITEM_MODULE_MAGNET => &["§7Módulo: atrae ítems cercanos hacia vos."],
+        rules::ITEM_MODULE_EFFICIENCY => &["§7Módulo: reduce a la mitad el gasto de FE de tu taladro."],
+        rules::ITEM_SILO_UPGRADE_5K => &["§7Aumenta la capacidad de un Silo Industrial en +5,000 ítems."],
+        rules::ITEM_SILO_UPGRADE_10K => &["§7Aumenta la capacidad de un Silo Industrial en +10,000 ítems."],
+        rules::ITEM_SILO_UPGRADE_100K => &["§7Aumenta la capacidad de un Silo Industrial en +100,000 ítems."],
+        rules::ITEM_SILO_UPGRADE_500K => &["§7Mejora suprema: +500,000 ítems de capacidad en el Silo."],
         _ => &["§7Componente industrial de Rusty Factory."],
     };
 
@@ -4903,10 +5507,21 @@ pub(in crate::game) fn hud(
                 let m = if is_drill_3x3(st) { "3x3" } else { "1x1" };
                 format!("Taladro ({m})")
             }
+            rules::ITEM_MINING_DRILL_MK2 => {
+                let m = if is_drill_3x3(st) { "3x3" } else { "1x1" };
+                format!("Taladro MK2 ({m})")
+            }
+            rules::ITEM_MINING_DRILL_MK3 => {
+                let m = if is_drill_3x3(st) { "5x5" } else { "1x1" };
+                format!("Taladro MK3 ({m})")
+            }
+            rules::ITEM_CHAINSAW => "Motosierra".to_owned(),
             rules::ITEM_MINING_LASER => "Láser Minero".to_owned(),
             rules::ITEM_BATTERY => "Batería MK1".to_owned(),
             rules::ITEM_BATTERY_MK2 => "Batería MK2".to_owned(),
+            rules::ITEM_BATTERY_PACK => "Mochila Bat.".to_owned(),
             rules::ITEM_JETPACK => "Jetpack".to_owned(),
+            rules::ITEM_JETPACK_MK2 => "Jetpack MK2".to_owned(),
             rules::ITEM_JET_BOOTS => "Botas Cohete".to_owned(),
             rules::ITEM_SOLAR_HELMET => "Casco Solar".to_owned(),
             rules::ITEM_INDUSTRIAL_HELMET => "Casco Ind.".to_owned(),
@@ -4927,6 +5542,7 @@ pub(in crate::game) fn hud(
             rules::ITEM_SOLAR_HELMET => "Solar",
             rules::ITEM_INDUSTRIAL_HELMET => "Casco",
             rules::ITEM_JETPACK => "Jetpack",
+            rules::ITEM_JETPACK_MK2 => "Jet MK2",
             rules::ITEM_INDUSTRIAL_CHESTPLATE => "Pecho",
             rules::ITEM_INDUSTRIAL_LEGGINGS => "Piernas",
             rules::ITEM_JET_BOOTS => "Cohete",
@@ -4947,7 +5563,7 @@ pub(in crate::game) fn hud(
     let mut bat_cap: i32 = 0;
     for slot in game.inventory.iter().take(36) {
         if let Some(st) = slot.as_ref() {
-            if st.item.as_ref() == rules::ITEM_BATTERY || st.item.as_ref() == rules::ITEM_BATTERY_MK2 {
+            if rules::is_battery_item(st.item.as_ref()) {
                 bat_cur += get_item_energy(st);
                 bat_cap += rules::battery_capacity(st.item.as_ref()).unwrap_or(50_000);
             }
@@ -5056,4 +5672,76 @@ pub(in crate::game) fn hud(
     if bat_cap > 0 {
         draw_bar(game, batch, "Baterías", bat_cur, bat_cap, ry);
     }
+}
+
+fn belt_filter_matches(filter: &str, item: &str, blacklist: bool) -> bool {
+    let in_list = filter
+        .split(',')
+        .any(|f| !f.trim().is_empty() && f.trim() == item);
+    if blacklist {
+        !in_list
+    } else {
+        in_list
+    }
+}
+
+fn has_item_module(stack: &ItemStack, code: &str) -> bool {
+    let key = horizon_world::nbt::JavaString::from("rf_modules");
+    stack
+        .custom_data()
+        .and_then(|c| c.get(&key))
+        .and_then(|t| match t {
+            horizon_world::nbt::Tag::String(s) => s.to_string().ok(),
+            _ => None,
+        })
+        .is_some_and(|s| s.split(',').any(|m| m == code))
+}
+
+fn add_item_module(stack: &mut ItemStack, code: &str) {
+    let key = horizon_world::nbt::JavaString::from("rf_modules");
+    let mut map = stack.custom_data().cloned().unwrap_or_default();
+    let existing = map
+        .get(&key)
+        .and_then(|t| match t {
+            horizon_world::nbt::Tag::String(s) => s.to_string().ok(),
+            _ => None,
+        })
+        .unwrap_or_default();
+    if !existing.split(',').any(|m| m == code) {
+        let next = if existing.is_empty() {
+            code.to_owned()
+        } else {
+            format!("{existing},{code}")
+        };
+        map.insert(
+            key,
+            horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(next.as_str())),
+        );
+        stack
+            .data_mut()
+            .set_other("minecraft:custom_data", Some(horizon_world::nbt::Tag::Compound(map)));
+    }
+}
+
+fn is_jetpack_hover(stack: &ItemStack) -> bool {
+    let key = horizon_world::nbt::JavaString::from("hover");
+    stack
+        .custom_data()
+        .and_then(|c| c.get(&key))
+        .and_then(|t| match t {
+            horizon_world::nbt::Tag::Byte(v) => Some(*v != 0),
+            _ => None,
+        })
+        .unwrap_or(false)
+}
+
+fn set_jetpack_hover(stack: &mut ItemStack, hover: bool) {
+    let mut map = stack.custom_data().cloned().unwrap_or_default();
+    map.insert(
+        horizon_world::nbt::JavaString::from("hover"),
+        horizon_world::nbt::Tag::Byte(if hover { 1 } else { 0 }),
+    );
+    stack
+        .data_mut()
+        .set_other("minecraft:custom_data", Some(horizon_world::nbt::Tag::Compound(map)));
 }

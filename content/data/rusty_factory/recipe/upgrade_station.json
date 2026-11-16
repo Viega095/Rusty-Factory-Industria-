@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "IGI",
+    "ECE",
+    "SSS"
+  ],
+  "key": {
+    "I": "rusty_factory:iron_plate",
+    "G": "rusty_factory:steel_gear",
+    "E": "rusty_factory:electronic_circuit",
+    "C": "rusty_factory:machine_casing",
+    "S": "rusty_factory:steel_ingot"
+  },
+  "result": {
+    "id": "rusty_factory:upgrade_station",
+    "count": 1
+  }
+}

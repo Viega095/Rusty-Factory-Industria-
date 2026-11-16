@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "IGI",
+    "GCG",
+    "PMP"
+  ],
+  "key": {
+    "I": "rusty_factory:iron_plate",
+    "G": "rusty_factory:steel_gear",
+    "C": "rusty_factory:machine_casing",
+    "P": "minecraft:piston",
+    "M": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:recycler",
+    "count": 1
+  }
+}

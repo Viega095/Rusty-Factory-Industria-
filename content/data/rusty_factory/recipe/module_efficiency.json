@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " G ",
+    "CEC",
+    " B "
+  ],
+  "key": {
+    "G": "rusty_factory:gold_plate",
+    "C": "rusty_factory:cable_gold",
+    "E": "rusty_factory:electronic_circuit",
+    "B": "rusty_factory:energy_battery"
+  },
+  "result": {
+    "id": "rusty_factory:module_efficiency",
+    "count": 1
+  }
+}

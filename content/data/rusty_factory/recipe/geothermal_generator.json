@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "SOS",
+    "BCB",
+    "OLO"
+  ],
+  "key": {
+    "S": "rusty_factory:steel_ingot",
+    "O": "minecraft:obsidian",
+    "B": "rusty_factory:fluid_tank",
+    "C": "rusty_factory:machine_casing",
+    "L": "minecraft:lava_bucket"
+  },
+  "result": {
+    "id": "rusty_factory:geothermal_generator",
+    "count": 1
+  }
+}

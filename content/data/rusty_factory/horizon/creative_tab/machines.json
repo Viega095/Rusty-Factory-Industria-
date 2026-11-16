@@ -19,6 +19,10 @@
     "rusty_factory:block_breaker",
     "rusty_factory:block_placer",
     "rusty_factory:sap_extractor",
-    "rusty_factory:fluid_pump"
+    "rusty_factory:fluid_pump",
+    "rusty_factory:geothermal_generator",
+    "rusty_factory:steam_turbine",
+    "rusty_factory:recycler",
+    "rusty_factory:upgrade_station"
   ]
 }

@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "G G",
+    "EFE",
+    "R R"
+  ],
+  "key": {
+    "G": "rusty_factory:gold_plate",
+    "E": "rusty_factory:electronic_circuit",
+    "F": "rusty_factory:belt_filter",
+    "R": "rusty_factory:rubber_sheet"
+  },
+  "result": {
+    "id": "rusty_factory:belt_filter_advanced",
+    "count": 1
+  }
+}

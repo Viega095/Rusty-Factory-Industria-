@@ -27,6 +27,13 @@
     "rusty_factory:rubber_sap_log",
     "rusty_factory:rubber_planks",
     "rusty_factory:rubber_leaves",
-    "rusty_factory:rubber_sapling"
+    "rusty_factory:rubber_sapling",
+    "rusty_factory:module_night_vision",
+    "rusty_factory:module_magnet",
+    "rusty_factory:module_efficiency",
+    "rusty_factory:silo_upgrade_5k",
+    "rusty_factory:silo_upgrade_10k",
+    "rusty_factory:silo_upgrade_100k",
+    "rusty_factory:silo_upgrade_500k"
   ]
 }

@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " G ",
+    "CEC",
+    " S "
+  ],
+  "key": {
+    "G": "minecraft:golden_carrot",
+    "C": "rusty_factory:electronic_circuit",
+    "E": "minecraft:ender_eye",
+    "S": "rusty_factory:iron_plate"
+  },
+  "result": {
+    "id": "rusty_factory:module_night_vision",
+    "count": 1
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "RJR",
+    "BCB",
+    "G G"
+  ],
+  "key": {
+    "R": "rusty_factory:cable_red",
+    "J": "rusty_factory:jetpack",
+    "B": "rusty_factory:energy_battery_mk2",
+    "C": "rusty_factory:electronic_circuit",
+    "G": "rusty_factory:gold_plate"
+  },
+  "result": {
+    "id": "rusty_factory:jetpack_mk2",
+    "count": 1
+  }
+}

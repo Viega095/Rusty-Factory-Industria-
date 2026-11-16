@@ -19,6 +19,9 @@
     "rusty_factory:energy_bank",
     "rusty_factory:energy_relay",
     "rusty_factory:energy_monitor",
-    "rusty_factory:charging_pad"
+    "rusty_factory:charging_pad",
+    "rusty_factory:industrial_silo",
+    "rusty_factory:tesseract",
+    "rusty_factory:belt_filter_advanced"
   ]
 }

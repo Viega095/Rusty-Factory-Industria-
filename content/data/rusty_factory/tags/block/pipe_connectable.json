@@ -29,6 +29,9 @@
     "minecraft:blast_furnace",
     "minecraft:smoker",
     "minecraft:dropper",
-    "minecraft:dispenser"
+    "minecraft:dispenser",
+    "rusty_factory:industrial_silo",
+    "rusty_factory:tesseract",
+    "rusty_factory:recycler"
   ]
 }

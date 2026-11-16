@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " N ",
+    "RMR",
+    "EBE"
+  ],
+  "key": {
+    "N": "minecraft:netherite_ingot",
+    "R": "rusty_factory:cable_red",
+    "M": "rusty_factory:mining_drill_mk2",
+    "E": "rusty_factory:electronic_circuit",
+    "B": "rusty_factory:battery_pack"
+  },
+  "result": {
+    "id": "rusty_factory:mining_drill_mk3",
+    "count": 1
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "GGG",
+    "GUG",
+    "GGG"
+  ],
+  "key": {
+    "G": "rusty_factory:gold_plate",
+    "U": "rusty_factory:silo_upgrade_5k"
+  },
+  "result": {
+    "id": "rusty_factory:silo_upgrade_10k",
+    "count": 1
+  }
+}

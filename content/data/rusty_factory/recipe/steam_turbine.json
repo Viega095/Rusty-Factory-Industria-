@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "SGS",
+    "GCG",
+    "PBP"
+  ],
+  "key": {
+    "S": "rusty_factory:steel_ingot",
+    "G": "rusty_factory:steel_gear",
+    "C": "rusty_factory:machine_casing",
+    "P": "rusty_factory:copper_plate",
+    "B": "rusty_factory:cable_gold"
+  },
+  "result": {
+    "id": "rusty_factory:steam_turbine",
+    "count": 1
+  }
+}

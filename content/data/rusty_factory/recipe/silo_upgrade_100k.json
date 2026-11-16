@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "EDE",
+    "DUD",
+    "EDE"
+  ],
+  "key": {
+    "E": "rusty_factory:electronic_circuit",
+    "D": "minecraft:diamond",
+    "U": "rusty_factory:silo_upgrade_10k"
+  },
+  "result": {
+    "id": "rusty_factory:silo_upgrade_100k",
+    "count": 1
+  }
+}

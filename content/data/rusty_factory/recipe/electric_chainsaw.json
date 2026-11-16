@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " SS",
+    " GS",
+    "EB "
+  ],
+  "key": {
+    "S": "rusty_factory:steel_ingot",
+    "G": "rusty_factory:steel_gear",
+    "E": "rusty_factory:electronic_circuit",
+    "B": "rusty_factory:energy_battery"
+  },
+  "result": {
+    "id": "rusty_factory:electric_chainsaw",
+    "count": 1
+  }
+}

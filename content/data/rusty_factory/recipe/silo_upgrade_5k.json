@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "III",
+    "ICI",
+    "III"
+  ],
+  "key": {
+    "I": "rusty_factory:iron_plate",
+    "C": "minecraft:chest"
+  },
+  "result": {
+    "id": "rusty_factory:silo_upgrade_5k",
+    "count": 1
+  }
+}

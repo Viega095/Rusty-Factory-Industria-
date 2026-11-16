@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "SIS",
+    "ICI",
+    "SGS"
+  ],
+  "key": {
+    "S": "rusty_factory:steel_ingot",
+    "I": "rusty_factory:iron_plate",
+    "C": "minecraft:chest",
+    "G": "rusty_factory:steel_gear"
+  },
+  "result": {
+    "id": "rusty_factory:industrial_silo",
+    "count": 1
+  }
+}

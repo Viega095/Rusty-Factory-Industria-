@@ -1,0 +1,12 @@
+{
+  "parent": "minecraft:block/cube",
+  "textures": {
+    "particle": "rusty_factory:block/tesseract_side",
+    "down": "rusty_factory:block/tesseract_side",
+    "up": "rusty_factory:block/tesseract_top",
+    "north": "rusty_factory:block/tesseract_front",
+    "south": "rusty_factory:block/tesseract_side",
+    "west": "rusty_factory:block/tesseract_side",
+    "east": "rusty_factory:block/tesseract_side"
+  }
+}

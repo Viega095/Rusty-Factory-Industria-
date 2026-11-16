@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " I ",
+    "RMR",
+    " E "
+  ],
+  "key": {
+    "I": "rusty_factory:steel_ingot",
+    "R": "minecraft:redstone",
+    "M": "rusty_factory:item_magnet",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:module_magnet",
+    "count": 1
+  }
+}

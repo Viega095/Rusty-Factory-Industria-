@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "RER",
+    "DCD",
+    "BNB"
+  ],
+  "key": {
+    "R": "rusty_factory:cable_red",
+    "E": "minecraft:ender_pearl",
+    "D": "minecraft:diamond",
+    "C": "rusty_factory:electronic_circuit",
+    "B": "rusty_factory:energy_battery_mk2",
+    "N": "minecraft:netherite_ingot"
+  },
+  "result": {
+    "id": "rusty_factory:tesseract",
+    "count": 1
+  }
+}

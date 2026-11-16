@@ -15,6 +15,12 @@
     "rusty_factory:industrial_helmet",
     "rusty_factory:industrial_chestplate",
     "rusty_factory:industrial_leggings",
-    "rusty_factory:industrial_boots"
+    "rusty_factory:industrial_boots",
+    "rusty_factory:mining_drill_mk2",
+    "rusty_factory:mining_drill_mk3",
+    "rusty_factory:electric_chainsaw",
+    "rusty_factory:battery_pack",
+    "rusty_factory:jetpack_mk2",
+    "rusty_factory:energy_scanner"
   ]
 }

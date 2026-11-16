@@ -27,6 +27,11 @@
     "rusty_factory:fluid_pump",
     "rusty_factory:energy_relay",
     "rusty_factory:charging_pad",
-    "rusty_factory:alloy_smelter"
+    "rusty_factory:alloy_smelter",
+    "rusty_factory:upgrade_station",
+    "rusty_factory:geothermal_generator",
+    "rusty_factory:steam_turbine",
+    "rusty_factory:tesseract",
+    "rusty_factory:recycler"
   ]
 }

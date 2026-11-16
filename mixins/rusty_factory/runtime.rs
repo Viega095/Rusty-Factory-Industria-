@@ -99,6 +99,12 @@ pub const BLOCK_CHARGING_PAD: &str = "rusty_factory:charging_pad";
 pub const BLOCK_FLUID_PIPE: &str = "rusty_factory:fluid_pipe";
 pub const BLOCK_ITEM_SPLITTER: &str = "rusty_factory:item_splitter";
 pub const BLOCK_ALLOY_SMELTER: &str = "rusty_factory:alloy_smelter";
+pub const BLOCK_UPGRADE_STATION: &str = "rusty_factory:upgrade_station";
+pub const BLOCK_GEOTHERMAL: &str = "rusty_factory:geothermal_generator";
+pub const BLOCK_STEAM_TURBINE: &str = "rusty_factory:steam_turbine";
+pub const BLOCK_TESSERACT: &str = "rusty_factory:tesseract";
+pub const BLOCK_INDUSTRIAL_SILO: &str = "rusty_factory:industrial_silo";
+pub const BLOCK_RECYCLER: &str = "rusty_factory:recycler";
 
 // Item IDs (29 items)
 pub const ITEM_WRENCH: &str = "rusty_factory:wrench";
@@ -124,12 +130,54 @@ pub const ITEM_INDUSTRIAL_HELMET: &str = "rusty_factory:industrial_helmet";
 pub const ITEM_INDUSTRIAL_CHESTPLATE: &str = "rusty_factory:industrial_chestplate";
 pub const ITEM_INDUSTRIAL_LEGGINGS: &str = "rusty_factory:industrial_leggings";
 pub const ITEM_INDUSTRIAL_BOOTS: &str = "rusty_factory:industrial_boots";
+pub const ITEM_MINING_DRILL_MK2: &str = "rusty_factory:mining_drill_mk2";
+pub const ITEM_MINING_DRILL_MK3: &str = "rusty_factory:mining_drill_mk3";
+pub const ITEM_CHAINSAW: &str = "rusty_factory:electric_chainsaw";
+pub const ITEM_BATTERY_PACK: &str = "rusty_factory:battery_pack";
+pub const ITEM_JETPACK_MK2: &str = "rusty_factory:jetpack_mk2";
+pub const ITEM_ENERGY_SCANNER: &str = "rusty_factory:energy_scanner";
+pub const ITEM_BELT_FILTER_ADV: &str = "rusty_factory:belt_filter_advanced";
+pub const ITEM_MODULE_NIGHT_VISION: &str = "rusty_factory:module_night_vision";
+pub const ITEM_MODULE_MAGNET: &str = "rusty_factory:module_magnet";
+pub const ITEM_MODULE_EFFICIENCY: &str = "rusty_factory:module_efficiency";
+pub const ITEM_SILO_UPGRADE_5K: &str = "rusty_factory:silo_upgrade_5k";
+pub const ITEM_SILO_UPGRADE_10K: &str = "rusty_factory:silo_upgrade_10k";
+pub const ITEM_SILO_UPGRADE_100K: &str = "rusty_factory:silo_upgrade_100k";
+pub const ITEM_SILO_UPGRADE_500K: &str = "rusty_factory:silo_upgrade_500k";
+
+pub fn is_battery_item(item: &str) -> bool {
+    matches!(item, ITEM_BATTERY | ITEM_BATTERY_MK2 | ITEM_BATTERY_PACK)
+}
+
+/// Returns `(tier, radius_half, fe_cost)` for Mining Drills.
+pub fn drill_tier(item: &str) -> Option<(u8, i32, i32)> {
+    match item {
+        ITEM_MINING_DRILL => Some((1, 1, 45)),
+        ITEM_MINING_DRILL_MK2 => Some((2, 1, 25)),
+        ITEM_MINING_DRILL_MK3 => Some((3, 2, 15)),
+        _ => None,
+    }
+}
+
+pub fn silo_upgrade_bonus(item: &str) -> Option<u32> {
+    match item {
+        ITEM_SILO_UPGRADE_5K => Some(5_000),
+        ITEM_SILO_UPGRADE_10K => Some(10_000),
+        ITEM_SILO_UPGRADE_100K => Some(100_000),
+        ITEM_SILO_UPGRADE_500K => Some(500_000),
+        _ => None,
+    }
+}
 
 pub fn battery_capacity(item: &str) -> Option<i32> {
     match item {
         ITEM_BATTERY => Some(50_000),
         ITEM_BATTERY_MK2 => Some(250_000),
-        ITEM_MINING_DRILL | ITEM_MINING_LASER | ITEM_JETPACK | ITEM_JET_BOOTS
+        ITEM_BATTERY_PACK => Some(1_000_000),
+        ITEM_MINING_DRILL_MK2 => Some(100_000),
+        ITEM_MINING_DRILL_MK3 => Some(250_000),
+        ITEM_JETPACK_MK2 => Some(500_000),
+        ITEM_MINING_DRILL | ITEM_MINING_LASER | ITEM_CHAINSAW | ITEM_JETPACK | ITEM_JET_BOOTS
         | ITEM_SOLAR_HELMET | ITEM_INDUSTRIAL_HELMET | ITEM_INDUSTRIAL_CHESTPLATE
         | ITEM_INDUSTRIAL_LEGGINGS | ITEM_INDUSTRIAL_BOOTS => Some(50_000),
         _ => None,
@@ -191,6 +239,12 @@ pub enum MachineKind {
     EnergyRelay,
     ChargingPad,
     AlloySmelter,
+    UpgradeStation,
+    GeothermalGenerator,
+    SteamTurbine,
+    Tesseract,
+    IndustrialSilo,
+    Recycler,
 }
 
 impl MachineKind {
@@ -223,6 +277,12 @@ impl MachineKind {
             BLOCK_ENERGY_RELAY => Some(Self::EnergyRelay),
             BLOCK_CHARGING_PAD => Some(Self::ChargingPad),
             BLOCK_ALLOY_SMELTER => Some(Self::AlloySmelter),
+            BLOCK_UPGRADE_STATION => Some(Self::UpgradeStation),
+            BLOCK_GEOTHERMAL => Some(Self::GeothermalGenerator),
+            BLOCK_STEAM_TURBINE => Some(Self::SteamTurbine),
+            BLOCK_TESSERACT => Some(Self::Tesseract),
+            BLOCK_INDUSTRIAL_SILO => Some(Self::IndustrialSilo),
+            BLOCK_RECYCLER => Some(Self::Recycler),
             _ => None,
         }
     }
@@ -253,9 +313,14 @@ impl MachineKind {
             | Self::SteamBoiler
             | Self::EnergyRelay
             | Self::ChargingPad
-            | Self::AlloySmelter => MachineTier::Tier2,
+            | Self::AlloySmelter
+            | Self::UpgradeStation
+            | Self::GeothermalGenerator
+            | Self::SteamTurbine
+            | Self::Tesseract
+            | Self::Recycler => MachineTier::Tier2,
 
-            Self::EnergyBank | Self::EnergyMonitor | Self::FluidTank => MachineTier::Storage,
+            Self::EnergyBank | Self::EnergyMonitor | Self::FluidTank | Self::IndustrialSilo => MachineTier::Storage,
         }
     }
 
@@ -286,6 +351,12 @@ impl MachineKind {
             Self::EnergyRelay => 20_000,
             Self::ChargingPad => 8_000,
             Self::AlloySmelter => 5_000,
+            Self::UpgradeStation => 0,
+            Self::GeothermalGenerator => 25_000,
+            Self::SteamTurbine => 30_000,
+            Self::Tesseract => 100_000,
+            Self::IndustrialSilo => 0,
+            Self::Recycler => 4_000,
         }
     }
 
@@ -301,7 +372,13 @@ impl MachineKind {
             | Self::FluidPump
             | Self::VoidTrashCan
             | Self::EnergyRelay
-            | Self::ChargingPad => 1,
+            | Self::ChargingPad
+            | Self::UpgradeStation
+            | Self::GeothermalGenerator
+            | Self::SteamTurbine
+            | Self::Tesseract
+            | Self::IndustrialSilo => 1,
+            Self::Recycler => 20,
             Self::ItemExtractor => 10,
             Self::ElectricCrusher => 70,
             Self::ElectricFurnace => 50,
@@ -339,6 +416,10 @@ impl MachineKind {
             Self::BlockPlacer => 8,
             Self::ChargingPad => 25,
             Self::AlloySmelter => 16,
+            Self::GeothermalGenerator => 120,
+            Self::SteamTurbine => 160,
+            Self::Recycler => 10,
+            Self::UpgradeStation | Self::Tesseract | Self::IndustrialSilo => 0,
         }
     }
 
@@ -360,6 +441,8 @@ impl MachineKind {
                 | Self::EnergyRelay
                 | Self::ChargingPad
                 | Self::AlloySmelter
+                | Self::Tesseract
+                | Self::Recycler
         )
     }
 
@@ -392,6 +475,12 @@ impl MachineKind {
             Self::EnergyRelay => "block.rusty_factory.energy_relay",
             Self::ChargingPad => "block.rusty_factory.charging_pad",
             Self::AlloySmelter => "block.rusty_factory.alloy_smelter",
+            Self::UpgradeStation => "block.rusty_factory.upgrade_station",
+            Self::GeothermalGenerator => "block.rusty_factory.geothermal_generator",
+            Self::SteamTurbine => "block.rusty_factory.steam_turbine",
+            Self::Tesseract => "block.rusty_factory.tesseract",
+            Self::IndustrialSilo => "block.rusty_factory.industrial_silo",
+            Self::Recycler => "block.rusty_factory.recycler",
         }
     }
 
@@ -419,7 +508,9 @@ impl MachineKind {
             Self::SteamBoiler => "rusty_factory:gui/steam_boiler",
             Self::FluidPump => "rusty_factory:gui/fluid_pump",
             Self::VoidTrashCan => "rusty_factory:gui/void_trash_can",
-            Self::ItemPipe | Self::FluidPipe | Self::ItemSplitter | Self::EnergyMonitor | Self::EnergyRelay => "rusty_factory:gui/machine",
+            Self::ItemPipe | Self::FluidPipe | Self::ItemSplitter | Self::EnergyMonitor | Self::EnergyRelay
+            | Self::UpgradeStation | Self::GeothermalGenerator | Self::SteamTurbine | Self::Tesseract
+            | Self::IndustrialSilo | Self::Recycler => "rusty_factory:gui/machine",
         }
     }
 }
@@ -492,6 +583,10 @@ pub struct MachineState {
     #[serde(default)]
     pub belt_filter_attached: bool,
     #[serde(default)]
+    pub belt_filter_blacklist: bool,
+    #[serde(default)]
+    pub silo_capacity: u32,
+    #[serde(default)]
     pub fluid_kind: String,
     #[serde(default)]
     pub fluid_amount: i32,
@@ -520,6 +615,8 @@ impl MachineState {
             pipe_has_target: false,
             splitter_filters: [String::new(), String::new(), String::new()],
             belt_filter_attached: false,
+            belt_filter_blacklist: false,
+            silo_capacity: 2_048,
             fluid_kind: String::new(),
             fluid_amount: 0,
         }
@@ -911,7 +1008,13 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
         | MachineKind::FluidPump
         | MachineKind::VoidTrashCan
         | MachineKind::EnergyRelay
-        | MachineKind::ChargingPad => None,
+        | MachineKind::ChargingPad
+        | MachineKind::UpgradeStation
+        | MachineKind::GeothermalGenerator
+        | MachineKind::SteamTurbine
+        | MachineKind::Tesseract
+        | MachineKind::IndustrialSilo
+        | MachineKind::Recycler => None,
     }
 }
 
@@ -1272,7 +1375,13 @@ pub fn step_machine(
         | MachineKind::FluidTank
         | MachineKind::VoidTrashCan
         | MachineKind::EnergyRelay
-        | MachineKind::ChargingPad => StepOutcome {
+        | MachineKind::ChargingPad
+        | MachineKind::UpgradeStation
+        | MachineKind::GeothermalGenerator
+        | MachineKind::SteamTurbine
+        | MachineKind::Tesseract
+        | MachineKind::IndustrialSilo
+        | MachineKind::Recycler => StepOutcome {
             status: StepStatus::Idle,
             consume_input: false,
             consume_fuel: false,

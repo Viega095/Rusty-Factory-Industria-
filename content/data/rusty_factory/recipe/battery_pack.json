@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "BEB",
+    "RCR",
+    "BEB"
+  ],
+  "key": {
+    "B": "rusty_factory:energy_battery_mk2",
+    "E": "rusty_factory:electronic_circuit",
+    "R": "rusty_factory:cable_red",
+    "C": "rusty_factory:steel_ingot"
+  },
+  "result": {
+    "id": "rusty_factory:battery_pack",
+    "count": 1
+  }
+}
