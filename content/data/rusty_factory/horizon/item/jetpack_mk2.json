@@ -5,7 +5,7 @@
   "components": {
     "minecraft:equippable": {
       "slot": "chest",
-      "asset_id": "rusty_factory:jetpack"
+      "asset_id": "rusty_factory:jetpack_mk2"
     }
   }
 }

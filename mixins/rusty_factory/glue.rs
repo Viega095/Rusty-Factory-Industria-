@@ -6062,16 +6062,45 @@ pub(in crate::game) fn tooltip(
 
     if let Some(cap) = rules::battery_capacity(id) {
         let cur = get_item_energy(stack);
+        let pct = ((cur as f32 / cap.max(1) as f32) * 100.0).round() as i32;
         lines.push((
-            Text::legacy(&format!("§b⚡ Energía: §f{cur} / {cap} FE")),
+            Text::legacy(&format!("§b⚡ Energía: §f{cur} / {cap} FE ({pct}%)")),
             0xFF38_F2FF,
         ));
     }
-    if id == rules::ITEM_MINING_DRILL {
+    if id == rules::ITEM_MINING_DRILL || id == rules::ITEM_MINING_DRILL_MK2 {
         let mode = if is_drill_3x3(stack) { "3x3" } else { "1x1" };
         lines.push((
             Text::legacy(&format!("§e⛏ Modo actual: §f{mode}")),
             0xFFFF_D038,
+        ));
+    } else if id == rules::ITEM_MINING_DRILL_MK3 {
+        let mode = if is_drill_3x3(stack) { "5x5" } else { "1x1" };
+        lines.push((
+            Text::legacy(&format!("§e⛏ Modo actual: §f{mode}")),
+            0xFFFF_D038,
+        ));
+    } else if id == rules::ITEM_JETPACK_MK2 {
+        let hover = if is_jetpack_hover(stack) { "§aON" } else { "§7OFF" };
+        lines.push((
+            Text::legacy(&format!("§b🚀 Modo Hover: {hover}")),
+            0xFF38_F2FF,
+        ));
+    }
+    let mut mods = Vec::new();
+    if has_item_module(stack, "nv") {
+        mods.push("Visión Nocturna");
+    }
+    if has_item_module(stack, "mag") {
+        mods.push("Imán");
+    }
+    if has_item_module(stack, "eff") {
+        mods.push("Eficiencia");
+    }
+    if !mods.is_empty() {
+        lines.push((
+            Text::legacy(&format!("§a✦ Módulos: §f{}", mods.join(", "))),
+            0xFF4A_DE80,
         ));
     }
 }
@@ -6123,10 +6152,18 @@ pub(in crate::game) fn hud(
             rules::ITEM_JETPACK_MK2 => "Jetpack MK2".to_owned(),
             rules::ITEM_JET_BOOTS => "Botas Cohete".to_owned(),
             rules::ITEM_SOLAR_HELMET => "Casco Solar".to_owned(),
+            rules::ITEM_STEEL_HELMET => "Casco Acero".to_owned(),
+            rules::ITEM_STEEL_CHESTPLATE => "Pechera Acero".to_owned(),
+            rules::ITEM_STEEL_LEGGINGS => "Pantalón Acero".to_owned(),
+            rules::ITEM_STEEL_BOOTS => "Botas Acero".to_owned(),
             rules::ITEM_INDUSTRIAL_HELMET => "Casco Ind.".to_owned(),
             rules::ITEM_INDUSTRIAL_CHESTPLATE => "Pechera Ind.".to_owned(),
             rules::ITEM_INDUSTRIAL_LEGGINGS => "Pantalón Ind.".to_owned(),
             rules::ITEM_INDUSTRIAL_BOOTS => "Botas Ind.".to_owned(),
+            rules::ITEM_QUANTUM_HELMET => "Casco Cuántico".to_owned(),
+            rules::ITEM_QUANTUM_CHESTPLATE => "Pechera Cuántica".to_owned(),
+            rules::ITEM_QUANTUM_LEGGINGS => "Pantalón Cuántico".to_owned(),
+            rules::ITEM_QUANTUM_BOOTS => "Botas Cuánticas".to_owned(),
             _ => "Equipo Tech".to_owned(),
         };
         Some((label, cur, cap))
