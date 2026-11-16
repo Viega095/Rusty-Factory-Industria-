@@ -2518,28 +2518,31 @@ pub(in crate::game) fn world_primitives(
         let base_y = y as f64;
         let top_y = y as f64 + 3.25;
         let (beam_col_a, beam_col_b, accent_col) = match entity.id.as_str() {
-            rules::BLOCK_QUARRY_MK2 => (0xFF38_98FF, 0xFFFF_C800, 0xFF38_B6FF),
-            rules::BLOCK_QUARRY_MK3 => (0xFF38_F2FF, 0xFF1D_2026, 0xFFAA_66FF),
-            _ => (0xFFFF_C800, 0xFF1D_2026, 0xFFFF_9E22),
+            rules::BLOCK_QUARRY_MK2 => (0xFF4A_76A4, 0xFFB8_8E2C, 0xFF5A_8EC0),
+            rules::BLOCK_QUARRY_MK3 => (0xFF3E_8292, 0xFF1C_2026, 0xFF72_669E),
+            _ => (0xFFC8_9826, 0xFF20_242B, 0xFFD0_8228),
         };
-        let steel_dark = 0xFF28_2D36;
-        let steel_mid = 0xFF4B_5463;
-        let steel_light = 0xFF7D_8899;
+        let steel_dark = 0xFF26_2A32;
+        let steel_mid = 0xFF46_4E5C;
+        let steel_light = 0xFF6E_7888;
 
-        // 1. 3D Industrial Construction Scaffolding (tubular hazard beams + footings + corner beacons)
+        // 1. 3D Industrial Construction Scaffolding (non-overlapping segmented beams)
         let draw_hazard_beam = |prims: &mut WorldPrimitives, a: [f64; 3], b: [f64; 3], r: f64| {
             let dx = b[0] - a[0];
             let dy = b[1] - a[1];
             let dz = b[2] - a[2];
             let len = (dx * dx + dy * dy + dz * dz).sqrt().max(0.01);
             let segs = (len / 0.5).ceil().max(1.0) as usize;
+            let rx = if dx.abs() > 0.001 { 0.0 } else { r };
+            let ry = if dy.abs() > 0.001 { 0.0 } else { r };
+            let rz = if dz.abs() > 0.001 { 0.0 } else { r };
             for i in 0..segs {
                 let t0 = i as f64 / segs as f64;
                 let t1 = (i + 1) as f64 / segs as f64;
                 let p0 = [a[0] + dx * t0, a[1] + dy * t0, a[2] + dz * t0];
                 let p1 = [a[0] + dx * t1, a[1] + dy * t1, a[2] + dz * t1];
-                let bmin = [p0[0].min(p1[0]) - r, p0[1].min(p1[1]) - r, p0[2].min(p1[2]) - r];
-                let bmax = [p0[0].max(p1[0]) + r, p0[1].max(p1[1]) + r, p0[2].max(p1[2]) + r];
+                let bmin = [p0[0].min(p1[0]) - rx, p0[1].min(p1[1]) - ry, p0[2].min(p1[2]) - rz];
+                let bmax = [p0[0].max(p1[0]) + rx, p0[1].max(p1[1]) + ry, p0[2].max(p1[2]) + rz];
                 let col = if i % 2 == 0 { beam_col_a } else { beam_col_b };
                 prims.filled_box(bmin, bmax, col);
             }
@@ -2549,36 +2552,33 @@ pub(in crate::game) fn world_primitives(
         let beacon_col = if st.enabled && ((anim_t * 0.18) as i64).rem_euclid(2) == 0 {
             accent_col
         } else if st.enabled {
-            0xFF38_F2FF
+            0xFF52_A8B8
         } else {
-            0xFF66_2222
+            0xFF5A_2424
         };
 
-        // 4 vertical corner pillars with heavy anchor footings, mid-collars & top beacons
+        // 4 vertical corner pillars with heavy anchor footings, mid-collars & top beacons (zero overlap)
+        let mid_y = base_y + (top_y - base_y) * 0.5;
         for &(cx, cz) in &[(x0, z0), (x1, z0), (x0, z1), (x1, z1)] {
-            // Concrete/steel anchor footing
             primitives.filled_box([cx - 0.19, base_y, cz - 0.19], [cx + 0.19, base_y + 0.22, cz + 0.19], steel_dark);
             primitives.filled_box([cx - 0.14, base_y + 0.22, cz - 0.14], [cx + 0.14, base_y + 0.34, cz + 0.14], steel_mid);
-            // Vertical hazard pillar
-            draw_hazard_beam(primitives, [cx, base_y + 0.34, cz], [cx, top_y, cz], 0.085);
-            // Mid-height reinforcement collar
-            let mid_y = base_y + (top_y - base_y) * 0.5;
+            draw_hazard_beam(primitives, [cx, base_y + 0.34, cz], [cx, mid_y - 0.08, cz], 0.085);
             primitives.filled_box([cx - 0.12, mid_y - 0.08, cz - 0.12], [cx + 0.12, mid_y + 0.08, cz + 0.12], steel_mid);
-            // Top structural corner housing + beacon
+            draw_hazard_beam(primitives, [cx, mid_y + 0.08, cz], [cx, top_y - 0.16, cz], 0.085);
             primitives.filled_box([cx - 0.16, top_y - 0.16, cz - 0.16], [cx + 0.16, top_y + 0.16, cz + 0.16], steel_dark);
             primitives.filled_box([cx - 0.09, top_y + 0.16, cz - 0.09], [cx + 0.09, top_y + 0.28, cz + 0.09], beacon_col);
         }
-        // 4 top perimeter hazard beams + upper steel guide rail
-        draw_hazard_beam(primitives, [x0, top_y, z0], [x1, top_y, z0], 0.085);
-        draw_hazard_beam(primitives, [x0, top_y, z1], [x1, top_y, z1], 0.085);
-        draw_hazard_beam(primitives, [x0, top_y, z0], [x0, top_y, z1], 0.085);
-        draw_hazard_beam(primitives, [x1, top_y, z0], [x1, top_y, z1], 0.085);
-        // 4 ground perimeter hazard bars
+        // 4 top perimeter hazard beams (inset 0.16 from corner housings)
+        draw_hazard_beam(primitives, [x0 + 0.16, top_y, z0], [x1 - 0.16, top_y, z0], 0.085);
+        draw_hazard_beam(primitives, [x0 + 0.16, top_y, z1], [x1 - 0.16, top_y, z1], 0.085);
+        draw_hazard_beam(primitives, [x0, top_y, z0 + 0.16], [x0, top_y, z1 - 0.16], 0.085);
+        draw_hazard_beam(primitives, [x1, top_y, z0 + 0.16], [x1, top_y, z1 - 0.16], 0.085);
+        // 4 ground perimeter hazard bars (inset 0.19 from anchor footings)
         let gy = base_y + 0.08;
-        draw_hazard_beam(primitives, [x0, gy, z0], [x1, gy, z0], 0.06);
-        draw_hazard_beam(primitives, [x0, gy, z1], [x1, gy, z1], 0.06);
-        draw_hazard_beam(primitives, [x0, gy, z0], [x0, gy, z1], 0.06);
-        draw_hazard_beam(primitives, [x1, gy, z0], [x1, gy, z1], 0.06);
+        draw_hazard_beam(primitives, [x0 + 0.19, gy, z0], [x1 - 0.19, gy, z0], 0.06);
+        draw_hazard_beam(primitives, [x0 + 0.19, gy, z1], [x1 - 0.19, gy, z1], 0.06);
+        draw_hazard_beam(primitives, [x0, gy, z0 + 0.19], [x0, gy, z1 - 0.19], 0.06);
+        draw_hazard_beam(primitives, [x1, gy, z0 + 0.19], [x1, gy, z1 - 0.19], 0.06);
 
         // Power conduit pipe connecting the Quarry block (`pos`) to the frame
         let qx = x as f64 + 0.5;
@@ -2602,56 +2602,62 @@ pub(in crate::game) fn world_primitives(
         let tz = (target[2] as f64 + 0.5).clamp(z0 + 0.5, z1 - 0.5);
         let ty = (target[1] as f64 + 0.5).min(top_y - 0.8);
 
-        // Twin-rail steel X-Bridge across the Quarry frame at `tz`
-        primitives.filled_box([x0, top_y - 0.10, tz - 0.20], [x1, top_y + 0.06, tz - 0.08], steel_mid);
-        primitives.filled_box([x0, top_y - 0.10, tz + 0.08], [x1, top_y + 0.06, tz + 0.20], steel_mid);
         // End-truck trolley wheels riding on the X0 and X1 rails
-        primitives.filled_box([x0 - 0.14, top_y - 0.18, tz - 0.28], [x0 + 0.14, top_y + 0.16, tz + 0.28], steel_dark);
-        primitives.filled_box([x1 - 0.14, top_y - 0.18, tz - 0.28], [x1 + 0.14, top_y + 0.16, tz + 0.28], steel_dark);
+        primitives.filled_box([x0 - 0.14, top_y - 0.16, tz - 0.26], [x0 + 0.14, top_y + 0.14, tz + 0.26], steel_dark);
+        primitives.filled_box([x1 - 0.14, top_y - 0.16, tz - 0.26], [x1 + 0.14, top_y + 0.14, tz + 0.26], steel_dark);
+        // Twin-rail steel X-Bridge (inset 0.14 from end-trucks, split around carriage)
+        let left_end = (tx - 0.34).max(x0 + 0.14);
+        let right_start = (tx + 0.34).min(x1 - 0.14);
+        if left_end > x0 + 0.14 {
+            primitives.filled_box([x0 + 0.14, top_y - 0.09, tz - 0.18], [left_end, top_y + 0.05, tz - 0.07], steel_mid);
+            primitives.filled_box([x0 + 0.14, top_y - 0.09, tz + 0.07], [left_end, top_y + 0.05, tz + 0.18], steel_mid);
+        }
+        if x1 - 0.14 > right_start {
+            primitives.filled_box([right_start, top_y - 0.09, tz - 0.18], [x1 - 0.14, top_y + 0.05, tz - 0.07], steel_mid);
+            primitives.filled_box([right_start, top_y - 0.09, tz + 0.07], [x1 - 0.14, top_y + 0.05, tz + 0.18], steel_mid);
+        }
 
         // Multi-part Drill Head Carriage at `[tx, top_y, tz]`
-        primitives.filled_box([tx - 0.36, top_y - 0.22, tz - 0.36], [tx + 0.36, top_y + 0.14, tz + 0.36], steel_dark);
-        primitives.filled_box([tx - 0.28, top_y + 0.14, tz - 0.28], [tx + 0.28, top_y + 0.28, tz + 0.28], beam_col_a);
-        primitives.filled_box([tx - 0.20, top_y - 0.38, tz - 0.20], [tx + 0.20, top_y - 0.22, tz + 0.20], steel_mid);
+        primitives.filled_box([tx - 0.34, top_y - 0.20, tz - 0.34], [tx + 0.34, top_y + 0.12, tz + 0.34], steel_dark);
+        primitives.filled_box([tx - 0.24, top_y + 0.12, tz - 0.24], [tx + 0.24, top_y + 0.24, tz + 0.24], beam_col_a);
+        primitives.filled_box([tx - 0.18, top_y - 0.36, tz - 0.18], [tx + 0.18, top_y - 0.20, tz + 0.18], steel_mid);
 
         // 3. Telescoping 3D Drill Pipe & Multi-Stage Animated Drill Head
         if st.enabled {
             let bob = (anim_t * 0.55).sin().abs() * 0.24;
             let spin_alt = ((anim_t * 0.50) as i64).rem_euclid(2) == 0;
             let drill_tip_y = ty + 0.06 - bob;
-            let pipe_top = top_y - 0.38;
+            let pipe_top = top_y - 0.36;
             let pipe_bot = drill_tip_y + 0.72;
 
-            // Hydraulic upper sleeve
+            // Hydraulic upper sleeve + inner steel drill shaft (joined end-to-end, no overlap)
             if pipe_top > pipe_bot {
                 let sleeve_bot = (pipe_top - 0.75).max(pipe_bot);
-                primitives.filled_box([tx - 0.13, sleeve_bot, tz - 0.13], [tx + 0.13, pipe_top, tz + 0.13], steel_dark);
-                // Inner steel drill shaft
-                primitives.filled_box([tx - 0.075, pipe_bot, tz - 0.075], [tx + 0.075, pipe_top, tz + 0.075], steel_light);
-                // Periodic auger stabilizer rings along the drill pipe
-                let mut ry = pipe_bot + 0.6;
-                let mut ring_idx = 0;
-                while ry < pipe_top - 0.25 {
-                    let rcol = if ring_idx % 2 == 0 { beam_col_a } else { steel_dark };
-                    primitives.filled_box([tx - 0.11, ry - 0.05, tz - 0.11], [tx + 0.11, ry + 0.05, tz + 0.11], rcol);
-                    ry += 0.9;
-                    ring_idx += 1;
+                primitives.filled_box([tx - 0.12, sleeve_bot, tz - 0.12], [tx + 0.12, pipe_top, tz + 0.12], steel_dark);
+                if sleeve_bot > pipe_bot {
+                    primitives.filled_box([tx - 0.075, pipe_bot, tz - 0.075], [tx + 0.075, sleeve_bot, tz + 0.075], steel_light);
                 }
             }
 
             // Gearbox & hazard collar above cutter head
-            primitives.filled_box([tx - 0.24, drill_tip_y + 0.50, tz - 0.24], [tx + 0.24, drill_tip_y + 0.72, tz + 0.24], beam_col_a);
-            primitives.filled_box([tx - 0.18, drill_tip_y + 0.44, tz - 0.18], [tx + 0.18, drill_tip_y + 0.50, tz + 0.18], steel_dark);
+            primitives.filled_box([tx - 0.22, drill_tip_y + 0.50, tz - 0.22], [tx + 0.22, drill_tip_y + 0.72, tz + 0.22], beam_col_a);
+            primitives.filled_box([tx - 0.16, drill_tip_y + 0.44, tz - 0.16], [tx + 0.16, drill_tip_y + 0.50, tz + 0.16], steel_dark);
 
-            // Rotating 4-flute cutter head (crossed steel & carbide blades)
-            let (bx, bz) = if spin_alt { (0.32, 0.10) } else { (0.10, 0.32) };
+            // Rotating 4-flute cutter head (crossed steel & carbide blades, non-overlapping arms)
+            let (bx, bz) = if spin_alt { (0.30, 0.09) } else { (0.09, 0.30) };
             primitives.filled_box([tx - bx, drill_tip_y + 0.22, tz - bz], [tx + bx, drill_tip_y + 0.44, tz + bz], steel_light);
-            primitives.filled_box([tx - bz, drill_tip_y + 0.22, tz - bx], [tx + bz, drill_tip_y + 0.44, tz + bx], steel_dark);
+            if spin_alt {
+                primitives.filled_box([tx - 0.09, drill_tip_y + 0.22, tz - 0.30], [tx + 0.09, drill_tip_y + 0.44, tz - 0.09], steel_dark);
+                primitives.filled_box([tx - 0.09, drill_tip_y + 0.22, tz + 0.09], [tx + 0.09, drill_tip_y + 0.44, tz + 0.30], steel_dark);
+            } else {
+                primitives.filled_box([tx - 0.30, drill_tip_y + 0.22, tz - 0.09], [tx - 0.09, drill_tip_y + 0.44, tz + 0.09], steel_dark);
+                primitives.filled_box([tx + 0.09, drill_tip_y + 0.22, tz - 0.09], [tx + 0.30, drill_tip_y + 0.44, tz + 0.09], steel_dark);
+            }
 
             // Conical stepped diamond/energy drill tip
-            let tip_col = if spin_alt { 0xFF38_F2FF } else { accent_col };
-            primitives.filled_box([tx - 0.15, drill_tip_y + 0.10, tz - 0.15], [tx + 0.15, drill_tip_y + 0.22, tz + 0.15], steel_mid);
-            primitives.filled_box([tx - 0.08, drill_tip_y, tz - 0.08], [tx + 0.08, drill_tip_y + 0.12, tz + 0.08], tip_col);
+            let tip_col = if spin_alt { 0xFF52_A8B8 } else { accent_col };
+            primitives.filled_box([tx - 0.14, drill_tip_y + 0.10, tz - 0.14], [tx + 0.14, drill_tip_y + 0.22, tz + 0.14], steel_mid);
+            primitives.filled_box([tx - 0.08, drill_tip_y, tz - 0.08], [tx + 0.08, drill_tip_y + 0.10, tz + 0.08], tip_col);
 
             // Pulsing excavation collar around the target block
             primitives.box_outline(
