@@ -147,6 +147,17 @@ bindings = [
 ]
 
 [[injection]]
+id = "use-item"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_use_item"
+helper = "use_item.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "stack", ty = "&crate::items::ItemStack", value = "stack" },
+  { name = "claimed", ty = "&mut bool", value = "&mut *claimed" },
+]
+
+[[injection]]
 id = "menu-button"
 kind = "HEAD"
 target = "horizon_client::game::native_hooks::Game<'_>::native_menu_button"

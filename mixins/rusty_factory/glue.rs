@@ -3696,22 +3696,181 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
         return;
     }
     let block_id = game.native_block(pos);
-    if block_id != rules::BLOCK_ITEM_PIPE && !rules::is_conveyor_block(&block_id) {
+    if block_id == rules::BLOCK_ITEM_PIPE || rules::is_conveyor_block(&block_id) {
+        let mut dropped_item: Option<(String, u32)> = None;
+        game.native_with_mod_block_entity(pos, |entity| {
+            if let Some(mut st) = load_state(entity) {
+                if !st.belt_item.is_empty() {
+                    dropped_item = Some((st.belt_item.clone(), st.belt_count.max(1)));
+                    st.belt_item.clear();
+                    st.belt_count = 0;
+                    store_state(entity, &st);
+                }
+            }
+        });
+        if let Some((item_id, count)) = dropped_item {
+            game.pop_resource(pos, ItemStack::new(&item_id, count));
+        }
         return;
     }
-    let mut dropped_item: Option<(String, u32)> = None;
-    game.native_with_mod_block_entity(pos, |entity| {
-        if let Some(mut st) = load_state(entity) {
-            if !st.belt_item.is_empty() {
-                dropped_item = Some((st.belt_item.clone(), st.belt_count.max(1)));
-                st.belt_item.clear();
-                st.belt_count = 0;
-                store_state(entity, &st);
+
+    static DRILL_BREAKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if DRILL_BREAKING.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let Some(held) = game.held() else {
+        return;
+    };
+    let held_id = held.item.as_ref().to_owned();
+    let Some((_, rad_half, base_cost)) = rules::drill_tier(&held_id) else {
+        return;
+    };
+    if !is_drill_3x3(held) {
+        return;
+    }
+    let eff_mod = has_item_module(held, "eff");
+    let cost = if eff_mod { (base_cost / 2).max(5) } else { base_cost };
+    if !game.creative && !consume_player_energy(game, cost) {
+        return;
+    }
+    let (u_axes, v_axes): ([i32; 3], [i32; 3]) = if let Some(who) = game.native_acting_player() {
+        if who.pitch.abs() > 45.0 {
+            ([1, 0, 0], [0, 0, 1])
+        } else {
+            let yaw = who.yaw.rem_euclid(360.0);
+            if !(45.0..135.0).contains(&yaw) && !(225.0..315.0).contains(&yaw) {
+                ([1, 0, 0], [0, 1, 0])
+            } else {
+                ([0, 0, 1], [0, 1, 0])
             }
         }
-    });
-    if let Some((item_id, count)) = dropped_item {
-        game.pop_resource(pos, ItemStack::new(&item_id, count));
+    } else {
+        ([1, 0, 0], [0, 1, 0])
+    };
+    DRILL_BREAKING.store(true, std::sync::atomic::Ordering::Relaxed);
+    let [cx, cy, cz] = pos;
+    for u in -rad_half..=rad_half {
+        for v in -rad_half..=rad_half {
+            if u == 0 && v == 0 {
+                continue;
+            }
+            let p = [
+                cx + u_axes[0] * u + v_axes[0] * v,
+                cy + u_axes[1] * u + v_axes[1] * v,
+                cz + u_axes[2] * u + v_axes[2] * v,
+            ];
+            let b = game.native_block(p);
+            if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
+                game.native_run_command(&format!("setblock {} {} {} minecraft:air destroy", p[0], p[1], p[2]));
+            }
+        }
+    }
+    DRILL_BREAKING.store(false, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Handles right-clicking tools in the air (not targeting a block): Drill mode toggle, Jetpacks, Magnet, Batteries.
+pub(in crate::game) fn use_item(game: &mut Game<'_>, stack: &ItemStack, claimed: &mut bool) {
+    if *claimed || !game.native_on(rules::ID) {
+        return;
+    }
+    let held_id = stack.item.as_ref();
+    let is_crouching = game
+        .player
+        .as_ref()
+        .is_some_and(|p| p.pose == horizon_client::pose::Pose::Crouching);
+
+    if let Some((tier, rad_half, _)) = rules::drill_tier(held_id) {
+        if is_crouching {
+            *claimed = true;
+            let area_label = if rad_half >= 2 { "5x5" } else { "3x3" };
+            let mut mode_now = false;
+            if let Some(held) = game.held_mut() {
+                mode_now = !is_drill_3x3(held);
+                set_drill_3x3(held, mode_now);
+            }
+            if let Some(who) = game.native_acting_player() {
+                let msg = if mode_now {
+                    format!("⚡ [Taladro MK{tier}] Modo: {area_label} Excavación Amplia")
+                } else {
+                    format!("⚡ [Taladro MK{tier}] Modo: 1x1 Precisión")
+                };
+                game.native_action_bar(who.uuid, Text::literal(msg));
+            }
+        }
+        return;
+    }
+
+    if held_id == rules::ITEM_JETPACK_MK2 {
+        *claimed = true;
+        if is_crouching {
+            let mut now_hover = false;
+            if let Some(held) = game.held_mut() {
+                now_hover = !is_jetpack_hover(held);
+                set_jetpack_hover(held, now_hover);
+            }
+            if let Some(who) = game.native_acting_player() {
+                let m = if now_hover { "ACTIVADO" } else { "DESACTIVADO" };
+                game.native_action_bar(who.uuid, Text::literal(format!("🚀 [Jetpack MK2] Modo Hover {m}")));
+            }
+        } else {
+            game.native_run_command("playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.4 1.15");
+            game.native_run_command("effect give @s minecraft:levitation 1 16 true");
+            game.native_run_command("effect give @s minecraft:slow_falling 8 0 true");
+            if let Some(who) = game.native_acting_player() {
+                game.native_action_bar(who.uuid, Text::literal("🚀 [Jetpack MK2] Propulsión Avanzada"));
+            }
+        }
+        return;
+    }
+
+    if held_id == rules::ITEM_JETPACK {
+        *claimed = true;
+        game.native_run_command("playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.5 1.0");
+        game.native_run_command("effect give @s minecraft:levitation 1 15 true");
+        game.native_run_command("effect give @s minecraft:slow_falling 6 0 true");
+        game.native_run_command("particle minecraft:flame ~ ~ ~ 0.4 0.1 0.4 0.08 30");
+        game.native_run_command("particle minecraft:campfire_cosy_smoke ~ ~ ~ 0.3 0.1 0.3 0.03 15");
+        if let Some(who) = game.native_acting_player() {
+            game.native_action_bar(who.uuid, Text::literal("🚀 [Jetpack Industrial] ¡Propulsión Aérea Máxima Activada!"));
+        }
+        return;
+    }
+
+    if held_id == rules::ITEM_JET_BOOTS {
+        *claimed = true;
+        game.native_run_command("playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.2 1.1");
+        game.native_run_command("effect give @s minecraft:levitation 1 10 true");
+        game.native_run_command("effect give @s minecraft:slow_falling 5 0 true");
+        game.native_run_command("particle minecraft:flame ~ ~ ~ 0.3 0.1 0.3 0.05 20");
+        game.native_run_command("particle minecraft:smoke ~ ~ ~ 0.2 0.1 0.2 0.02 15");
+        if let Some(who) = game.native_acting_player() {
+            game.native_action_bar(who.uuid, Text::literal("🚀 [Botas Cohete] ¡Propulsión Cohete Activada!"));
+        }
+        return;
+    }
+
+    if held_id == rules::ITEM_ITEM_MAGNET {
+        *claimed = true;
+        game.native_run_command("playsound minecraft:entity.item.pickup player @s ~ ~ ~ 1.0 1.5");
+        game.native_run_command("tp @e[type=item,distance=..12] @s");
+        game.native_run_command("tp @e[type=experience_orb,distance=..12] @s");
+        game.native_run_command("particle minecraft:portal ~ ~1 ~ 0.5 0.5 0.5 0.1 25");
+        if let Some(who) = game.native_acting_player() {
+            game.native_action_bar(who.uuid, Text::literal("🧲 [Imán Industrial] ¡Ítems y experiencia cercanos atraídos hacia ti!"));
+        }
+        return;
+    }
+
+    if rules::is_battery_item(held_id) {
+        *claimed = true;
+        let cap = rules::battery_capacity(held_id).unwrap_or(50_000);
+        let cur = get_item_energy(stack);
+        if let Some(who) = game.native_acting_player() {
+            game.native_action_bar(
+                who.uuid,
+                Text::literal(format!("🔋 [Batería] Carga: {cur} / {cap} FE (recarga tu equipo automáticamente)")),
+            );
+        }
     }
 }
 
@@ -4418,13 +4577,12 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
 
         // 3. Mining Drill (MK1 3x3, MK2 3x3, MK3 5x5): Crouch toggles area/1x1; Click excavates using FE
         if let Some((tier, rad_half, base_cost)) = rules::drill_tier(held_id) {
-            static DRILL_MODE_3X3: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
             let area_label = if rad_half >= 2 { "5x5" } else { "3x3" };
             if is_crouching {
                 *canceled = true;
-                let prev = DRILL_MODE_3X3.fetch_xor(true, std::sync::atomic::Ordering::Relaxed);
-                let mode_now = !prev;
+                let mut mode_now = false;
                 if let Some(held) = game.held_mut() {
+                    mode_now = !is_drill_3x3(held);
                     set_drill_3x3(held, mode_now);
                 }
                 if let Some(who) = game.native_acting_player() {
@@ -4436,7 +4594,7 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                     game.native_action_bar(who.uuid, Text::literal(msg));
                 }
                 return;
-            } else if DRILL_MODE_3X3.load(std::sync::atomic::Ordering::Relaxed) {
+            } else if game.held().is_some_and(is_drill_3x3) {
                 *canceled = true;
                 let eff_mod = game.held().is_some_and(|h| has_item_module(h, "eff"));
                 let cost = if eff_mod { (base_cost / 2).max(5) } else { base_cost };
@@ -4558,32 +4716,6 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
             return;
         }
 
-        // 3c. Industrial Armor Set: Equip directly
-        if matches!(
-            held_id.as_str(),
-            rules::ITEM_INDUSTRIAL_HELMET
-                | rules::ITEM_INDUSTRIAL_CHESTPLATE
-                | rules::ITEM_INDUSTRIAL_LEGGINGS
-                | rules::ITEM_INDUSTRIAL_BOOTS
-        ) {
-            *canceled = true;
-            let slot = match held_id.as_str() {
-                rules::ITEM_INDUSTRIAL_HELMET => "armor.head",
-                rules::ITEM_INDUSTRIAL_CHESTPLATE => "armor.chest",
-                rules::ITEM_INDUSTRIAL_LEGGINGS => "armor.legs",
-                _ => "armor.feet",
-            };
-            game.native_run_command(&format!("item replace entity @s {slot} with {held_id}"));
-            game.native_run_command("playsound minecraft:item.armor.equip_netherite player @s ~ ~ ~ 1.0 1.0");
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(
-                    who.uuid,
-                    Text::literal("🛡 [Armadura Industrial] Equipada. Consume FE de tus baterías para darte mejoras."),
-                );
-            }
-            return;
-        }
-
         // 4. Jet Boots: Rocket propulsion boost with flame & smoke exhaust, slow falling to prevent fall damage!
         if held_id == rules::ITEM_JET_BOOTS {
             *canceled = true;
@@ -4651,20 +4783,6 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 game.native_action_bar(
                     who.uuid,
                     Text::literal("⚡ [Láser Minero] Haz de Plasma Concentrado Disparado"),
-                );
-            }
-            return;
-        }
-
-        // 8. Solar Helmet: Equip directly to head armor slot
-        if held_id == rules::ITEM_SOLAR_HELMET {
-            *canceled = true;
-            game.native_run_command("item replace entity @s armor.head with rusty_factory:solar_helmet");
-            game.native_run_command("playsound minecraft:item.armor.equip_diamond player @s ~ ~ ~ 1.0 1.0");
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(
-                    who.uuid,
-                    Text::literal("☀️ [Casco Solar] Equipado. Genera recarga pasiva de día."),
                 );
             }
             return;
