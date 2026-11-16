@@ -1,0 +1,11 @@
+{
+  "template": "minecraft:netherite_boots",
+  "max_stack_size": 1,
+  "rarity": "rare",
+  "components": {
+    "minecraft:equippable": {
+      "slot": "feet",
+      "asset_id": "rusty_factory:industrial"
+    }
+  }
+}

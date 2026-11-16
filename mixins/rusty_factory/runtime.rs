@@ -49,6 +49,21 @@ pub const BLOCK_ASSEMBLER: &str = "rusty_factory:industrial_assembler";
 pub const BLOCK_VULCANIZER: &str = "rusty_factory:vulcanizer";
 pub const BLOCK_SAP_EXTRACTOR: &str = "rusty_factory:sap_extractor";
 pub const BLOCK_QUARRY: &str = "rusty_factory:quarry";
+pub const BLOCK_QUARRY_MK2: &str = "rusty_factory:quarry_mk2";
+pub const BLOCK_QUARRY_MK3: &str = "rusty_factory:quarry_mk3";
+
+pub fn is_quarry_block(block: &str) -> bool {
+    matches!(block, BLOCK_QUARRY | BLOCK_QUARRY_MK2 | BLOCK_QUARRY_MK3)
+}
+
+/// Returns `(radius, speed_multiplier, native_fortune)` for a Quarry tier.
+pub fn quarry_tier(block: &str) -> (i32, u32, u32) {
+    match block {
+        BLOCK_QUARRY_MK2 => (6, 2, 1),
+        BLOCK_QUARRY_MK3 => (10, 4, 2),
+        _ => (2, 1, 0),
+    }
+}
 pub const BLOCK_HARVESTER: &str = "rusty_factory:auto_harvester";
 pub const BLOCK_BREAKER: &str = "rusty_factory:block_breaker";
 pub const BLOCK_PLACER: &str = "rusty_factory:block_placer";
@@ -103,6 +118,23 @@ pub const ITEM_SOLAR_HELMET: &str = "rusty_factory:solar_helmet";
 pub const ITEM_SPEED_UPGRADE: &str = "rusty_factory:speed_upgrade";
 pub const ITEM_FORTUNE_UPGRADE: &str = "rusty_factory:fortune_upgrade";
 pub const ITEM_BATTERY: &str = "rusty_factory:energy_battery";
+pub const ITEM_BATTERY_MK2: &str = "rusty_factory:energy_battery_mk2";
+pub const ITEM_BELT_FILTER: &str = "rusty_factory:belt_filter";
+pub const ITEM_INDUSTRIAL_HELMET: &str = "rusty_factory:industrial_helmet";
+pub const ITEM_INDUSTRIAL_CHESTPLATE: &str = "rusty_factory:industrial_chestplate";
+pub const ITEM_INDUSTRIAL_LEGGINGS: &str = "rusty_factory:industrial_leggings";
+pub const ITEM_INDUSTRIAL_BOOTS: &str = "rusty_factory:industrial_boots";
+
+pub fn battery_capacity(item: &str) -> Option<i32> {
+    match item {
+        ITEM_BATTERY => Some(50_000),
+        ITEM_BATTERY_MK2 => Some(250_000),
+        ITEM_MINING_DRILL | ITEM_MINING_LASER | ITEM_JETPACK | ITEM_JET_BOOTS
+        | ITEM_SOLAR_HELMET | ITEM_INDUSTRIAL_HELMET | ITEM_INDUSTRIAL_CHESTPLATE
+        | ITEM_INDUSTRIAL_LEGGINGS | ITEM_INDUSTRIAL_BOOTS => Some(50_000),
+        _ => None,
+    }
+}
 pub const ITEM_CIRCUIT: &str = "rusty_factory:electronic_circuit";
 pub const ITEM_SOLAR_CELL: &str = "rusty_factory:solar_cell";
 pub const ITEM_SILICON: &str = "rusty_factory:silicon";
@@ -175,7 +207,7 @@ impl MachineKind {
             BLOCK_ASSEMBLER => Some(Self::IndustrialAssembler),
             BLOCK_VULCANIZER => Some(Self::Vulcanizer),
             BLOCK_SAP_EXTRACTOR => Some(Self::SapExtractor),
-            BLOCK_QUARRY => Some(Self::Quarry),
+            BLOCK_QUARRY | BLOCK_QUARRY_MK2 | BLOCK_QUARRY_MK3 => Some(Self::Quarry),
             BLOCK_HARVESTER => Some(Self::AutoHarvester),
             BLOCK_BREAKER => Some(Self::BlockBreaker),
             BLOCK_PLACER => Some(Self::BlockPlacer),
@@ -458,6 +490,8 @@ pub struct MachineState {
     #[serde(default)]
     pub splitter_filters: [String; 3],
     #[serde(default)]
+    pub belt_filter_attached: bool,
+    #[serde(default)]
     pub fluid_kind: String,
     #[serde(default)]
     pub fluid_amount: i32,
@@ -485,13 +519,14 @@ impl MachineState {
             pipe_target: [0, 0, 0],
             pipe_has_target: false,
             splitter_filters: [String::new(), String::new(), String::new()],
+            belt_filter_attached: false,
             fluid_kind: String::new(),
             fluid_amount: 0,
         }
     }
 
     pub fn quarry_side_len(&self) -> i32 {
-        self.quarry_radius.clamp(2, 4) * 2 + 1
+        self.quarry_radius.clamp(2, 10) * 2 + 1
     }
 }
 
@@ -953,7 +988,7 @@ pub fn quarry_drop_for_block(block_id: &str) -> Option<(&'static str, u32)> {
 /// The Quarry sits at `pos` with its front pointing toward `facing`, so the excavation frame
 /// extends behind the Quarry (`-facing`).
 pub fn quarry_area_bounds(pos: [i32; 3], facing: &str, radius: i32) -> (i32, i32, i32, i32) {
-    let r = radius.clamp(2, 4);
+    let r = radius.clamp(2, 10);
     let side = r * 2 + 1;
     match facing {
         // Front is North (-Z), so behind is South (+Z: pos[2]+1 ..= pos[2]+side)

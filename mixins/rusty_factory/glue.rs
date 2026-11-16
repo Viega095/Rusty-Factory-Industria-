@@ -711,6 +711,52 @@ fn tick_conveyor(
         state.progress += 1;
         store_state(entity, state);
         game.native_block_entity_sync(pos);
+        // If an inline Belt Filter is attached and item does NOT match filter, deflect to the side!
+        if state.progress >= (max_ticks / 2).max(1)
+            && state.belt_filter_attached
+            && !state.splitter_filters[0].is_empty()
+            && state.belt_item != state.splitter_filters[0]
+        {
+            let stack = ItemStack::new(&state.belt_item, state.belt_count.max(1));
+            let side_offs = [
+                rules::conveyor_exit_offset(&facing, "turn_right"),
+                rules::conveyor_exit_offset(&facing, "turn_left"),
+            ];
+            let mut deflected = false;
+            for soff in side_offs {
+                let sp = [pos[0] + soff[0], pos[1], pos[2] + soff[2]];
+                let sb = game.native_block(sp);
+                if rules::is_conveyor_block(&sb) {
+                    if insert_into_conveyor(game, sp, stack.clone()).is_none() {
+                        deflected = true;
+                        break;
+                    }
+                } else if is_item_container_block(&sb) {
+                    if game.native_insert_item(sp, Direction::Up, stack.clone()).is_none() {
+                        deflected = true;
+                        break;
+                    }
+                } else if matches!(sb.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air") {
+                    let drop_pos = [
+                        pos[0] as f64 + 0.5 + soff[0] as f64 * 0.68,
+                        pos[1] as f64 + 0.30,
+                        pos[2] as f64 + 0.5 + soff[2] as f64 * 0.68,
+                    ];
+                    let vel = [soff[0] as f64 * 0.12, 0.06, soff[2] as f64 * 0.12];
+                    game.spawn_item(stack.clone(), drop_pos, vel, 10);
+                    deflected = true;
+                    break;
+                }
+            }
+            if deflected {
+                state.belt_item.clear();
+                state.belt_count = 0;
+                state.progress = 0;
+                store_state(entity, state);
+                game.native_block_entity_sync(pos);
+                return;
+            }
+        }
         // If an Item Splitter sits directly on top of this belt, feed it once item reaches center
         if state.progress >= (max_ticks / 2).max(1) {
             let above_pos = [pos[0], pos[1] + 1, pos[2]];
@@ -812,8 +858,13 @@ fn tick_quarry(
         return (outcome.status, 0);
     }
 
+    let (tier_radius, tier_speed, tier_fortune) = rules::quarry_tier(&entity.id);
+    if state.quarry_radius < tier_radius {
+        state.quarry_radius = tier_radius;
+    }
     let cost = rules::effective_energy_cost(MachineKind::Quarry, speed_upgrades);
-    let needed = rules::effective_work_ticks(MachineKind::Quarry, speed_upgrades);
+    let base_needed = rules::effective_work_ticks(MachineKind::Quarry, speed_upgrades);
+    let needed = (base_needed / tier_speed as i32).max(1);
 
     // Check if output slot is completely full before mining
     if let Some(existing) = entity.items[rules::SLOT_OUTPUT].as_ref() {
@@ -905,7 +956,7 @@ fn tick_quarry(
                 state.last_target = target_pos;
 
                 let bonus = if block_id.ends_with("_ore") || block_id == "minecraft:ancient_debris" {
-                    fortune_upgrades.min(4)
+                    (fortune_upgrades + tier_fortune).min(6)
                 } else {
                     0
                 };
@@ -1353,6 +1404,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     if !game.native_on(rules::ID) {
         return;
     }
+    tick_player_equipment(game);
 
     // 1. Rubber Sapling automatic growth tick (grows into a full Rubber Tree after ~8 seconds)
     if entity.id == rules::BLOCK_RUBBER_SAPLING {
@@ -1789,23 +1841,23 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         if let Some(Some(item_stack)) = entity.items.first_mut() {
             let charge_cost = 50;
             if state.energy >= charge_cost {
-                if matches!(
-                    item_stack.item.as_ref(),
-                    rules::ITEM_BATTERY
-                        | rules::ITEM_JETPACK
-                        | rules::ITEM_JET_BOOTS
-                        | rules::ITEM_MINING_DRILL
-                        | rules::ITEM_MINING_LASER
-                        | rules::ITEM_SOLAR_HELMET
-                ) {
+                if let Some(cap) = rules::battery_capacity(item_stack.item.as_ref()) {
+                    let cur = get_item_energy(item_stack);
+                    if cur < cap {
+                        let add = 500.min(cap - cur).min(state.energy);
+                        if add > 0 {
+                            set_item_energy(item_stack, cur + add);
+                            state.energy -= add;
+                        }
+                    }
                     if item_stack.damage > 0 {
                         item_stack.damage = item_stack.damage.saturating_sub(2);
-                        state.energy -= charge_cost;
+                        state.energy = (state.energy - charge_cost).max(0);
                     }
                 }
             }
         }
-        // 2. Standing induction wireless charging for player:
+        // 2. Standing induction wireless charging for player & inventory batteries/tools:
         let mut player_on_pad = false;
         let pad_center = [pos[0] as f64 + 0.5, pos[1] as f64 + 0.2, pos[2] as f64 + 0.5];
         if let Some(player) = &game.player {
@@ -1833,6 +1885,27 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                     }
                 }
             }
+        }
+        if player_on_pad && state.energy > 0 {
+            let mut transferred = 0;
+            for slot in game.inventory.iter_mut() {
+                if let Some(st) = slot.as_mut() {
+                    if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
+                        let cur = get_item_energy(st);
+                        if cur < cap {
+                            let add = 250.min(cap - cur).min(state.energy - transferred);
+                            if add > 0 {
+                                set_item_energy(st, cur + add);
+                                transferred += add;
+                            }
+                        }
+                    }
+                }
+                if transferred >= state.energy {
+                    break;
+                }
+            }
+            state.energy -= transferred;
         }
         update_lit_state(game, pos, player_on_pad || entity.items.first().is_some_and(|s| s.is_some()));
         let pct = ((state.energy * 100) / kind.max_energy().max(1)).clamp(0, 100);
@@ -2395,17 +2468,37 @@ pub(in crate::game) fn world_primitives(
             continue;
         }
 
-        if entity.id != rules::BLOCK_QUARRY {
+        if rules::is_conveyor_block(&entity.id) {
+            if let Some(st) = load_state(entity) {
+                if st.belt_filter_attached {
+                    let fx = x as f64;
+                    let fy = y as f64;
+                    let fz = z as f64;
+                    // Sleek 3D brass & cyan filter arch mounted directly on the conveyor belt
+                    primitives.filled_box([fx + 0.08, fy + 0.25, fz + 0.08], [fx + 0.20, fy + 0.58, fz + 0.20], 0xFFD9_A420);
+                    primitives.filled_box([fx + 0.80, fy + 0.25, fz + 0.08], [fx + 0.92, fy + 0.58, fz + 0.20], 0xFFD9_A420);
+                    primitives.filled_box([fx + 0.08, fy + 0.25, fz + 0.80], [fx + 0.20, fy + 0.58, fz + 0.92], 0xFFD9_A420);
+                    primitives.filled_box([fx + 0.80, fy + 0.25, fz + 0.80], [fx + 0.92, fy + 0.58, fz + 0.92], 0xFFD9_A420);
+                    let arch_col = if st.splitter_filters[0].is_empty() { 0xFF55_6070 } else { 0xFF38_F2FF };
+                    primitives.filled_box([fx + 0.08, fy + 0.52, fz + 0.08], [fx + 0.92, fy + 0.64, fz + 0.92], arch_col);
+                }
+            }
             continue;
         }
 
+        if !rules::is_quarry_block(&entity.id) {
+            continue;
+        }
+
+        let (tier_radius, _, _) = rules::quarry_tier(&entity.id);
         let st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::Quarry));
+        let eff_radius = st.quarry_radius.max(tier_radius);
         let pos = [x, y, z];
         let facing = game
             .native_block_property(pos, "facing")
             .unwrap_or_else(|| "north".to_owned());
         let (min_x, max_x, min_z, max_z) =
-            rules::quarry_area_bounds(pos, &facing, st.quarry_radius);
+            rules::quarry_area_bounds(pos, &facing, eff_radius);
 
         let x0 = min_x as f64;
         let x1 = (max_x + 1) as f64;
@@ -2413,6 +2506,11 @@ pub(in crate::game) fn world_primitives(
         let z1 = (max_z + 1) as f64;
         let base_y = y as f64;
         let top_y = y as f64 + 3.0;
+        let (beam_col_a, beam_col_b) = match entity.id.as_str() {
+            rules::BLOCK_QUARRY_MK2 => (0xFF38_98FF, 0xFFFF_C800),
+            rules::BLOCK_QUARRY_MK3 => (0xFF38_F2FF, 0xFF1D_2026),
+            _ => (0xFFFF_C800, 0xFF1D_2026),
+        };
 
         // 1. 3D Construction Hazard Pipe Frame (yellow & black striped tubular beams, non-interactable)
         let draw_hazard_beam = |prims: &mut WorldPrimitives, a: [f64; 3], b: [f64; 3], r: f64| {
@@ -2428,7 +2526,7 @@ pub(in crate::game) fn world_primitives(
                 let p1 = [a[0] + dx * t1, a[1] + dy * t1, a[2] + dz * t1];
                 let bmin = [p0[0].min(p1[0]) - r, p0[1].min(p1[1]) - r, p0[2].min(p1[2]) - r];
                 let bmax = [p0[0].max(p1[0]) + r, p0[1].max(p1[1]) + r, p0[2].max(p1[2]) + r];
-                let col = if i % 2 == 0 { 0xFFFF_C800 } else { 0xFF1D_2026 };
+                let col = if i % 2 == 0 { beam_col_a } else { beam_col_b };
                 prims.filled_box(bmin, bmax, col);
             }
         };
@@ -2694,6 +2792,16 @@ pub(in crate::game) fn place_block(game: &mut Game<'_>, pos: [i32; 3]) {
         return;
     }
     let block_id = game.native_block(pos);
+    if rules::is_quarry_block(&block_id) {
+        let (tier_radius, _, _) = rules::quarry_tier(&block_id);
+        game.native_with_mod_block_entity(pos, |entity| {
+            let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::Quarry));
+            st.quarry_radius = tier_radius;
+            store_state(entity, &st);
+        });
+        game.native_block_entity_sync(pos);
+        return;
+    }
     let is_belt = rules::is_conveyor_block(&block_id);
     let is_splitter = block_id == rules::BLOCK_ITEM_SPLITTER;
     if !is_belt && !is_splitter {
@@ -2848,9 +2956,60 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
     // Direct hand interaction on Conveyor Belts (NO GUI!)
     if let Some((_, max_batch)) = rules::conveyor_tier(&block_id) {
         if let Some((ref held_id, _, _)) = held_info {
+            if held_id == rules::ITEM_BELT_FILTER {
+                *canceled = true;
+                let changed = game.native_with_mod_block_entity(pos, |entity| {
+                    let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ConveyorBelt));
+                    if !st.belt_filter_attached {
+                        st.belt_filter_attached = true;
+                        store_state(entity, &st);
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if changed == Some(true) {
+                    if !game.creative {
+                        if let Some(held) = game.held_mut() {
+                            if held.count > 1 {
+                                held.count -= 1;
+                            } else {
+                                *game.held_mut() = None;
+                            }
+                        }
+                    }
+                    game.native_block_entity_sync(pos);
+                    if let Some(who) = game.native_acting_player() {
+                        game.native_action_bar(
+                            who.uuid,
+                            Text::literal("🔍 [Cinta] Filtro acoplado. Clic con un ítem para configurarlo."),
+                        );
+                    }
+                }
+                return;
+            }
             if held_id == rules::ITEM_WRENCH {
                 *canceled = true;
                 if is_crouching {
+                    let mut had_filter = false;
+                    game.native_with_mod_block_entity(pos, |entity| {
+                        if let Some(mut st) = load_state(entity) {
+                            if st.belt_filter_attached {
+                                st.belt_filter_attached = false;
+                                st.splitter_filters[0].clear();
+                                store_state(entity, &st);
+                                had_filter = true;
+                            }
+                        }
+                    });
+                    if had_filter {
+                        game.native_give_items(rules::ITEM_BELT_FILTER, 1);
+                        game.native_block_entity_sync(pos);
+                        if let Some(who) = game.native_acting_player() {
+                            game.native_action_bar(who.uuid, Text::literal("🔧 [Cinta] Filtro retirado"));
+                        }
+                        return;
+                    }
                     destroy_block(game, pos);
                     game.native_give_items(&block_id, 1);
                     game.native_run_command(&format!(
@@ -2922,6 +3081,31 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                             ));
                         }
                     }
+                }
+                return;
+            }
+            // If this belt has an inline filter attached and needs configuration (empty filter or crouching with item), set filter!
+            let mut filter_set = false;
+            let item_to_filter = held_id.clone();
+            let filter_changed = game.native_with_mod_block_entity(pos, |entity| {
+                if let Some(mut st) = load_state(entity) {
+                    if st.belt_filter_attached && (st.splitter_filters[0].is_empty() || is_crouching) {
+                        st.splitter_filters[0] = item_to_filter.clone();
+                        store_state(entity, &st);
+                        filter_set = true;
+                        return true;
+                    }
+                }
+                false
+            });
+            if filter_changed == Some(true) && filter_set {
+                *canceled = true;
+                game.native_block_entity_sync(pos);
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(
+                        who.uuid,
+                        Text::literal(format!("🔍 [Cinta] Filtrando: {item_to_filter}")),
+                    );
                 }
                 return;
             }
@@ -3133,13 +3317,16 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
             return;
         }
 
-        // 3. Mining Drill: Crouch to toggle 1x1 / 3x3 mode; Click to instantly drill a 3x3 rock slice
+        // 3. Mining Drill: Crouch to toggle 1x1 / 3x3 mode; Click to excavate perpendicular 3x3 plane using FE
         if held_id == rules::ITEM_MINING_DRILL {
             static DRILL_MODE_3X3: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
             if is_crouching {
                 *canceled = true;
                 let prev = DRILL_MODE_3X3.fetch_xor(true, std::sync::atomic::Ordering::Relaxed);
                 let mode_now = !prev;
+                if let Some(held) = game.held_mut() {
+                    set_drill_3x3(held, mode_now);
+                }
                 if let Some(who) = game.native_acting_player() {
                     let msg = if mode_now {
                         "⚡ [Taladro Minero] Modo: 3x3 Excavación Amplia"
@@ -3151,25 +3338,81 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 return;
             } else if DRILL_MODE_3X3.load(std::sync::atomic::Ordering::Relaxed) {
                 *canceled = true;
+                if !game.creative && !consume_player_energy(game, 45) {
+                    if let Some(who) = game.native_acting_player() {
+                        game.native_action_bar(
+                            who.uuid,
+                            Text::literal("⚠ [Taladro Minero] Sin energía (recarga o lleva una Batería en el inventario)"),
+                        );
+                    }
+                    return;
+                }
                 let [cx, cy, cz] = pos;
-                for dy in -1..=1 {
-                    for dx in -1..=1 {
-                        for dz in -1..=1 {
-                            if (dx as i32).abs() + (dz as i32).abs() <= 2 && (dy as i32).abs() <= 1 {
-                                let p = [cx + dx, cy + dy, cz + dz];
-                                let b = game.native_block(p);
-                                if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
-                                    game.native_run_command(&format!("setblock {} {} {} minecraft:air destroy", p[0], p[1], p[2]));
-                                }
-                            }
+                let (u_axes, v_axes): ([i32; 3], [i32; 3]) = if face[1] != 0 {
+                    ([1, 0, 0], [0, 0, 1])
+                } else if face[2] != 0 {
+                    ([1, 0, 0], [0, 1, 0])
+                } else {
+                    ([0, 0, 1], [0, 1, 0])
+                };
+                for u in -1..=1 {
+                    for v in -1..=1 {
+                        let p = [
+                            cx + u_axes[0] * u + v_axes[0] * v,
+                            cy + u_axes[1] * u + v_axes[1] * v,
+                            cz + u_axes[2] * u + v_axes[2] * v,
+                        ];
+                        let b = game.native_block(p);
+                        if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
+                            game.native_run_command(&format!("setblock {} {} {} minecraft:air destroy", p[0], p[1], p[2]));
                         }
                     }
                 }
                 if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal("⚡ [Taladro Minero] 3x3 Excavado"));
+                    game.native_action_bar(who.uuid, Text::literal("⚡ [Taladro Minero] 3x3 Excavado (-45 FE)"));
                 }
                 return;
             }
+        }
+
+        // 3b. Portable Batteries: Inspect charge in hand
+        if held_id == rules::ITEM_BATTERY || held_id == rules::ITEM_BATTERY_MK2 {
+            *canceled = true;
+            let cap = rules::battery_capacity(held_id).unwrap_or(50_000);
+            let cur = game.held().map_or(0, get_item_energy);
+            if let Some(who) = game.native_acting_player() {
+                game.native_action_bar(
+                    who.uuid,
+                    Text::literal(format!("🔋 [Batería Portátil] Carga: {cur} / {cap} FE (recarga tu equipo automáticamente)")),
+                );
+            }
+            return;
+        }
+
+        // 3c. Industrial Armor Set: Equip directly
+        if matches!(
+            held_id.as_str(),
+            rules::ITEM_INDUSTRIAL_HELMET
+                | rules::ITEM_INDUSTRIAL_CHESTPLATE
+                | rules::ITEM_INDUSTRIAL_LEGGINGS
+                | rules::ITEM_INDUSTRIAL_BOOTS
+        ) {
+            *canceled = true;
+            let slot = match held_id.as_str() {
+                rules::ITEM_INDUSTRIAL_HELMET => "armor.head",
+                rules::ITEM_INDUSTRIAL_CHESTPLATE => "armor.chest",
+                rules::ITEM_INDUSTRIAL_LEGGINGS => "armor.legs",
+                _ => "armor.feet",
+            };
+            game.native_run_command(&format!("item replace entity @s {slot} with {held_id}"));
+            game.native_run_command("playsound minecraft:item.armor.equip_netherite player @s ~ ~ ~ 1.0 1.0");
+            if let Some(who) = game.native_acting_player() {
+                game.native_action_bar(
+                    who.uuid,
+                    Text::literal("🛡 [Armadura Industrial] Equipada. Consume FE de tus baterías para darte mejoras."),
+                );
+            }
+            return;
         }
 
         // 4. Jet Boots: Rocket propulsion boost with flame & smoke exhaust, slow falling to prevent fall damage!
@@ -4208,4 +4451,301 @@ pub(in crate::game) fn perform(game: &mut Game<'_>, line: &str, ran: &mut bool) 
     game.native_feedback(Text::literal(
         "[Rusty Factory v0.5.0] ¡Kit industrial avanzado entregado (Mega Panel 3x3, Plataforma de Carga Inductiva, Tubería de Fluidos, Fundición de Aleaciones, Casco Solar y más)!",
     ));
+}
+
+pub fn get_item_energy(stack: &ItemStack) -> i32 {
+    let key = horizon_world::nbt::JavaString::from("rf_energy");
+    stack
+        .custom_data()
+        .and_then(|c| c.get(&key))
+        .and_then(|t| match t {
+            horizon_world::nbt::Tag::Int(v) => Some(*v),
+            horizon_world::nbt::Tag::Long(v) => Some(*v as i32),
+            _ => None,
+        })
+        .unwrap_or(0)
+        .max(0)
+}
+
+pub fn set_item_energy(stack: &mut ItemStack, energy: i32) {
+    let cap = rules::battery_capacity(stack.item.as_ref()).unwrap_or(50_000);
+    let clamped = energy.clamp(0, cap);
+    let mut map = stack.custom_data().cloned().unwrap_or_default();
+    map.insert(
+        horizon_world::nbt::JavaString::from("rf_energy"),
+        horizon_world::nbt::Tag::Int(clamped),
+    );
+    stack
+        .data_mut()
+        .set_other("minecraft:custom_data", Some(horizon_world::nbt::Tag::Compound(map)));
+}
+
+pub fn is_drill_3x3(stack: &ItemStack) -> bool {
+    let key = horizon_world::nbt::JavaString::from("drill_3x3");
+    stack
+        .custom_data()
+        .and_then(|c| c.get(&key))
+        .and_then(|t| match t {
+            horizon_world::nbt::Tag::Byte(v) => Some(*v != 0),
+            _ => None,
+        })
+        .unwrap_or(true)
+}
+
+pub fn set_drill_3x3(stack: &mut ItemStack, enabled: bool) {
+    let mut map = stack.custom_data().cloned().unwrap_or_default();
+    map.insert(
+        horizon_world::nbt::JavaString::from("drill_3x3"),
+        horizon_world::nbt::Tag::Byte(if enabled { 1 } else { 0 }),
+    );
+    stack
+        .data_mut()
+        .set_other("minecraft:custom_data", Some(horizon_world::nbt::Tag::Compound(map)));
+}
+
+pub fn consume_player_energy(game: &mut Game<'_>, cost: i32) -> bool {
+    let mut needed = cost;
+    if let Some(held) = game.held_mut() {
+        let cur = get_item_energy(held);
+        if cur > 0 {
+            let take = cur.min(needed);
+            set_item_energy(held, cur - take);
+            needed -= take;
+        }
+    }
+    if needed > 0 {
+        for slot in game.inventory.iter_mut() {
+            let Some(st) = slot.as_mut() else {
+                continue;
+            };
+            if st.item.as_ref() == rules::ITEM_BATTERY || st.item.as_ref() == rules::ITEM_BATTERY_MK2 {
+                let cur = get_item_energy(st);
+                if cur > 0 {
+                    let take = cur.min(needed);
+                    set_item_energy(st, cur - take);
+                    needed -= take;
+                    if needed == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    needed == 0
+}
+
+fn tick_player_equipment(game: &mut Game<'_>) {
+    static LAST_EQUIP_TICK: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
+    let now = game.world.game_time;
+    let prev = LAST_EQUIP_TICK.load(std::sync::atomic::Ordering::Relaxed);
+    if now == prev || now % 10 != 0 {
+        return;
+    }
+    LAST_EQUIP_TICK.store(now, std::sync::atomic::Ordering::Relaxed);
+
+    // 1. Solar Helmet passive daytime charge into inventory batteries & tools
+    let has_solar_helmet = game.inventory.iter().any(|s| {
+        s.as_ref().is_some_and(|st| st.item.as_ref() == rules::ITEM_SOLAR_HELMET)
+    });
+    let is_day = (game.native_day_time().rem_euclid(24_000)) < 12_000;
+    if has_solar_helmet && is_day {
+        for slot in game.inventory.iter_mut() {
+            if let Some(st) = slot.as_mut() {
+                if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
+                    let cur = get_item_energy(st);
+                    if cur < cap {
+                        set_item_energy(st, cur + 40);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Portable Batteries in inventory automatically recharge tools & armor
+    let mut available = 0;
+    for slot in game.inventory.iter() {
+        if let Some(st) = slot.as_ref() {
+            if st.item.as_ref() == rules::ITEM_BATTERY || st.item.as_ref() == rules::ITEM_BATTERY_MK2 {
+                available += get_item_energy(st);
+            }
+        }
+    }
+    if available > 0 {
+        let mut used = 0;
+        let budget = available.min(200);
+        for slot in game.inventory.iter_mut() {
+            if let Some(st) = slot.as_mut() {
+                let id = st.item.as_ref();
+                if id != rules::ITEM_BATTERY && id != rules::ITEM_BATTERY_MK2 {
+                    if let Some(cap) = rules::battery_capacity(id) {
+                        let cur = get_item_energy(st);
+                        if cur < cap {
+                            let add = (budget - used).min(cap - cur);
+                            if add > 0 {
+                                set_item_energy(st, cur + add);
+                                used += add;
+                            }
+                        }
+                    }
+                }
+            }
+            if used >= budget {
+                break;
+            }
+        }
+        if used > 0 {
+            let mut left = used;
+            for slot in game.inventory.iter_mut() {
+                if let Some(st) = slot.as_mut() {
+                    if st.item.as_ref() == rules::ITEM_BATTERY || st.item.as_ref() == rules::ITEM_BATTERY_MK2 {
+                        let cur = get_item_energy(st);
+                        let take = cur.min(left);
+                        if take > 0 {
+                            set_item_energy(st, cur - take);
+                            left -= take;
+                        }
+                    }
+                }
+                if left == 0 {
+                    break;
+                }
+            }
+        }
+    }
+
+    // 3. Industrial Armor passive perks (when carrying industrial pieces + energy)
+    if now % 40 == 0 {
+        let mut has_ind_boots = false;
+        let mut has_ind_legs = false;
+        let mut has_ind_chest = false;
+        let mut has_ind_helm = false;
+        for slot in game.inventory.iter().skip(36) {
+            if let Some(st) = slot.as_ref() {
+                match st.item.as_ref() {
+                    rules::ITEM_INDUSTRIAL_BOOTS => has_ind_boots = true,
+                    rules::ITEM_INDUSTRIAL_LEGGINGS => has_ind_legs = true,
+                    rules::ITEM_INDUSTRIAL_CHESTPLATE => has_ind_chest = true,
+                    rules::ITEM_INDUSTRIAL_HELMET => has_ind_helm = true,
+                    _ => {}
+                }
+            }
+        }
+        if has_ind_boots {
+            game.native_run_command("effect give @s minecraft:jump_boost 3 0 true");
+        }
+        if has_ind_legs {
+            game.native_run_command("effect give @s minecraft:speed 3 0 true");
+        }
+        if has_ind_chest {
+            game.native_run_command("effect give @s minecraft:resistance 3 0 true");
+        }
+        if has_ind_helm {
+            game.native_run_command("effect give @s minecraft:night_vision 12 0 true");
+        }
+    }
+}
+
+pub(in crate::game) fn tooltip(
+    _game: &Game<'_>,
+    stack: &ItemStack,
+    lines: &mut Vec<(Text, u32)>,
+) {
+    let id = stack.item.as_ref();
+    if !id.starts_with("rusty_factory:") {
+        return;
+    }
+
+    let desc: &[&str] = match id {
+        rules::BLOCK_QUARRY => &[
+            "§7Excava automáticamente un área de 5x5 hasta el fondo.",
+            "§e• Aplana la superficie y mina con taladro 3D",
+        ],
+        rules::BLOCK_QUARRY_MK2 => &[
+            "§7Quarry Avanzado: excava un área de 13x13 a 2x velocidad.",
+            "§b• Fortuna I integrada y andamio 3D reforzado",
+        ],
+        rules::BLOCK_QUARRY_MK3 => &[
+            "§7Quarry Cuántico: excava un área de 21x21 a 4x velocidad.",
+            "§d• Fortuna II integrada y máxima eficiencia",
+        ],
+        rules::BLOCK_GENERATOR => &["§7Quema carbón y combustibles para generar energía (FE)."],
+        rules::BLOCK_BIO_GENERATOR => &["§7Genera energía (FE) usando biocombustible y cultivos."],
+        rules::BLOCK_SOLAR => &["§7Genera energía solar gratuita durante el día."],
+        rules::BLOCK_STEAM_BOILER => &["§7Calienta agua para producir vapor y energía térmica."],
+        rules::BLOCK_ENERGY_BANK => &["§7Almacena grandes reservas de FE y recarga baterías."],
+        rules::BLOCK_ENERGY_RELAY => &["§7Transmite energía de forma inalámbrica a máquinas cercanas."],
+        rules::BLOCK_ENERGY_MONITOR => &["§7Muestra el consumo y almacenamiento total de la red."],
+        rules::BLOCK_CHARGING_PAD => &["§7Recarga herramientas, armaduras y baterías por inducción."],
+        rules::BLOCK_CRUSHER => &["§7Tritura menas en polvo duplicando el rendimiento."],
+        rules::BLOCK_FURNACE => &["§7Funde ítems rápidamente usando electricidad (FE)."],
+        rules::BLOCK_ALLOY_SMELTER => &["§7Combina metales para forjar acero y aleaciones."],
+        rules::BLOCK_PRESS => &["§7Prensa lingotes para fabricar placas y engranajes."],
+        rules::BLOCK_VULCANIZER => &["§7Procesa savia cruda para obtener caucho industrial."],
+        rules::BLOCK_ASSEMBLER => &["§7Ensambla componentes electrónicos y piezas avanzadas."],
+        rules::BLOCK_HARVESTER => &["§7Cosecha y replanta cultivos automáticamente en área."],
+        rules::BLOCK_BREAKER => &["§7Rompe el bloque que tiene enfrente usando energía."],
+        rules::BLOCK_PLACER => &["§7Coloca bloques automáticamente frente a la máquina."],
+        rules::BLOCK_SAP_EXTRACTOR => &["§7Extrae savia de troncos de caucho automáticamente."],
+        rules::BLOCK_FLUID_PUMP => &["§7Bombea agua o lava hacia tuberías y tanques."],
+        rules::BLOCK_FLUID_TANK => &["§7Almacena fluidos (agua, lava, savia, vapor)."],
+        rules::BLOCK_TRASH_CAN => &["§7Destruye instantáneamente cualquier ítem o fluido sobrante."],
+        rules::BLOCK_CONVEYOR => &["§7Transporta ítems (Tier 1: 1 ítem/s). Shift al colocar invierte."],
+        rules::BLOCK_CONVEYOR_MK2 => &["§7Cinta rápida (Tier 2: lotes de 4 ítems a 2x velocidad)."],
+        rules::BLOCK_CONVEYOR_MK3 => &["§7Cinta ultra rápida (Tier 3: lotes de 16 ítems a 4x velocidad)."],
+        rules::ITEM_BELT_FILTER => &[
+            "§7Acopla un filtro directo sobre cualquier cinta transportadora.",
+            "§b• Clic derecho en cinta para acoplar y elegir ítem",
+        ],
+        rules::BLOCK_ITEM_SPLITTER => &[
+            "§7Divide y filtra ítems en 3 salidas (Izq / Frente / Der).",
+            "§b• Clic en cada cara para asignar su filtro",
+        ],
+        rules::BLOCK_ITEM_PIPE => &["§7Tubería de vidrio para transportar ítems entre inventarios."],
+        rules::BLOCK_FLUID_PIPE => &["§7Tubería para mover fluidos entre tanques y máquinas."],
+        rules::BLOCK_EXTRACTOR => &["§7Extrae ítems de cofres/máquinas hacia tubos o cintas."],
+        rules::BLOCK_CABLE_WHITE => &["§7Cable básico de energía (hasta 120 FE/t)."],
+        rules::BLOCK_CABLE_COPPER => &["§7Cable de cobre (hasta 360 FE/t)."],
+        rules::BLOCK_CABLE_GOLD => &["§7Cable de oro de alta tensión (hasta 1,200 FE/t)."],
+        rules::BLOCK_CABLE_RED => &["§7Cable superconductor (hasta 10,000 FE/t)."],
+        rules::ITEM_MINING_DRILL => &[
+            "§7Taladro eléctrico capaz de excavar planos 3x3.",
+            "§b• Shift + Clic Derecho: alterna modo 1x1 / 3x3",
+        ],
+        rules::ITEM_MINING_LASER => &["§7Dispara un haz de plasma minero que perfora bloques."],
+        rules::ITEM_BATTERY => &["§7Batería portátil (50,000 FE). Recarga tu equipo en el inventario."],
+        rules::ITEM_BATTERY_MK2 => &["§7Batería de alta capacidad (250,000 FE). Recarga tu equipo."],
+        rules::ITEM_SOLAR_HELMET => &["§7Casco solar: recarga baterías y armadura durante el día."],
+        rules::ITEM_JETPACK => &["§7Propulsión aérea sostenida para volar."],
+        rules::ITEM_JET_BOOTS => &["§7Botas cohete con impulso vertical y caída lenta."],
+        rules::ITEM_INDUSTRIAL_HELMET => &["§7Casco blindado con visión nocturna integrada."],
+        rules::ITEM_INDUSTRIAL_CHESTPLATE => &["§7Pechera blindada con resistencia industrial."],
+        rules::ITEM_INDUSTRIAL_LEGGINGS => &["§7Pantalones motorizados con aumento de velocidad."],
+        rules::ITEM_INDUSTRIAL_BOOTS => &["§7Botas hidráulicas con impulso de salto."],
+        rules::ITEM_ITEM_MAGNET => &["§7Atrae ítems y experiencia cercanos hacia vos."],
+        rules::ITEM_WRENCH => &["§7Rota máquinas/cintas o desmantela con Shift + Clic Derecho."],
+        rules::ITEM_TREETAP => &["§7Extrae savia manualmente de árboles de caucho."],
+        rules::ITEM_SPEED_UPGRADE => &["§7Mejora de velocidad para máquinas (+velocidad)."],
+        rules::ITEM_FORTUNE_UPGRADE => &["§7Mejora de fortuna para Quarry (+drops de menas)."],
+        _ => &["§7Componente industrial de Rusty Factory."],
+    };
+
+    for line in desc {
+        lines.push((Text::legacy(line), 0xFFAA_B4C4));
+    }
+
+    if let Some(cap) = rules::battery_capacity(id) {
+        let cur = get_item_energy(stack);
+        lines.push((
+            Text::legacy(&format!("§b⚡ Energía: §f{cur} / {cap} FE")),
+            0xFF38_F2FF,
+        ));
+    }
+    if id == rules::ITEM_MINING_DRILL {
+        let mode = if is_drill_3x3(stack) { "3x3" } else { "1x1" };
+        lines.push((
+            Text::legacy(&format!("§e⛏ Modo actual: §f{mode}")),
+            0xFFFF_D038,
+        ));
+    }
 }

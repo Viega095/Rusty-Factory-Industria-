@@ -80,5 +80,13 @@
   "rusty_factory.status.1": "Idle (Waiting)",
   "rusty_factory.status.2": "Low Energy (Needs FE)",
   "rusty_factory.status.3": "Output Full",
-  "rusty_factory.status.4": "Paused (Off)"
+  "rusty_factory.status.4": "Paused (Off)",
+  "item.rusty_factory.belt_filter": "Belt Filter",
+  "item.rusty_factory.energy_battery_mk2": "Portable Battery MK2",
+  "item.rusty_factory.industrial_helmet": "Industrial Helmet",
+  "item.rusty_factory.industrial_chestplate": "Industrial Chestplate",
+  "item.rusty_factory.industrial_leggings": "Industrial Leggings",
+  "item.rusty_factory.industrial_boots": "Industrial Boots",
+  "block.rusty_factory.quarry_mk2": "Advanced Quarry MK2",
+  "block.rusty_factory.quarry_mk3": "Quantum Quarry MK3"
 }

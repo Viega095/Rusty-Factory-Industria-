@@ -222,3 +222,14 @@ bindings = [
   { name = "command", ty = "&str", value = "command" },
   { name = "ran", ty = "&mut bool", value = "&mut *ran" },
 ]
+
+[[injection]]
+id = "tooltip"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_tooltip"
+helper = "tooltip.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "stack", ty = "&horizon_items::ItemStack", value = "stack" },
+  { name = "lines", ty = "&mut Vec<(horizon_client::text::Text, u32)>", value = "&mut *lines" },
+]

@@ -1,0 +1,24 @@
+{
+  "title": "Rusty Factory: Máquinas",
+  "icon": "rusty_factory:quarry",
+  "items": [
+    "rusty_factory:quarry",
+    "rusty_factory:quarry_mk2",
+    "rusty_factory:quarry_mk3",
+    "rusty_factory:coal_generator",
+    "rusty_factory:bio_generator",
+    "rusty_factory:solar_generator",
+    "rusty_factory:steam_boiler",
+    "rusty_factory:electric_furnace",
+    "rusty_factory:electric_crusher",
+    "rusty_factory:alloy_smelter",
+    "rusty_factory:mechanical_press",
+    "rusty_factory:vulcanizer",
+    "rusty_factory:industrial_assembler",
+    "rusty_factory:auto_harvester",
+    "rusty_factory:block_breaker",
+    "rusty_factory:block_placer",
+    "rusty_factory:sap_extractor",
+    "rusty_factory:fluid_pump"
+  ]
+}

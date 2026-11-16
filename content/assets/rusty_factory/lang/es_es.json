@@ -80,5 +80,13 @@
   "rusty_factory.status.1": "En espera",
   "rusty_factory.status.2": "Sin energía (Falta FE)",
   "rusty_factory.status.3": "Salida llena",
-  "rusty_factory.status.4": "Pausada (Apagada)"
+  "rusty_factory.status.4": "Pausada (Apagada)",
+  "item.rusty_factory.belt_filter": "Filtro de Cinta",
+  "item.rusty_factory.energy_battery_mk2": "Batería Portátil MK2",
+  "item.rusty_factory.industrial_helmet": "Casco Industrial",
+  "item.rusty_factory.industrial_chestplate": "Pechera Industrial",
+  "item.rusty_factory.industrial_leggings": "Pantalones Industriales",
+  "item.rusty_factory.industrial_boots": "Botas Industriales",
+  "block.rusty_factory.quarry_mk2": "Quarry Avanzado MK2",
+  "block.rusty_factory.quarry_mk3": "Quarry Cuántico MK3"
 }

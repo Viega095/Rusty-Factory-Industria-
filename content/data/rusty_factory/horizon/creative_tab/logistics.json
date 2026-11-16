@@ -1,0 +1,24 @@
+{
+  "title": "Rusty Factory: Logística y Energía",
+  "icon": "rusty_factory:conveyor_belt",
+  "items": [
+    "rusty_factory:conveyor_belt",
+    "rusty_factory:conveyor_belt_mk2",
+    "rusty_factory:conveyor_belt_mk3",
+    "rusty_factory:belt_filter",
+    "rusty_factory:item_splitter",
+    "rusty_factory:item_pipe",
+    "rusty_factory:fluid_pipe",
+    "rusty_factory:item_extractor",
+    "rusty_factory:fluid_tank",
+    "rusty_factory:void_trash_can",
+    "rusty_factory:copper_cable",
+    "rusty_factory:cable_white",
+    "rusty_factory:cable_gold",
+    "rusty_factory:cable_red",
+    "rusty_factory:energy_bank",
+    "rusty_factory:energy_relay",
+    "rusty_factory:energy_monitor",
+    "rusty_factory:charging_pad"
+  ]
+}
