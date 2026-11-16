@@ -2562,6 +2562,43 @@ pub(in crate::game) fn submit(
         return;
     }
 
+    if block == rules::BLOCK_INDUSTRIAL_SILO {
+        let Some(st) = load_state(entity) else {
+            return;
+        };
+        if !st.belt_item.is_empty() && st.belt_count > 0 {
+            let facing = game
+                .native_block_state_property(state, "facing")
+                .unwrap_or("north");
+            let (front_off, _) = rules::conveyor_offsets(facing);
+            let yaw = match facing {
+                "north" => 0.0,
+                "south" => 180.0,
+                "east" => 270.0,
+                "west" => 90.0,
+                _ => 0.0,
+            };
+            let stack = ItemStack::new(&st.belt_item, 1);
+            draw.push();
+            draw.translate([
+                0.5 + front_off[0] as f32 * 0.52,
+                0.60,
+                0.5 + front_off[2] as f32 * 0.52,
+            ]);
+            draw.rotate_about([0.0, 1.0, 0.0], yaw, [0.0, 0.0, 0.0]);
+            draw.scale([0.46, 0.46, 0.46]);
+            let _ = game.native_draw_item(
+                draw,
+                &stack,
+                DisplayContext::Fixed,
+                None,
+                pos[0].wrapping_mul(31) ^ pos[2],
+            );
+            draw.pop();
+        }
+        return;
+    }
+
     if block == rules::BLOCK_ITEM_SPLITTER {
         let Some(st) = load_state(entity) else {
             return;
@@ -2767,6 +2804,72 @@ pub(in crate::game) fn world_primitives(
         let dy = y as f64 + 0.5 - camera[1];
         let dz = z as f64 + 0.5 - camera[2];
         if dx * dx + dy * dy + dz * dz > 64.0 * 64.0 {
+            continue;
+        }
+
+    if entity.id == rules::BLOCK_INDUSTRIAL_SILO {
+            let st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::IndustrialSilo));
+            let pos = [x, y, z];
+            let facing = game
+                .native_block_property(pos, "facing")
+                .unwrap_or_else(|| "north".to_owned());
+            let (front_off, _) = rules::conveyor_offsets(&facing);
+            let cap = st.silo_capacity.max(2_048) as f64;
+            let ratio = (st.belt_count as f64 / cap).clamp(0.0, 1.0);
+            let bar_col = if ratio >= 0.90 {
+                0xFFE6_3232 // Rojo: lleno / casi lleno
+            } else if ratio >= 0.65 {
+                0xFFE6_B822 // Amarillo: llenándose
+            } else {
+                0xFF38_D96B // Verde: mucha capacidad libre
+            };
+            let cx = x as f64 + 0.5 + front_off[0] as f64 * 0.51;
+            let cz = z as f64 + 0.5 + front_off[2] as f64 * 0.51;
+            let (rx, rz) = if front_off[0] != 0 { (0.015, 0.34) } else { (0.34, 0.015) };
+            // Dark front display bezel
+            primitives.filled_box([cx - rx, y as f64 + 0.16, cz - rz], [cx + rx, y as f64 + 0.28, cz + rz], 0xFF16_1A22);
+            // Colored capacity bar (Green / Yellow / Red)
+            let fill_w = (ratio.max(0.06)) * 0.30;
+            let (fx, fz) = if front_off[0] != 0 { (0.02, fill_w) } else { (fill_w, 0.02) };
+            primitives.filled_box([cx - fx, y as f64 + 0.18, cz - fz], [cx + fx, y as f64 + 0.26, cz + fz], bar_col);
+            continue;
+        }
+
+        if entity.id == rules::BLOCK_TESSERACT {
+            let pulse = ((game.world.game_time as f64 + partial as f64) * 0.15).sin() * 0.04;
+            let r = 0.22 + pulse;
+            primitives.filled_box(
+                [x as f64 + 0.5 - r, y as f64 + 0.5 - r, z as f64 + 0.5 - r],
+                [x as f64 + 0.5 + r, y as f64 + 0.5 + r, z as f64 + 0.5 + r],
+                0xCC38_E0FF,
+            );
+            primitives.box_outline([x as f64 + 0.12, y as f64 + 0.12, z as f64 + 0.12], [x as f64 + 0.88, y as f64 + 0.88, z as f64 + 0.88], 0xFF78_66FF, 1.8);
+            continue;
+        }
+
+        if entity.id == rules::BLOCK_GEOTHERMAL {
+            let st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::GeothermalGenerator));
+            if st.fluid_amount > 0 {
+                primitives.filled_box(
+                    [x as f64 + 0.24, y as f64 + 0.96, z as f64 + 0.24],
+                    [x as f64 + 0.76, y as f64 + 1.03, z as f64 + 0.76],
+                    0xEEFF_6618,
+                );
+            }
+            continue;
+        }
+
+        if entity.id == rules::BLOCK_STEAM_TURBINE {
+            let st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::SteamTurbine));
+            if st.fluid_amount > 0 {
+                let spin = ((game.world.game_time / 2) % 2) == 0;
+                let (rx, rz) = if spin { (0.32, 0.08) } else { (0.08, 0.32) };
+                primitives.filled_box(
+                    [x as f64 + 0.5 - rx, y as f64 + 0.98, z as f64 + 0.5 - rz],
+                    [x as f64 + 0.5 + rx, y as f64 + 1.06, z as f64 + 0.5 + rz],
+                    0xFFD0_F4FF,
+                );
+            }
             continue;
         }
 
@@ -5570,6 +5673,104 @@ pub(in crate::game) fn hud(
         }
     }
 
+    // 0. Look-At Block Info Card (Silo capacity bar Green/Yellow/Red, Geothermal/Turbine/Tesseract/UpgradeStation info)
+    if let Some(player) = &game.player {
+        let yaw_rad = (game.yaw as f64).to_radians();
+        let pitch_rad = (game.pitch as f64).to_radians();
+        let dir = [
+            -yaw_rad.sin() * pitch_rad.cos(),
+            -pitch_rad.sin(),
+            yaw_rad.cos() * pitch_rad.cos(),
+        ];
+        let eye = [
+            player.position.x,
+            player.position.y + f64::from(player.dimensions.eye_height),
+            player.position.z,
+        ];
+        let mut hit_pos: Option<[i32; 3]> = None;
+        for step in 1..=100 {
+            let t = step as f64 * 0.05;
+            let cell = [
+                (eye[0] + dir[0] * t).floor() as i32,
+                (eye[1] + dir[1] * t).floor() as i32,
+                (eye[2] + dir[2] * t).floor() as i32,
+            ];
+            let blk = game.native_block(cell);
+            if !matches!(blk.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air") {
+                if blk.starts_with("rusty_factory:") {
+                    hit_pos = Some(cell);
+                }
+                break;
+            }
+        }
+        if let Some(hp) = hit_pos {
+            let hblk = game.native_block(hp);
+            let mut info_title = String::new();
+            let mut info_sub = String::new();
+            let mut bar_ratio: Option<(f32, u32)> = None;
+
+            if let Some(BlockEntity::Mod(ent)) = game.world.block_entities.get(&(hp[0], hp[1], hp[2])) {
+                if let Some(st) = load_state(ent) {
+                    if hblk == rules::BLOCK_INDUSTRIAL_SILO {
+                        let cap = st.silo_capacity.max(2_048);
+                        let fmt_k = |n: u32| if n >= 1000 { format!("{:.1}K", n as f32 / 1000.0).replace(".0K", "K") } else { format!("{n}") };
+                        let item_short = if st.belt_item.is_empty() {
+                            "Vacío".to_owned()
+                        } else {
+                            st.belt_item.split(':').nth(1).unwrap_or(&st.belt_item).to_owned()
+                        };
+                        let r = (st.belt_count as f32 / cap as f32).clamp(0.0, 1.0);
+                        let bcol = if r >= 0.90 {
+                            0xFFE6_3232 // Rojo: lleno
+                        } else if r >= 0.65 {
+                            0xFFE6_B822 // Amarillo: llenándose
+                        } else {
+                            0xFF38_D96B // Verde: libre
+                        };
+                        info_title = format!("📦 Silo: {item_short}");
+                        info_sub = format!("{} / {}", fmt_k(st.belt_count), fmt_k(cap));
+                        bar_ratio = Some((r, bcol));
+                    } else if hblk == rules::BLOCK_UPGRADE_STATION {
+                        info_title = "🔧 Estación de Mejora".to_owned();
+                        info_sub = if st.belt_item.is_empty() {
+                            "Clic con Módulo para cargar".to_owned()
+                        } else {
+                            format!("Módulo listo: {}", st.belt_item)
+                        };
+                    } else if let Some(kind) = MachineKind::from_block_id(&hblk) {
+                        if kind.max_energy() > 0 {
+                            let r = (st.energy as f32 / kind.max_energy() as f32).clamp(0.0, 1.0);
+                            info_title = hblk.split(':').nth(1).unwrap_or(&hblk).replace('_', " ");
+                            info_sub = format!("⚡ {} / {} FE", st.energy, kind.max_energy());
+                            bar_ratio = Some((r, 0xFF38_F2FF));
+                        }
+                    }
+                }
+            }
+
+            if !info_title.is_empty() {
+                let iw = 152.0_f32;
+                let ih = if bar_ratio.is_some() { 38.0 } else { 30.0 };
+                let (ix, iy) = corners.place(horizon_client::extras::Corner::BottomRight, iw, ih);
+                let border_c = bar_ratio.map_or(0xFF38_F2FF, |(_, c)| c);
+                game.native_fill(batch, [ix, iy, iw, ih], 0xBE10_141C);
+                game.native_fill(batch, [ix, iy, iw, 1.5], border_c);
+                game.native_fill(batch, [ix, iy + ih - 1.5, iw, 1.5], 0xFF28_5066);
+                game.native_fill(batch, [ix, iy, 1.5, ih], border_c);
+                game.native_fill(batch, [ix + iw - 1.5, iy, 1.5, ih], 0xFF28_5066);
+                game.native_text(batch, &info_title, [ix + 6.0, iy + 5.0], 0xFFE8_EEF8, true);
+                game.native_text(batch, &info_sub, [ix + 6.0, iy + 17.0], border_c, true);
+                if let Some((r, bcol)) = bar_ratio {
+                    game.native_fill(batch, [ix + 6.0, iy + 29.0, iw - 12.0, 4.0], 0xFF22_2834);
+                    let fw = ((iw - 12.0) * r).clamp(0.0, iw - 12.0);
+                    if fw > 0.5 {
+                        game.native_fill(batch, [ix + 6.0, iy + 29.0, fw, 4.0], bcol);
+                    }
+                }
+            }
+        }
+    }
+
     if held_entry.is_none() && !has_any_armor {
         return;
     }
@@ -5582,7 +5783,7 @@ pub(in crate::game) fn hud(
         extra_rows += 1;
     }
 
-    let armor_block_h = if has_any_armor { 54.0 } else { 0.0 };
+    let armor_block_h = if has_any_armor { 58.0 } else { 0.0 };
     let w = 152.0_f32;
     let h = 22.0 + armor_block_h + extra_rows as f32 * 18.0;
     let (x, y) = corners.place(horizon_client::extras::Corner::BottomRight, w, h);
@@ -5598,13 +5799,13 @@ pub(in crate::game) fn hud(
 
     let mut ry = y + 19.0;
 
-    // Draw 2D Character Silhouette + Per-Piece Armor % Readout
+    // Draw 2D Character Silhouette (thick black outer frame + colored armor segments + % readout)
     if has_any_armor {
-        let fx = x + 10.0;
+        let fx = x + 8.0;
         let fy = ry;
-        let tx = x + 44.0;
-        let empty_col = 0xFF11_1419;
-        let border_col = 0xFF35_3E4C;
+        let tx = x + 46.0;
+        let empty_col = 0xFF1A_1E24;
+        let sil_black = 0xFF0A_0C10;
 
         let piece_style = |info: Option<(&'static str, i32, i32)>| -> (u32, String) {
             if let Some((label, cur, cap)) = info {
@@ -5620,30 +5821,37 @@ pub(in crate::game) fn hud(
         let (legs_col, legs_txt) = piece_style(legs);
         let (feet_col, feet_txt) = piece_style(feet);
 
-        let draw_part = |g: &Game<'_>, b: &mut HudBatch, px: f32, py: f32, pw: f32, ph: f32, col: u32| {
-            g.native_fill(b, [px - 1.0, py - 1.0, pw + 2.0, ph + 2.0], border_col);
+        // Thick black outer silhouette backing (like reference figure)
+        game.native_fill(batch, [fx + 7.0, fy, 16.0, 12.0], sil_black);       // Head silhouette
+        game.native_fill(batch, [fx, fy + 11.0, 30.0, 18.0], sil_black);     // Torso + Arms silhouette
+        game.native_fill(batch, [fx + 6.0, fy + 29.0, 18.0, 23.0], sil_black); // Legs + Boots silhouette
+
+        let draw_seg = |g: &Game<'_>, b: &mut HudBatch, px: f32, py: f32, pw: f32, ph: f32, col: u32, lit: bool| {
             g.native_fill(b, [px, py, pw, ph], col);
+            if lit {
+                g.native_fill(b, [px, py, pw, 1.0], 0x44FF_FFFF);
+            }
         };
 
         // Head
-        draw_part(game, batch, fx + 8.0, fy, 10.0, 9.0, head_col);
-        game.native_text(batch, &head_txt, [tx, fy + 1.0], if head.is_some() { head_col } else { 0xFF55_6070 }, true);
+        draw_seg(game, batch, fx + 9.0, fy + 2.0, 12.0, 9.0, head_col, head.is_some());
+        game.native_text(batch, &head_txt, [tx, fy + 2.0], if head.is_some() { head_col } else { 0xFF55_6070 }, true);
 
         // Chest + Arms
-        draw_part(game, batch, fx + 1.0, fy + 12.0, 4.0, 12.0, chest_col);
-        draw_part(game, batch, fx + 7.0, fy + 12.0, 12.0, 13.0, chest_col);
-        draw_part(game, batch, fx + 21.0, fy + 12.0, 4.0, 12.0, chest_col);
-        game.native_text(batch, &chest_txt, [tx, fy + 14.0], if chest.is_some() { chest_col } else { 0xFF55_6070 }, true);
+        draw_seg(game, batch, fx + 2.0, fy + 13.0, 4.0, 14.0, chest_col, chest.is_some());
+        draw_seg(game, batch, fx + 8.0, fy + 13.0, 14.0, 14.0, chest_col, chest.is_some());
+        draw_seg(game, batch, fx + 24.0, fy + 13.0, 4.0, 14.0, chest_col, chest.is_some());
+        game.native_text(batch, &chest_txt, [tx, fy + 16.0], if chest.is_some() { chest_col } else { 0xFF55_6070 }, true);
 
         // Legs
-        draw_part(game, batch, fx + 7.0, fy + 27.0, 5.0, 11.0, legs_col);
-        draw_part(game, batch, fx + 14.0, fy + 27.0, 5.0, 11.0, legs_col);
-        game.native_text(batch, &legs_txt, [tx, fy + 28.0], if legs.is_some() { legs_col } else { 0xFF55_6070 }, true);
+        draw_seg(game, batch, fx + 8.0, fy + 29.0, 6.0, 13.0, legs_col, legs.is_some());
+        draw_seg(game, batch, fx + 16.0, fy + 29.0, 6.0, 13.0, legs_col, legs.is_some());
+        game.native_text(batch, &legs_txt, [tx, fy + 31.0], if legs.is_some() { legs_col } else { 0xFF55_6070 }, true);
 
         // Boots
-        draw_part(game, batch, fx + 7.0, fy + 40.0, 5.0, 6.0, feet_col);
-        draw_part(game, batch, fx + 14.0, fy + 40.0, 5.0, 6.0, feet_col);
-        game.native_text(batch, &feet_txt, [tx, fy + 39.0], if feet.is_some() { feet_col } else { 0xFF55_6070 }, true);
+        draw_seg(game, batch, fx + 8.0, fy + 44.0, 6.0, 6.0, feet_col, feet.is_some());
+        draw_seg(game, batch, fx + 16.0, fy + 44.0, 6.0, 6.0, feet_col, feet.is_some());
+        game.native_text(batch, &feet_txt, [tx, fy + 43.0], if feet.is_some() { feet_col } else { 0xFF55_6070 }, true);
 
         ry += armor_block_h;
     }
