@@ -4796,6 +4796,18 @@ pub(in crate::game) fn hud(
         return;
     }
 
+    let battery_color = |pct: f32| -> u32 {
+        if pct > 50.0 {
+            0xFF38_D96B // Verde (>50%)
+        } else if pct >= 35.0 {
+            0xFFE6_B822 // Amarillo (35%-50%)
+        } else if pct >= 15.0 {
+            0xFFE8_7A22 // Naranja (15%-35%)
+        } else {
+            0xFFE6_3232 // Rojo (<15%)
+        }
+    };
+
     // 1. Collect held tech item (tool or portable battery)
     let held_entry: Option<(String, i32, i32)> = game.held().and_then(|st| {
         let cap = rules::battery_capacity(st.item.as_ref())?;
@@ -4811,24 +4823,38 @@ pub(in crate::game) fn hud(
             rules::ITEM_JETPACK => "Jetpack".to_owned(),
             rules::ITEM_JET_BOOTS => "Botas Cohete".to_owned(),
             rules::ITEM_SOLAR_HELMET => "Casco Solar".to_owned(),
+            rules::ITEM_INDUSTRIAL_HELMET => "Casco Ind.".to_owned(),
+            rules::ITEM_INDUSTRIAL_CHESTPLATE => "Pechera Ind.".to_owned(),
+            rules::ITEM_INDUSTRIAL_LEGGINGS => "Pantalón Ind.".to_owned(),
+            rules::ITEM_INDUSTRIAL_BOOTS => "Botas Ind.".to_owned(),
             _ => "Equipo Tech".to_owned(),
         };
         Some((label, cur, cap))
     });
 
-    // 2. Collect equipped tech armor (slots 36..40)
-    let mut armor_cur: i32 = 0;
-    let mut armor_cap: i32 = 0;
-    let mut armor_pieces: usize = 0;
-    for slot in game.inventory.iter().skip(36).take(4) {
-        if let Some(st) = slot.as_ref() {
-            if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
-                armor_cur += get_item_energy(st);
-                armor_cap += cap;
-                armor_pieces += 1;
-            }
-        }
-    }
+    // 2. Collect per-piece equipped tech armor (39=Head, 38=Chest, 37=Legs, 36=Feet)
+    let read_armor_slot = |slot_idx: usize| -> Option<(&'static str, i32, i32)> {
+        let st = game.inventory.get(slot_idx)?.as_ref()?;
+        let cap = rules::battery_capacity(st.item.as_ref())?;
+        let cur = get_item_energy(st);
+        let short_name = match st.item.as_ref() {
+            rules::ITEM_SOLAR_HELMET => "Solar",
+            rules::ITEM_INDUSTRIAL_HELMET => "Casco",
+            rules::ITEM_JETPACK => "Jetpack",
+            rules::ITEM_INDUSTRIAL_CHESTPLATE => "Pecho",
+            rules::ITEM_INDUSTRIAL_LEGGINGS => "Piernas",
+            rules::ITEM_JET_BOOTS => "Cohete",
+            rules::ITEM_INDUSTRIAL_BOOTS => "Botas",
+            _ => "Tech",
+        };
+        Some((short_name, cur, cap))
+    };
+
+    let head = read_armor_slot(39);
+    let chest = read_armor_slot(38);
+    let legs = read_armor_slot(37);
+    let feet = read_armor_slot(36);
+    let has_any_armor = head.is_some() || chest.is_some() || legs.is_some() || feet.is_some();
 
     // 3. Collect reserve portable batteries in inventory
     let mut bat_cur: i32 = 0;
@@ -4842,42 +4868,92 @@ pub(in crate::game) fn hud(
         }
     }
 
-    if held_entry.is_none() && armor_pieces == 0 {
+    if held_entry.is_none() && !has_any_armor {
         return;
     }
 
-    let mut rows = 1usize; // Title
+    let mut extra_rows = 0usize;
     if held_entry.is_some() {
-        rows += 1;
-    }
-    if armor_pieces > 0 {
-        rows += 1;
+        extra_rows += 1;
     }
     if bat_cap > 0 {
-        rows += 1;
+        extra_rows += 1;
     }
 
-    let w = 148.0_f32;
-    let h = 10.0 + rows as f32 * 18.0;
+    let armor_block_h = if has_any_armor { 54.0 } else { 0.0 };
+    let w = 152.0_f32;
+    let h = 22.0 + armor_block_h + extra_rows as f32 * 18.0;
     let (x, y) = corners.place(horizon_client::extras::Corner::BottomRight, w, h);
 
     // Dark industrial background + cyan border
-    game.native_fill(batch, [x, y, w, h], 0xB812_161E);
+    game.native_fill(batch, [x, y, w, h], 0xBE10_141C);
     game.native_fill(batch, [x, y, w, 1.5], 0xFF38_F2FF);
     game.native_fill(batch, [x, y + h - 1.5, w, 1.5], 0xFF28_5066);
     game.native_fill(batch, [x, y, 1.5, h], 0xFF38_F2FF);
     game.native_fill(batch, [x + w - 1.5, y, 1.5, h], 0xFF28_5066);
 
-    game.native_text(batch, "⚡ ENERGÍA TECH", [x + 6.0, y + 5.0], 0xFF38_F2FF, true);
+    game.native_text(batch, "⚡ ESTADO TECH", [x + 6.0, y + 5.0], 0xFF38_F2FF, true);
 
-    let mut ry = y + 18.0;
-    let draw_bar = |g: &Game<'_>, b: &mut HudBatch, label: &str, cur: i32, cap: i32, row_y: f32, col: u32| {
+    let mut ry = y + 19.0;
+
+    // Draw 2D Character Silhouette + Per-Piece Armor % Readout
+    if has_any_armor {
+        let fx = x + 10.0;
+        let fy = ry;
+        let tx = x + 44.0;
+        let empty_col = 0xFF11_1419;
+        let border_col = 0xFF35_3E4C;
+
+        let piece_style = |info: Option<(&'static str, i32, i32)>| -> (u32, String) {
+            if let Some((label, cur, cap)) = info {
+                let pct = ((cur as f32 / cap.max(1) as f32) * 100.0).clamp(0.0, 100.0);
+                (battery_color(pct), format!("{label}: {}%", pct as i32))
+            } else {
+                (empty_col, "---".to_owned())
+            }
+        };
+
+        let (head_col, head_txt) = piece_style(head);
+        let (chest_col, chest_txt) = piece_style(chest);
+        let (legs_col, legs_txt) = piece_style(legs);
+        let (feet_col, feet_txt) = piece_style(feet);
+
+        let draw_part = |g: &Game<'_>, b: &mut HudBatch, px: f32, py: f32, pw: f32, ph: f32, col: u32| {
+            g.native_fill(b, [px - 1.0, py - 1.0, pw + 2.0, ph + 2.0], border_col);
+            g.native_fill(b, [px, py, pw, ph], col);
+        };
+
+        // Head
+        draw_part(game, batch, fx + 8.0, fy, 10.0, 9.0, head_col);
+        game.native_text(batch, &head_txt, [tx, fy + 1.0], if head.is_some() { head_col } else { 0xFF55_6070 }, true);
+
+        // Chest + Arms
+        draw_part(game, batch, fx + 1.0, fy + 12.0, 4.0, 12.0, chest_col);
+        draw_part(game, batch, fx + 7.0, fy + 12.0, 12.0, 13.0, chest_col);
+        draw_part(game, batch, fx + 21.0, fy + 12.0, 4.0, 12.0, chest_col);
+        game.native_text(batch, &chest_txt, [tx, fy + 14.0], if chest.is_some() { chest_col } else { 0xFF55_6070 }, true);
+
+        // Legs
+        draw_part(game, batch, fx + 7.0, fy + 27.0, 5.0, 11.0, legs_col);
+        draw_part(game, batch, fx + 14.0, fy + 27.0, 5.0, 11.0, legs_col);
+        game.native_text(batch, &legs_txt, [tx, fy + 28.0], if legs.is_some() { legs_col } else { 0xFF55_6070 }, true);
+
+        // Boots
+        draw_part(game, batch, fx + 7.0, fy + 40.0, 5.0, 6.0, feet_col);
+        draw_part(game, batch, fx + 14.0, fy + 40.0, 5.0, 6.0, feet_col);
+        game.native_text(batch, &feet_txt, [tx, fy + 39.0], if feet.is_some() { feet_col } else { 0xFF55_6070 }, true);
+
+        ry += armor_block_h;
+    }
+
+    let draw_bar = |g: &Game<'_>, b: &mut HudBatch, label: &str, cur: i32, cap: i32, row_y: f32| {
         let pct = ((cur as f32 / cap.max(1) as f32) * 100.0).clamp(0.0, 100.0);
+        let col = battery_color(pct);
         g.native_text(
             b,
             &format!("{label}: {}%", pct as i32),
             [x + 6.0, row_y],
-            0xFFE8_EEF8,
+            col,
             true,
         );
         g.native_fill(b, [x + 6.0, row_y + 10.0, w - 12.0, 4.0], 0xFF22_2834);
@@ -4888,14 +4964,10 @@ pub(in crate::game) fn hud(
     };
 
     if let Some((ref label, cur, cap)) = held_entry {
-        draw_bar(game, batch, label, cur, cap, ry, 0xFF38_F2FF);
-        ry += 18.0;
-    }
-    if armor_pieces > 0 {
-        draw_bar(game, batch, &format!("Armadura ({armor_pieces}p)"), armor_cur, armor_cap, ry, 0xFF55_FF88);
+        draw_bar(game, batch, label, cur, cap, ry);
         ry += 18.0;
     }
     if bat_cap > 0 {
-        draw_bar(game, batch, "Baterías", bat_cur, bat_cap, ry, 0xFFFF_C800);
+        draw_bar(game, batch, "Baterías", bat_cur, bat_cap, ry);
     }
 }
