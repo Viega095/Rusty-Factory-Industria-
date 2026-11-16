@@ -999,7 +999,7 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
         MachineKind::AlloySmelter => match input {
             "minecraft:iron_ingot" => Some(RecipeOutput { item: ITEM_STEEL_INGOT, count: 2 }),
             ITEM_IRON_DUST => Some(RecipeOutput { item: ITEM_STEEL_INGOT, count: 1 }),
-            "minecraft:copper_ingot" | ITEM_COPPER_DUST => Some(RecipeOutput { item: ITEM_GOLD_PLATE, count: 1 }),
+            "minecraft:copper_ingot" | ITEM_COPPER_DUST => Some(RecipeOutput { item: ITEM_COPPER_PLATE, count: 1 }),
             "minecraft:gold_ingot" | ITEM_GOLD_DUST => Some(RecipeOutput { item: ITEM_CIRCUIT, count: 2 }),
             ITEM_RUBBER_BAR => Some(RecipeOutput { item: ITEM_RUBBER_SHEET, count: 3 }),
             _ => None,
