@@ -1,0 +1,10 @@
+{
+  "replace": false,
+  "values": [
+    "rusty_factory:fluid_pipe",
+    "rusty_factory:fluid_tank",
+    "rusty_factory:steam_boiler",
+    "rusty_factory:fluid_pump",
+    "rusty_factory:void_trash_can"
+  ]
+}

@@ -445,11 +445,11 @@ fn route_item_from(game: &mut Game<'_>, source_pos: [i32; 3], mut stack: ItemSta
         |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
         |p| p != source_pos && (is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p)) || game.native_block(p) == rules::BLOCK_ITEM_SPLITTER),
     );
-    if let Some(&first_target) = targets.first() {
+    if !targets.is_empty() {
         for d in rules::DIRS {
             let adj = [source_pos[0] + d[0], source_pos[1] + d[1], source_pos[2] + d[2]];
             if game.native_block(adj) == rules::BLOCK_ITEM_PIPE {
-                if insert_into_pipe(game, source_pos, adj, stack.clone(), Some(first_target)).is_none() {
+                if insert_into_pipe(game, source_pos, adj, stack.clone(), None).is_none() {
                     return None;
                 }
             }
@@ -582,27 +582,55 @@ fn tick_item_pipe(
     let from_off = rules::offset_from_dir_index(state.pipe_from);
     let from_pos = [pos[0] + from_off[0], pos[1] + from_off[1], pos[2] + from_off[2]];
     let preferred = if state.pipe_has_target { Some(state.pipe_target) } else { None };
+    let is_pipe_target = |p: [i32; 3]| {
+        p != from_pos
+            && (is_item_container_block(&game.native_block(p))
+                || rules::is_conveyor_block(&game.native_block(p))
+                || game.native_block(p) == rules::BLOCK_ITEM_SPLITTER)
+    };
     let next_step = rules::find_next_pipe_step(
         pos,
         preferred,
         |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE && p != from_pos,
-        |p| p != from_pos && (is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p)) || game.native_block(p) == rules::BLOCK_ITEM_SPLITTER),
+        is_pipe_target,
     );
 
+    let stack = ItemStack::new(&state.belt_item, state.belt_count.max(1));
+
+    // If there is no target at all in front of this pipe, check if this is an open pipe end (air) and drop cleanly
     let Some((step_pos, final_target)) = next_step else {
+        let opp = rules::offset_from_dir_index(rules::opposite_dir_index(state.pipe_from));
+        let open_pos = [pos[0] + opp[0], pos[1] + opp[1], pos[2] + opp[2]];
+        if matches!(
+            game.native_block(open_pos).as_str(),
+            "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
+        ) {
+            let drop_pos = [
+                pos[0] as f64 + 0.5 + opp[0] as f64 * 0.6,
+                pos[1] as f64 + 0.35 + opp[1] as f64 * 0.4,
+                pos[2] as f64 + 0.5 + opp[2] as f64 * 0.6,
+            ];
+            let vel = [opp[0] as f64 * 0.12, 0.06, opp[2] as f64 * 0.12];
+            game.spawn_item(stack, drop_pos, vel, 10);
+            state.belt_item.clear();
+            state.belt_count = 0;
+            state.progress = 0;
+            state.pipe_has_target = false;
+            store_state(entity, state);
+            game.native_block_entity_sync(pos);
+        }
         return;
     };
 
-    let stack = ItemStack::new(&state.belt_item, state.belt_count.max(1));
     let step_block = game.native_block(step_pos);
     let leftover = if step_block == rules::BLOCK_ITEM_PIPE {
-        insert_into_pipe(game, pos, step_pos, stack, Some(final_target))
+        insert_into_pipe(game, pos, step_pos, stack.clone(), Some(final_target))
     } else if step_block == rules::BLOCK_ITEM_SPLITTER {
-        insert_into_splitter(game, step_pos, stack)
+        insert_into_splitter(game, step_pos, stack.clone())
     } else if rules::is_conveyor_block(&step_block) {
-        insert_into_conveyor(game, step_pos, stack)
+        insert_into_conveyor(game, step_pos, stack.clone())
     } else {
-        match game.native_insert_item(step_pos, Direction::Up, stack) {
+        match game.native_insert_item(step_pos, Direction::Up, stack.clone()) {
             None => None,
             Some(rest) => game.native_insert_item(step_pos, Direction::North, rest),
         }
@@ -622,7 +650,65 @@ fn tick_item_pipe(
             store_state(entity, state);
             game.native_block_entity_sync(pos);
         }
-        Some(_) => {}
+        Some(_) => {
+            // Destination chest/target is full! Try any other reachable target in the network (including branching back!)
+            state.pipe_has_target = false;
+            let all_targets = rules::find_connected_item_targets(
+                pos,
+                |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
+                |p| {
+                    p != final_target
+                        && p != step_pos
+                        && (is_item_container_block(&game.native_block(p))
+                            || rules::is_conveyor_block(&game.native_block(p))
+                            || game.native_block(p) == rules::BLOCK_ITEM_SPLITTER)
+                },
+            );
+            let mut rerouted = false;
+            for alt in all_targets {
+                if let Some((alt_step, _)) = rules::find_next_pipe_step(
+                    pos,
+                    Some(alt),
+                    |p| game.native_block(p) == rules::BLOCK_ITEM_PIPE,
+                    |p| p == alt,
+                ) {
+                    let alt_blk = game.native_block(alt_step);
+                    let rem = if alt_blk == rules::BLOCK_ITEM_PIPE {
+                        insert_into_pipe(game, pos, alt_step, stack.clone(), Some(alt))
+                    } else if alt_blk == rules::BLOCK_ITEM_SPLITTER {
+                        insert_into_splitter(game, alt_step, stack.clone())
+                    } else if rules::is_conveyor_block(&alt_blk) {
+                        insert_into_conveyor(game, alt_step, stack.clone())
+                    } else {
+                        match game.native_insert_item(alt_step, Direction::Up, stack.clone()) {
+                            None => None,
+                            Some(r) => game.native_insert_item(alt_step, Direction::North, r),
+                        }
+                    };
+                    if rem.is_none() {
+                        state.belt_item.clear();
+                        state.belt_count = 0;
+                        state.progress = 0;
+                        state.pipe_has_target = false;
+                        store_state(entity, state);
+                        game.native_block_entity_sync(pos);
+                        rerouted = true;
+                        break;
+                    } else if let Some(r) = rem {
+                        if r.count < state.belt_count {
+                            state.belt_count = r.count;
+                            store_state(entity, state);
+                            game.native_block_entity_sync(pos);
+                            rerouted = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if !rerouted {
+                store_state(entity, state);
+            }
+        }
     }
 }
 

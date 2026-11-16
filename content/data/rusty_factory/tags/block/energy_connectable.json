@@ -1,7 +1,6 @@
 {
   "replace": false,
   "values": [
-    "rusty_factory:machine_casing",
     "rusty_factory:coal_generator",
     "rusty_factory:bio_generator",
     "rusty_factory:solar_generator",
@@ -10,7 +9,6 @@
     "rusty_factory:cable_white",
     "rusty_factory:cable_gold",
     "rusty_factory:cable_red",
-    "rusty_factory:item_pipe",
     "rusty_factory:item_extractor",
     "rusty_factory:electric_crusher",
     "rusty_factory:electric_furnace",
@@ -19,21 +17,16 @@
     "rusty_factory:vulcanizer",
     "rusty_factory:sap_extractor",
     "rusty_factory:quarry",
+    "rusty_factory:quarry_mk2",
+    "rusty_factory:quarry_mk3",
     "rusty_factory:auto_harvester",
     "rusty_factory:block_breaker",
     "rusty_factory:block_placer",
-    "rusty_factory:conveyor_belt",
-    "rusty_factory:conveyor_belt_mk2",
-    "rusty_factory:conveyor_belt_mk3",
-    "rusty_factory:item_splitter",
     "rusty_factory:energy_monitor",
-    "rusty_factory:fluid_tank",
     "rusty_factory:steam_boiler",
     "rusty_factory:fluid_pump",
-    "rusty_factory:void_trash_can",
     "rusty_factory:energy_relay",
     "rusty_factory:charging_pad",
-    "rusty_factory:fluid_pipe",
     "rusty_factory:alloy_smelter"
   ]
 }
