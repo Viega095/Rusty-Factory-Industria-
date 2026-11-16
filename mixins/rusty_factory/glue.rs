@@ -105,7 +105,8 @@ pub(in crate::game) fn container(block: &str, container: &mut Option<ModContaine
             | MachineKind::FluidTank
             | MachineKind::FluidPump
             | MachineKind::GeothermalGenerator
-            | MachineKind::SteamTurbine => {
+            | MachineKind::SteamTurbine
+            | MachineKind::IndustrialSilo => {
                 *container = Some(ModContainer {
                     slots: 1,
                     faces: std::array::from_fn(|_| vec![0]),
@@ -120,8 +121,7 @@ pub(in crate::game) fn container(block: &str, container: &mut Option<ModContaine
             | MachineKind::ItemPipe
             | MachineKind::FluidPipe
             | MachineKind::ItemSplitter
-            | MachineKind::UpgradeStation
-            | MachineKind::IndustrialSilo => {
+            | MachineKind::UpgradeStation => {
                 *container = None;
             }
             MachineKind::EnergyBank => {
@@ -243,6 +243,40 @@ fn grow_rubber_tree(game: &mut Game<'_>, pos: [i32; 3]) {
     }
 }
 
+/// Inserts `stack` into an `industrial_silo` ONLY if it is empty or already holds that exact item type.
+fn insert_into_silo(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) -> Option<ItemStack> {
+    if game.native_block(pos) != rules::BLOCK_INDUSTRIAL_SILO {
+        return Some(stack);
+    }
+    let item_id = stack.item.to_string();
+    let mut rem = stack.count;
+    let changed = game.native_with_mod_block_entity(pos, |entity| {
+        let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::IndustrialSilo));
+        if !st.belt_item.is_empty() && st.belt_item != item_id {
+            return false;
+        }
+        let cap = st.silo_capacity.max(2_048);
+        let space = cap.saturating_sub(st.belt_count);
+        let add = rem.min(space);
+        if add == 0 {
+            return false;
+        }
+        st.belt_item = item_id.clone();
+        st.belt_count += add;
+        rem -= add;
+        store_state(entity, &st);
+        true
+    });
+    if changed == Some(true) {
+        game.native_block_entity_sync(pos);
+    }
+    if rem == 0 {
+        None
+    } else {
+        Some(ItemStack::new(&stack.item, rem))
+    }
+}
+
 /// Inserts `stack` onto a conveyor belt's `MachineState` if it is empty or can batch more of the same item.
 /// Returns `None` if all items were accepted, or `Some(leftover)`.
 fn insert_into_conveyor(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) -> Option<ItemStack> {
@@ -335,6 +369,8 @@ fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
             insert_into_conveyor(game, target, stack.clone())
         } else if tb == rules::BLOCK_ITEM_PIPE {
             insert_into_pipe(game, pos, target, stack.clone(), None)
+        } else if tb == rules::BLOCK_INDUSTRIAL_SILO {
+            insert_into_silo(game, target, stack.clone())
         } else if is_item_container_block(&tb) {
             match game.native_insert_item(target, Direction::Up, stack.clone()) {
                 None => None,
@@ -433,7 +469,12 @@ fn route_item_from(game: &mut Game<'_>, source_pos: [i32; 3], mut stack: ItemSta
     for d in rules::DIRS {
         let adj = [source_pos[0] + d[0], source_pos[1] + d[1], source_pos[2] + d[2]];
         let blk = game.native_block(adj);
-        if !rules::is_conveyor_block(&blk) && is_item_container_block(&blk) {
+        if blk == rules::BLOCK_INDUSTRIAL_SILO {
+            match insert_into_silo(game, adj, stack) {
+                None => return None,
+                Some(rest) => stack = rest,
+            }
+        } else if !rules::is_conveyor_block(&blk) && is_item_container_block(&blk) {
             match game.native_insert_item(adj, Direction::Up, stack) {
                 None => return None,
                 Some(rest) => {
@@ -634,6 +675,8 @@ fn tick_item_pipe(
         insert_into_pipe(game, pos, step_pos, stack.clone(), Some(final_target))
     } else if step_block == rules::BLOCK_ITEM_SPLITTER {
         insert_into_splitter(game, step_pos, stack.clone())
+    } else if step_block == rules::BLOCK_INDUSTRIAL_SILO {
+        insert_into_silo(game, step_pos, stack.clone())
     } else if rules::is_conveyor_block(&step_block) {
         insert_into_conveyor(game, step_pos, stack.clone())
     } else {
@@ -684,6 +727,8 @@ fn tick_item_pipe(
                         insert_into_pipe(game, pos, alt_step, stack.clone(), Some(alt))
                     } else if alt_blk == rules::BLOCK_ITEM_SPLITTER {
                         insert_into_splitter(game, alt_step, stack.clone())
+                    } else if alt_blk == rules::BLOCK_INDUSTRIAL_SILO {
+                        insert_into_silo(game, alt_step, stack.clone())
                     } else if rules::is_conveyor_block(&alt_blk) {
                         insert_into_conveyor(game, alt_step, stack.clone())
                     } else {
@@ -887,6 +932,8 @@ fn tick_conveyor(
         insert_into_splitter(game, front_pos, stack)
     } else if front_block == rules::BLOCK_ITEM_PIPE {
         insert_into_pipe(game, pos, front_pos, stack, None)
+    } else if front_block == rules::BLOCK_INDUSTRIAL_SILO {
+        insert_into_silo(game, front_pos, stack)
     } else if is_item_container_block(&front_block) {
         match game.native_insert_item(front_pos, Direction::Up, stack) {
             None => None,
@@ -1909,28 +1956,30 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
 
     if kind == MachineKind::IndustrialSilo {
         let cap = state.silo_capacity.max(2_048);
-        if let Some(in_stack) = entity.items[rules::SLOT_INPUT].take() {
-            let in_id = in_stack.item.to_string();
+        if let Some(Some(slot0)) = entity.items.first_mut() {
+            let in_id = slot0.item.to_string();
             if state.belt_item.is_empty() || state.belt_item == in_id {
                 let space = cap.saturating_sub(state.belt_count);
-                let add = in_stack.count.min(space);
-                state.belt_item = in_id;
-                state.belt_count += add;
-                if in_stack.count > add {
-                    entity.items[rules::SLOT_INPUT] = Some(ItemStack::new(&in_stack.item, in_stack.count - add));
+                let add = slot0.count.min(space);
+                if add > 0 {
+                    state.belt_item = in_id;
+                    state.belt_count += add;
+                    if slot0.count > add {
+                        slot0.count -= add;
+                    } else {
+                        entity.items[0] = None;
+                    }
                 }
-            } else {
-                entity.items[rules::SLOT_INPUT] = Some(in_stack);
             }
         }
-        if entity.items[rules::SLOT_OUTPUT].is_none() && !state.belt_item.is_empty() && state.belt_count > 0 {
-            let take = state.belt_count.min(64);
-            state.belt_count -= take;
-            entity.items[rules::SLOT_OUTPUT] = Some(ItemStack::new(&state.belt_item, take));
-            if state.belt_count == 0 {
-                state.belt_item.clear();
-            }
-        }
+        let pct = ((state.belt_count as u64 * 100) / cap.max(1) as u64).min(100) as i32;
+        entity.data = vec![
+            if state.belt_count > 0 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
+            state.belt_count as i32,
+            cap as i32,
+            pct,
+            0, 1, 1, 0, 0, 0,
+        ];
         store_state(entity, &state);
         return;
     }
@@ -3455,11 +3504,17 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
         return;
     }
 
-    // Industrial Silo: Direct deposit, withdraw, and capacity upgrades (+5K/+10K/+100K/+500K)
+    // Industrial Silo: Front screen = deposit / Shift-lock item / withdraw; Side faces = place blocks or open 1-slot GUI
     if block_id == rules::BLOCK_INDUSTRIAL_SILO {
-        *canceled = true;
+        let facing = game
+            .native_block_property(pos, "facing")
+            .unwrap_or_else(|| "north".to_owned());
+        let (front_off, _) = rules::conveyor_offsets(&facing);
+        let is_front = face == front_off;
+
         if let Some((ref held_id, held_count, _)) = held_info {
             if let Some(bonus) = rules::silo_upgrade_bonus(held_id) {
+                *canceled = true;
                 let mut new_cap = 0;
                 game.native_with_mod_block_entity(pos, |entity| {
                     let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::IndustrialSilo));
@@ -3478,36 +3533,82 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 }
                 return;
             }
-            let item_id = held_id.clone();
-            let mut deposited = 0u32;
-            let mut total_now = 0u32;
-            let mut cap_now = 2_048u32;
-            game.native_with_mod_block_entity(pos, |entity| {
-                let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::IndustrialSilo));
-                cap_now = st.silo_capacity.max(2_048);
-                if st.belt_item.is_empty() || st.belt_item == item_id {
-                    let space = cap_now.saturating_sub(st.belt_count);
-                    deposited = held_count.min(space);
-                    if deposited > 0 {
+            if is_front {
+                *canceled = true;
+                let item_id = held_id.clone();
+                let mut deposited = 0u32;
+                let mut total_now = 0u32;
+                let mut cap_now = 2_048u32;
+                let mut mismatch = false;
+                game.native_with_mod_block_entity(pos, |entity| {
+                    let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::IndustrialSilo));
+                    cap_now = st.silo_capacity.max(2_048);
+                    if is_crouching && st.belt_count == 0 {
+                        // Shift + Right-Click on front screen locks/configures the Silo to this item
                         st.belt_item = item_id.clone();
-                        st.belt_count += deposited;
                         store_state(entity, &st);
                     }
-                }
-                total_now = st.belt_count;
-            });
-            if deposited > 0 {
-                if !game.creative {
-                    if let Some(held) = game.held_mut() {
-                        if held.count > deposited { held.count -= deposited; } else { *game.held_mut() = None; }
+                    if st.belt_item.is_empty() || st.belt_item == item_id {
+                        let space = cap_now.saturating_sub(st.belt_count);
+                        deposited = held_count.min(space);
+                        if deposited > 0 {
+                            st.belt_item = item_id.clone();
+                            st.belt_count += deposited;
+                            store_state(entity, &st);
+                        }
+                    } else {
+                        mismatch = true;
                     }
+                    total_now = st.belt_count;
+                });
+                if deposited > 0 {
+                    if !game.creative {
+                        if let Some(held) = game.held_mut() {
+                            if held.count > deposited { held.count -= deposited; } else { *game.held_mut() = None; }
+                        }
+                    }
+                    game.native_block_entity_sync(pos);
+                } else if is_crouching {
+                    game.native_block_entity_sync(pos);
                 }
-                game.native_block_entity_sync(pos);
+                if let Some(who) = game.native_acting_player() {
+                    let msg = if mismatch {
+                        format!("⚠ [Silo] Bloqueado a otro ítem ({total_now} / {cap_now})")
+                    } else {
+                        format!("📦 [Silo] {total_now} / {cap_now} ({item_id})")
+                    };
+                    game.native_action_bar(who.uuid, Text::literal(msg));
+                }
+                return;
+            } else if held_id != rules::ITEM_WRENCH {
+                // Side/top/back face with a block in hand: place that block at `pos + face`!
+                if let Some(place_state) = game.native_default_state(held_id) {
+                    *canceled = true;
+                    let target = [pos[0] + face[0], pos[1] + face[1], pos[2] + face[2]];
+                    let target_blk = game.native_block(target);
+                    if matches!(
+                        target_blk.as_str(),
+                        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" | "minecraft:water"
+                    ) {
+                        let dim = game.native_dimension();
+                        if game.native_set_block(dim, target, place_state, 3) {
+                            let forward_facing = cardinal_facing_from_yaw(game.yaw);
+                            let raw_facing = opposite_facing(forward_facing);
+                            let _ = game.native_set_block_property(target, "facing", raw_facing);
+                            place_block(game, target);
+                            if !game.creative {
+                                if let Some(held) = game.held_mut() {
+                                    if held.count > 1 { held.count -= 1; } else { *game.held_mut() = None; }
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
             }
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(who.uuid, Text::literal(format!("📦 [Silo] {total_now} / {cap_now} ({item_id})")));
-            }
-        } else {
+        } else if is_front {
+            // Empty hand on front screen: withdraw 1 stack (up to 64)
+            *canceled = true;
             let mut taken: Option<(String, u32)> = None;
             let mut total_now = 0u32;
             let mut cap_now = 2_048u32;
@@ -3533,8 +3634,9 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                     game.native_action_bar(who.uuid, Text::literal(format!("📦 [Silo] Retirado x{amt} | Restante: {total_now} / {cap_now}")));
                 }
             }
+            return;
         }
-        return;
+        // Empty hand on non-front face falls through so the 1-slot Silo GUI opens!
     }
 
     // Equipment Upgrade Station: load a module_* or install loaded module onto held tech tool/armor
@@ -4977,6 +5079,23 @@ pub(in crate::game) fn screen_draw(
         let line2 = format!("Fundición de alta temperatura: {progress_pct}%");
         game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
         game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF_8844, false);
+    } else if kind == MachineKind::IndustrialSilo {
+        let bar_col = if progress_pct >= 90 {
+            0xFFE6_3232
+        } else if progress_pct >= 65 {
+            0xFFE6_B822
+        } else {
+            0xFF38_D96B
+        };
+        let line1 = format!("Almacenado: {energy} / {max_energy} ({progress_pct}%)");
+        let line2 = "Slot 0 = Depositar (Frente = Bloquear/Retirar)";
+        game.native_text(batch, &line1, [x + 10.0, y + 58.0], bar_col, false);
+        game.native_text(batch, line2, [x + 10.0, y + 68.0], 0xFFAA_B4C4, false);
+        game.native_fill(batch, [x + 10.0, y + 78.0, 156.0, 5.0], 0xFF22_2834);
+        let fw = (156.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 156.0);
+        if fw > 0.5 {
+            game.native_fill(batch, [x + 10.0, y + 78.0, fw, 5.0], bar_col);
+        }
     } else if kind == MachineKind::IndustrialAssembler {
         let line1 = format!("FE: {energy}/{max_energy} | Ensamblador Robótico");
         let line2 = format!("Ensamblaje automatizado: {progress_pct}%");
