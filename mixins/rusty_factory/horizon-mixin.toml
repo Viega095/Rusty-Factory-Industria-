@@ -168,6 +168,30 @@ bindings = [
 ]
 
 [[injection]]
+id = "menu-button-v2"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_menu_button_v2"
+helper = "menu_button_v2.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "pos", ty = "[i32; 3]", value = "pos" },
+  { name = "entity", ty = "&mut horizon_client::containers::ModBlockEntity", value = "&mut *entity" },
+  { name = "id", ty = "i32", value = "id" },
+  { name = "carried", ty = "&mut Option<horizon_client::items::ItemStack>", value = "&mut *carried" },
+]
+
+[[injection]]
+id = "key-event"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_key"
+helper = "key_event.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "key", ty = "&str", value = "key" },
+  { name = "pressed", ty = "bool", value = "pressed" },
+]
+
+[[injection]]
 id = "screen"
 kind = "HEAD"
 target = "horizon_client::game::native_hooks::Game<'_>::native_screen"

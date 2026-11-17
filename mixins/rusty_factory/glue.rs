@@ -344,6 +344,62 @@ fn sorted_silo_network(
     (list, silos_n, chests_n)
 }
 
+static TERMINAL_SEARCH: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+static TERMINAL_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn get_terminal_search() -> String {
+    TERMINAL_SEARCH.lock().map(|s| s.clone()).unwrap_or_default()
+}
+
+fn filtered_silo_network(
+    game: &Game<'_>,
+    start: [i32; 3],
+    sort_by_name: bool,
+    ascending: bool,
+    query: &str,
+) -> (Vec<(String, u32, bool)>, usize, usize) {
+    let (mut list, silos_n, chests_n) = sorted_silo_network(game, start, sort_by_name, ascending);
+    let q = query.trim().to_ascii_lowercase();
+    if !q.is_empty() {
+        list.retain(|(id, _, _)| {
+            let short = id.split(':').nth(1).unwrap_or(id).to_ascii_lowercase();
+            short.contains(&q)
+        });
+    }
+    (list, silos_n, chests_n)
+}
+
+pub(in crate::game) fn key_event(game: &mut Game<'_>, key: &str, pressed: bool) {
+    if !pressed || !game.native_on(rules::ID) {
+        return;
+    }
+    if !game.native_screen_shown() {
+        TERMINAL_OPEN.store(false, std::sync::atomic::Ordering::Relaxed);
+        return;
+    }
+    if !TERMINAL_OPEN.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let k = key.strip_prefix("key.keyboard.").unwrap_or(key);
+    if let Ok(mut s) = TERMINAL_SEARCH.lock() {
+        if k.eq_ignore_ascii_case("backspace") {
+            s.pop();
+        } else if k.eq_ignore_ascii_case("space") {
+            if s.len() < 20 {
+                s.push(' ');
+            }
+        } else if k.len() == 1 {
+            if let Some(ch) = k.chars().next() {
+                if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                    if s.len() < 20 {
+                        s.push(ch.to_ascii_lowercase());
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn match_terminal_craft(grid: &[Option<ItemStack>]) -> Option<(&'static str, u32)> {
     let g = |i: usize| grid.get(i).and_then(|s| s.as_ref()).map(|s| s.item.as_ref());
     let non_empty: Vec<(usize, &str)> = (0..9).filter_map(|i| g(i).map(|id| (i, id))).collect();
@@ -1311,8 +1367,8 @@ fn tick_quarry(
             }
         }
 
-        // Scan up to 12 positions to skip over air/water/bedrock quickly
-        for _ in 0..if cleared_surface { 0 } else { 12 } {
+        // Scan up to 512 positions to skip over empty air/water/bedrock layers immediately
+        for _ in 0..if cleared_surface { 0 } else { 512 } {
             let target_pos = rules::quarry_target_pos(pos, &facing, state);
             if target_pos[1] <= -60 {
                 // Reached bottom of the world; wrap back to top layer
@@ -2268,89 +2324,13 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 entity.items[0] = Some(rest);
             }
         }
-        let (list, silos_n, chests_n) = sorted_silo_network(game, pos, state.auto_io, state.enabled);
+        let search = get_terminal_search();
+        let (list, silos_n, chests_n) = filtered_silo_network(game, pos, state.auto_io, state.enabled, &search);
         let max_page = (list.len().saturating_sub(1) / 27) as i32;
         if state.quarry_cursor > max_page {
             state.quarry_cursor = max_page;
         }
         let page = state.quarry_cursor.max(0) as usize;
-
-        // Handle pending grid slot click withdrawal (`state.quarry_y_offset == 1..=27`) -> place into slot 1 (Retiro)
-        if state.quarry_y_offset > 0 {
-            let slot_idx = (state.quarry_y_offset - 1) as usize;
-            state.quarry_y_offset = 0;
-            if let Some((target_item, _, _)) = list.get(page * 27 + slot_idx) {
-                let out_room = match entity.items.get(1).and_then(|s| s.as_ref()) {
-                    None => 64u32,
-                    Some(cur) if cur.item.as_ref() == target_item.as_str() => 64u32.saturating_sub(cur.count),
-                    Some(_) => 0u32,
-                };
-                if out_room > 0 {
-                    let (silos, chests) = collect_silo_network(game, pos);
-                    let mut need = out_room;
-                    let mut taken = 0u32;
-                    for &sp in &silos {
-                        if need == 0 {
-                            break;
-                        }
-                        let mut took = 0u32;
-                        game.native_with_mod_block_entity(sp, |sent| {
-                            if let Some(mut sst) = load_state(sent) {
-                                if sst.belt_item == *target_item && sst.belt_count > 0 {
-                                    took = sst.belt_count.min(need);
-                                    sst.belt_count -= took;
-                                    if sst.belt_count == 0 {
-                                        sst.belt_item.clear();
-                                    }
-                                    store_state(sent, &sst);
-                                }
-                            }
-                        });
-                        if took > 0 {
-                            game.native_block_entity_sync(sp);
-                            need -= took;
-                            taken += took;
-                        }
-                    }
-                    for &cp in &chests {
-                        if need == 0 {
-                            break;
-                        }
-                        let mut took = 0u32;
-                        if let Some(BlockEntity::Chest(slots)) = game.world.block_entities.get_mut(&(cp[0], cp[1], cp[2])) {
-                            for slot in slots.iter_mut() {
-                                if need == 0 {
-                                    break;
-                                }
-                                if let Some(st) = slot.as_mut() {
-                                    if st.item.as_ref() == target_item.as_str() {
-                                        let amt = st.count.min(need);
-                                        took += amt;
-                                        need -= amt;
-                                        if st.count > amt {
-                                            st.count -= amt;
-                                        } else {
-                                            *slot = None;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        taken += took;
-                    }
-                    if taken > 0 {
-                        if entity.items.len() < 2 {
-                            entity.items.resize(2, None);
-                        }
-                        match entity.items[1].as_mut() {
-                            Some(cur) => cur.count += taken,
-                            None => entity.items[1] = Some(ItemStack::new(target_item, taken)),
-                        }
-                    }
-                }
-            }
-        }
-
         update_lit_state(game, pos, silos_n + chests_n > 0);
         entity.data = vec![
             if silos_n + chests_n > 0 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
@@ -2412,92 +2392,13 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 state.progress = 1;
             }
         }
-        let (list, silos_n, chests_n) = sorted_silo_network(game, pos, state.auto_io, state.enabled);
+        let search = get_terminal_search();
+        let (list, silos_n, chests_n) = filtered_silo_network(game, pos, state.auto_io, state.enabled, &search);
         let max_page = (list.len().saturating_sub(1) / 27) as i32;
         if state.quarry_cursor > max_page {
             state.quarry_cursor = max_page;
         }
         let page = state.quarry_cursor.max(0) as usize;
-        if state.quarry_y_offset > 0 {
-            let slot_idx = (state.quarry_y_offset - 1) as usize;
-            state.quarry_y_offset = 0;
-            if let Some((target_item, _, _)) = list.get(page * 27 + slot_idx) {
-                let out_room = if state.progress == 1 {
-                    0u32
-                } else {
-                    match entity.items.get(9).and_then(|s| s.as_ref()) {
-                        None => 64u32,
-                        Some(cur) if cur.item.as_ref() == target_item.as_str() => 64u32.saturating_sub(cur.count),
-                        Some(_) => 0u32,
-                    }
-                };
-                if out_room == 0 {
-                    // Output slot occupied by another item; do not consume from silo
-                } else {
-                let (silos, chests) = collect_silo_network(game, pos);
-                let mut need = out_room;
-                let mut taken = 0u32;
-                for &sp in &silos {
-                    if need == 0 {
-                        break;
-                    }
-                    let mut took = 0u32;
-                    game.native_with_mod_block_entity(sp, |sent| {
-                        if let Some(mut sst) = load_state(sent) {
-                            if sst.belt_item == *target_item && sst.belt_count > 0 {
-                                took = sst.belt_count.min(need);
-                                sst.belt_count -= took;
-                                if sst.belt_count == 0 {
-                                    sst.belt_item.clear();
-                                }
-                                store_state(sent, &sst);
-                            }
-                        }
-                    });
-                    if took > 0 {
-                        game.native_block_entity_sync(sp);
-                        need -= took;
-                        taken += took;
-                    }
-                }
-                if need > 0 {
-                    for &cp in &chests {
-                        if need == 0 {
-                            break;
-                        }
-                        let mut took = 0u32;
-                        let dim = game.native_dimension();
-                        if let Some(slots) = game.native_container_slots(dim, cp, Direction::Up) {
-                            for s in slots {
-                                if need == 0 {
-                                    break;
-                                }
-                                if let Some(st) = s.stack {
-                                    if st.item.as_ref() == target_item.as_str() {
-                                        let req = need.min(st.count);
-                                        if let Some(pulled) = game.native_extract_item(dim, cp, Direction::Up, s.slot, req) {
-                                            took += pulled.count;
-                                            need -= pulled.count;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        taken += took;
-                    }
-                }
-                if taken > 0 {
-                    if entity.items.len() < 10 {
-                        entity.items.resize(10, None);
-                    }
-                    match entity.items[9].as_mut() {
-                        Some(cur) => cur.count += taken,
-                        None => entity.items[9] = Some(ItemStack::new(target_item, taken)),
-                    }
-                }
-                }
-            }
-        }
         update_lit_state(game, pos, silos_n + chests_n > 0);
         entity.data = vec![
             if silos_n + chests_n > 0 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
@@ -2850,29 +2751,34 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 }
             }
         }
-        // 2. Standing induction wireless charging for player & inventory batteries/tools:
+        // 2. Standing induction wireless charging for player & entire inventory (armor, hotbar, inventory, offhand):
         let mut player_on_pad = false;
         let pad_center = [pos[0] as f64 + 0.5, pos[1] as f64 + 0.2, pos[2] as f64 + 0.5];
         if let Some(player) = &game.player {
-            let dist_sq = (player.position.x - pad_center[0]).powi(2)
-                + (player.position.y - pad_center[1]).powi(2)
-                + (player.position.z - pad_center[2]).powi(2);
-            if dist_sq <= 1.4 * 1.4 {
+            let dx = (player.position.x - pad_center[0]).abs();
+            let dz = (player.position.z - pad_center[2]).abs();
+            let dy = player.position.y - pos[1] as f64;
+            if dx <= 0.9 && dz <= 0.9 && (0.0..=1.6).contains(&dy) {
                 player_on_pad = true;
                 if state.energy >= 20 {
                     state.energy -= 20;
-                    if (game.world.game_time + pos[0] as i64) % 15 == 0 {
+                    if (game.world.game_time + pos[0] as i64) % 4 == 0 {
+                        let phase = ((game.world.game_time % 20) as f64) * 0.09;
                         game.native_run_command(&format!(
-                            "particle minecraft:electric_spark {} {} {} 0.3 0.1 0.3 0.05 12",
-                            pad_center[0], pad_center[1], pad_center[2]
+                            "particle minecraft:electric_spark {} {} {} 0.35 0.15 0.35 0.04 10",
+                            pad_center[0], pos[1] as f64 + 1.05 + phase, pad_center[2]
+                        ));
+                        game.native_run_command(&format!(
+                            "particle minecraft:end_rod {} {} {} 0.25 0.1 0.25 0.02 3",
+                            pad_center[0], pos[1] as f64 + 1.05 + phase, pad_center[2]
                         ));
                     }
-                    if (game.world.game_time + pos[0] as i64) % 30 == 0 {
+                    if (game.world.game_time + pos[0] as i64) % 25 == 0 {
                         game.native_run_command("playsound minecraft:block.beacon.ambient player @s ~ ~ ~ 0.35 1.8");
                         if let Some(who) = game.native_acting_player() {
                             game.native_action_bar(
                                 who.uuid,
-                                Text::literal("⚡ [Plataforma de Carga] Recarga por Inducción activa (500 FE/s)"),
+                                Text::literal("⚡ [Cargador Inductivo] Cargando todo tu inventario y armadura..."),
                             );
                         }
                     }
@@ -5496,12 +5402,106 @@ pub(in crate::game) fn menu_button(entity: &mut ModBlockEntity, id: i32) {
             23 if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) => {
                 state.auto_io = !state.auto_io;
             }
-            30..=56 if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) => {
-                state.quarry_y_offset = 1 + (id - 30);
-            }
             _ => {}
         }
         store_state(entity, &state);
+    }
+}
+
+pub(in crate::game) fn menu_button_v2(
+    game: &mut Game<'_>,
+    pos: [i32; 3],
+    entity: &mut ModBlockEntity,
+    id: i32,
+    carried: &mut Option<ItemStack>,
+) {
+    let Some(kind) = MachineKind::from_block_id(&entity.id) else {
+        return;
+    };
+    if !matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) {
+        return;
+    }
+    if id == 26 {
+        if let Ok(mut s) = TERMINAL_SEARCH.lock() {
+            s.clear();
+        }
+        return;
+    }
+    if !(30..=56).contains(&id) {
+        return;
+    }
+    // 1. If holding an item on cursor -> deposit straight into Silo/Chest network!
+    if let Some(cursor_stack) = carried.take() {
+        if let Some(rest) = insert_into_silo_controller(game, pos, cursor_stack) {
+            *carried = Some(rest);
+        }
+        game.native_block_entity_sync(pos);
+        return;
+    }
+    // 2. If cursor is empty -> withdraw up to 64 of clicked item straight onto cursor!
+    let state = load_state(entity).unwrap_or_else(|| MachineState::new(kind));
+    let search = get_terminal_search();
+    let (list, _, _) = filtered_silo_network(game, pos, state.auto_io, state.enabled, &search);
+    let page = state.quarry_cursor.max(0) as usize;
+    let slot_idx = (id - 30) as usize;
+    let Some((target_item, _, _)) = list.get(page * 27 + slot_idx) else {
+        return;
+    };
+    let (silos, chests) = collect_silo_network(game, pos);
+    let mut need = 64u32;
+    let mut taken = 0u32;
+    for &sp in &silos {
+        if need == 0 {
+            break;
+        }
+        let mut took = 0u32;
+        game.native_with_mod_block_entity(sp, |sent| {
+            if let Some(mut sst) = load_state(sent) {
+                if sst.belt_item == *target_item && sst.belt_count > 0 {
+                    took = sst.belt_count.min(need);
+                    sst.belt_count -= took;
+                    if sst.belt_count == 0 {
+                        sst.belt_item.clear();
+                    }
+                    store_state(sent, &sst);
+                }
+            }
+        });
+        if took > 0 {
+            game.native_block_entity_sync(sp);
+            need -= took;
+            taken += took;
+        }
+    }
+    for &cp in &chests {
+        if need == 0 {
+            break;
+        }
+        let mut took = 0u32;
+        if let Some(BlockEntity::Chest(slots)) = game.world.block_entities.get_mut(&(cp[0], cp[1], cp[2])) {
+            for slot in slots.iter_mut() {
+                if need == 0 {
+                    break;
+                }
+                if let Some(st) = slot.as_mut() {
+                    if st.item.as_ref() == target_item.as_str() {
+                        let amt = st.count.min(need);
+                        took += amt;
+                        need -= amt;
+                        if st.count > amt {
+                            st.count -= amt;
+                        } else {
+                            *slot = None;
+                        }
+                    }
+                }
+            }
+        }
+        taken += took;
+    }
+    if taken > 0 {
+        *carried = Some(ItemStack::new(target_item, taken));
+        game.native_block_entity_sync(pos);
     }
 }
 
@@ -5642,11 +5642,13 @@ pub(in crate::game) fn screen_draw(
         game.native_fill(batch, [x + 6.0, y + 6.0, 164.0, 56.0], 0xFF1E_1E1E);
         game.native_fill(batch, [x + 7.0, y + 7.0, 162.0, 54.0], 0xFF37_3737);
 
+        TERMINAL_OPEN.store(true, std::sync::atomic::Ordering::Relaxed);
         let sort_by_name = get(4) != 0;
         let ascending = get(5) != 0;
         let ctrl_pos = [get(7), get(8), get(9)];
         let page = get(6).max(0) as usize;
-        let (list, silos_n, chests_n) = sorted_silo_network(game, ctrl_pos, sort_by_name, ascending);
+        let search = get_terminal_search();
+        let (list, _silos_n, _chests_n) = filtered_silo_network(game, ctrl_pos, sort_by_name, ascending, &search);
         let total_pages = ((list.len().saturating_sub(1)) / 27) + 1;
         let cur_page = page.min(total_pages - 1);
 
@@ -5680,15 +5682,14 @@ pub(in crate::game) fn screen_draw(
         draw_button(game, batch, origin, [37.0, 64.0, 13.0, 13.0], "◀", 0xFF5A_5A5A);
         draw_button(game, batch, origin, [52.0, 64.0, 13.0, 13.0], "▶", 0xFF5A_5A5A);
 
-        // Dark search/status bar [68, 64, 101, 13]
-        game.native_fill(batch, [x + 68.0, y + 64.0, 101.0, 13.0], 0xFF14_1414);
-        game.native_text(
-            batch,
-            &format!("S:{silos_n} C:{chests_n}  P.{}/{total_pages}", cur_page + 1),
-            [x + 71.0, y + 66.5],
-            0xFF55_FFAA,
-            false,
-        );
+        // Dark search bar [68, 64, 88, 13] + [X] clear button [157, 64, 12, 13]
+        game.native_fill(batch, [x + 68.0, y + 64.0, 88.0, 13.0], 0xFF14_1414);
+        if search.is_empty() {
+            game.native_text(batch, "Buscar...", [x + 71.0, y + 66.5], 0xFF70_7888, false);
+        } else {
+            game.native_text(batch, &format!("{search}_"), [x + 71.0, y + 66.5], 0xFFFF_FFFF, false);
+        }
+        draw_button(game, batch, origin, [157.0, 64.0, 12.0, 13.0], "X", 0xFF5A_5A5A);
 
         // Lower 3x3 Visual Grid + Arrow + Deposit Slot
         for r in 0..3 {
@@ -6168,6 +6169,8 @@ pub(in crate::game) fn screen_click(
             *button = Some(20);
         } else if in_rect(at, [52.0, 64.0, 13.0, 13.0]) {
             *button = Some(21);
+        } else if in_rect(at, [157.0, 64.0, 12.0, 13.0]) {
+            *button = Some(26);
         } else {
             for row in 0..3 {
                 for col in 0..9 {
