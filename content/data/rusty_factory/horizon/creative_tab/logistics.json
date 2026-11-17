@@ -28,6 +28,8 @@
     "rusty_factory:silo_controller",
     "rusty_factory:silo_crafting_terminal",
     "rusty_factory:tesseract",
-    "rusty_factory:void_trash_can"
+    "rusty_factory:void_trash_can",
+    "rusty_factory:wireless_charger",
+    "rusty_factory:teleporter_pad"
   ]
 }

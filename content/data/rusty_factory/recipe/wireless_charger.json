@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "RER",
+    "BCB",
+    "SNS"
+  ],
+  "key": {
+    "R": "rusty_factory:cable_red",
+    "E": "minecraft:ender_pearl",
+    "B": "rusty_factory:energy_battery_mk2",
+    "C": "rusty_factory:charging_pad",
+    "S": "rusty_factory:steel_ingot",
+    "N": "minecraft:diamond"
+  },
+  "result": {
+    "id": "rusty_factory:wireless_charger",
+    "count": 1
+  }
+}

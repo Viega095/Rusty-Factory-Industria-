@@ -145,5 +145,7 @@
   "block.rusty_factory.hydroponic_chamber": "Hydroponic Chamber (Tier 2)",
   "block.rusty_factory.laser_turret": "Defense Laser Turret (Tier 3)",
   "item.rusty_factory.wireless_silo_tablet": "Wireless Silo Tablet",
-  "item.rusty_factory.quantum_backpack": "Quantum Dimensional Backpack"
+  "item.rusty_factory.quantum_backpack": "Quantum Dimensional Backpack",
+  "block.rusty_factory.wireless_charger": "Wireless Area Charger (Tier 3)",
+  "block.rusty_factory.teleporter_pad": "Quantum Teleporter Pad (Tier 3)"
 }

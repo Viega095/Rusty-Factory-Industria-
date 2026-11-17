@@ -154,6 +154,8 @@ pub const BLOCK_NUCLEAR_REACTOR: &str = "rusty_factory:nuclear_reactor";
 pub const BLOCK_WIND_TURBINE: &str = "rusty_factory:wind_turbine";
 pub const BLOCK_HYDROPONIC_CHAMBER: &str = "rusty_factory:hydroponic_chamber";
 pub const BLOCK_LASER_TURRET: &str = "rusty_factory:laser_turret";
+pub const BLOCK_WIRELESS_CHARGER: &str = "rusty_factory:wireless_charger";
+pub const BLOCK_TELEPORTER_PAD: &str = "rusty_factory:teleporter_pad";
 pub const BLOCK_RECYCLER: &str = "rusty_factory:recycler";
 
 // Item IDs (29 items)
@@ -377,6 +379,8 @@ pub enum MachineKind {
     WindTurbine,
     HydroponicChamber,
     LaserTurret,
+    WirelessCharger,
+    TeleporterPad,
     Recycler,
 }
 
@@ -421,6 +425,8 @@ impl MachineKind {
             BLOCK_WIND_TURBINE => Some(Self::WindTurbine),
             BLOCK_HYDROPONIC_CHAMBER => Some(Self::HydroponicChamber),
             BLOCK_LASER_TURRET => Some(Self::LaserTurret),
+            BLOCK_WIRELESS_CHARGER => Some(Self::WirelessCharger),
+            BLOCK_TELEPORTER_PAD => Some(Self::TeleporterPad),
             BLOCK_RECYCLER => Some(Self::Recycler),
             _ => None,
         }
@@ -463,6 +469,8 @@ impl MachineKind {
             | Self::WindTurbine
             | Self::HydroponicChamber
             | Self::LaserTurret
+            | Self::WirelessCharger
+            | Self::TeleporterPad
             | Self::Recycler => MachineTier::Tier2,
 
             Self::EnergyBank | Self::EnergyMonitor | Self::FluidTank | Self::IndustrialSilo => MachineTier::Storage,
@@ -506,6 +514,8 @@ impl MachineKind {
             Self::WindTurbine => 20_000,
             Self::HydroponicChamber => 8_000,
             Self::LaserTurret => 50_000,
+            Self::WirelessCharger => 100_000,
+            Self::TeleporterPad => 50_000,
             Self::Recycler => 4_000,
         }
     }
@@ -531,7 +541,9 @@ impl MachineKind {
             | Self::SiloController
             | Self::SiloCraftingTerminal
             | Self::NuclearReactor
-            | Self::WindTurbine => 1,
+            | Self::WindTurbine
+            | Self::WirelessCharger
+            | Self::TeleporterPad => 1,
             Self::LaserTurret => 15,
             Self::HydroponicChamber => 40,
             Self::Recycler => 20,
@@ -578,6 +590,8 @@ impl MachineKind {
             Self::WindTurbine => 60,
             Self::HydroponicChamber => 12,
             Self::LaserTurret => 40,
+            Self::WirelessCharger => 100,
+            Self::TeleporterPad => 1_000,
             Self::Recycler => 10,
             Self::UpgradeStation | Self::Tesseract | Self::IndustrialSilo | Self::SiloController | Self::SiloCraftingTerminal => 0,
         }
@@ -604,6 +618,8 @@ impl MachineKind {
                 | Self::Tesseract
                 | Self::HydroponicChamber
                 | Self::LaserTurret
+                | Self::WirelessCharger
+                | Self::TeleporterPad
                 | Self::Recycler
         )
     }
@@ -648,6 +664,8 @@ impl MachineKind {
             Self::WindTurbine => "block.rusty_factory.wind_turbine",
             Self::HydroponicChamber => "block.rusty_factory.hydroponic_chamber",
             Self::LaserTurret => "block.rusty_factory.laser_turret",
+            Self::WirelessCharger => "block.rusty_factory.wireless_charger",
+            Self::TeleporterPad => "block.rusty_factory.teleporter_pad",
             Self::Recycler => "block.rusty_factory.recycler",
         }
     }
@@ -679,7 +697,8 @@ impl MachineKind {
             Self::ItemPipe | Self::FluidPipe | Self::ItemSplitter | Self::EnergyMonitor | Self::EnergyRelay
             | Self::UpgradeStation | Self::GeothermalGenerator | Self::SteamTurbine | Self::Tesseract
             | Self::IndustrialSilo | Self::SiloController | Self::SiloCraftingTerminal | Self::NuclearReactor
-            | Self::WindTurbine | Self::HydroponicChamber | Self::LaserTurret | Self::Recycler => "rusty_factory:gui/machine",
+            | Self::WindTurbine | Self::HydroponicChamber | Self::LaserTurret
+            | Self::WirelessCharger | Self::TeleporterPad | Self::Recycler => "rusty_factory:gui/machine",
         }
     }
 }
@@ -1189,6 +1208,8 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
         | MachineKind::NuclearReactor
         | MachineKind::WindTurbine
         | MachineKind::LaserTurret
+        | MachineKind::WirelessCharger
+        | MachineKind::TeleporterPad
         | MachineKind::Recycler => None,
 
         MachineKind::HydroponicChamber => match input {
@@ -1574,6 +1595,8 @@ pub fn step_machine(
         | MachineKind::WindTurbine
         | MachineKind::HydroponicChamber
         | MachineKind::LaserTurret
+        | MachineKind::WirelessCharger
+        | MachineKind::TeleporterPad
         | MachineKind::Recycler => StepOutcome {
             status: StepStatus::Idle,
             consume_input: false,

@@ -2686,6 +2686,98 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         return;
     }
 
+    if kind == MachineKind::WirelessCharger {
+        let mut charged_any = false;
+        let pad_center = [pos[0] as f64 + 0.5, pos[1] as f64 + 0.5, pos[2] as f64 + 0.5];
+        let in_range = game.player.as_ref().is_some_and(|p| {
+            let d2 = (p.position.x - pad_center[0]).powi(2)
+                + (p.position.y - pad_center[1]).powi(2)
+                + (p.position.z - pad_center[2]).powi(2);
+            d2 <= 32.0 * 32.0
+        });
+        if state.enabled && in_range && state.energy >= 20 {
+            for slot in game.armor.iter_mut().chain(game.inventory.iter_mut()).chain(std::iter::once(&mut game.offhand)) {
+                if state.energy < 20 {
+                    break;
+                }
+                if let Some(st) = slot.as_mut() {
+                    if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
+                        let cur = get_item_energy(st);
+                        if cur < cap {
+                            let add = 250.min(cap - cur).min(state.energy);
+                            if add > 0 {
+                                set_item_energy(st, cur + add);
+                                state.energy -= add;
+                                charged_any = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        update_lit_state(game, pos, charged_any);
+        entity.data = vec![
+            if charged_any { StepStatus::Working as i32 } else if state.energy < 20 { StepStatus::NoPower as i32 } else { StepStatus::Idle as i32 },
+            state.energy,
+            kind.max_energy(),
+            if charged_any { 100 } else { 0 },
+            if charged_any { -250 } else { 0 },
+            i32::from(state.enabled),
+            0, 0, 0, 0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
+    if kind == MachineKind::TeleporterPad {
+        if state.progress > 0 {
+            state.progress -= 1;
+        }
+        let mut peers: Vec<[i32; 3]> = Vec::new();
+        for (&(px, py, pz), be) in &game.world.block_entities {
+            if let BlockEntity::Mod(ent) = be {
+                if ent.id == rules::BLOCK_TELEPORTER_PAD && [px, py, pz] != pos {
+                    peers.push([px, py, pz]);
+                }
+            }
+        }
+        peers.sort();
+        if state.progress == 0 && state.enabled && !peers.is_empty() && state.energy >= 1_000 {
+            let standing_crouching = game.player.as_ref().is_some_and(|p| {
+                p.pose == horizon_client::pose::Pose::Crouching
+                    && (p.position.x - (pos[0] as f64 + 0.5)).abs() <= 0.85
+                    && (p.position.z - (pos[2] as f64 + 0.5)).abs() <= 0.85
+                    && (p.position.y - pos[1] as f64) >= 0.0
+                    && (p.position.y - pos[1] as f64) <= 1.6
+            });
+            if standing_crouching {
+                let dest = peers[0];
+                state.energy -= 1_000;
+                state.progress = 40;
+                game.native_run_command(&format!("tp @s {}.5 {} {}.5", dest[0], dest[1] + 1, dest[2]));
+                game.native_run_command("playsound minecraft:entity.enderman.teleport player @s ~ ~ ~ 1.0 1.1");
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(
+                        who.uuid,
+                        Text::literal(format!("🌀 [Teletransporte] Destino [{}, {}, {}] (-1,000 FE)", dest[0], dest[1], dest[2])),
+                    );
+                }
+            }
+        }
+        update_lit_state(game, pos, !peers.is_empty() && state.energy >= 1_000);
+        entity.data = vec![
+            if !peers.is_empty() && state.energy >= 1_000 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
+            state.energy,
+            kind.max_energy(),
+            if state.progress > 0 { (state.progress * 100 / 40).clamp(0, 100) } else { 100 },
+            peers.len() as i32,
+            i32::from(state.enabled),
+            0, 0, 0, 0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
     if kind == MachineKind::Tesseract {
         // 1. Wireless cross-world energy sharing with other Tesseracts
         let mut peers: Vec<[i32; 3]> = Vec::new();
@@ -4402,35 +4494,61 @@ pub(in crate::game) fn use_item(game: &mut Game<'_>, stack: &ItemStack, claimed:
         return;
     }
 
-    if let Some((tier, range, cost)) = rules::laser_tier(held_id) {
+    if let Some((tier, range, base_cost)) = rules::laser_tier(held_id) {
         *claimed = true;
+        let eff_mod = has_item_module(stack, "eff");
+        let smelt_mod = tier >= 3 || has_item_module(stack, "smelt");
+        let fortune_mod = has_item_module(stack, "fortune");
+        let cost = if eff_mod { (base_cost / 2).max(5) } else { base_cost };
         if !game.creative && !consume_player_energy(game, cost) {
             if let Some(who) = game.native_acting_player() {
                 game.native_action_bar(who.uuid, Text::literal("⚠ [Láser] Sin energía"));
             }
             return;
         }
-        if let Some(who) = game.native_acting_player() {
-            let yaw = who.yaw.to_radians() as f64;
-            let pitch = who.pitch.to_radians() as f64;
-            let dx = -yaw.sin() * pitch.cos();
-            let dy = -pitch.sin();
-            let dz = yaw.cos() * pitch.cos();
-            let [px, py, pz] = who.position;
-            for step in 1..=range {
-                let bx = (px + dx * step as f64).floor() as i32;
-                let by = (py + 1.5 + dy * step as f64).floor() as i32;
-                let bz = (pz + dz * step as f64).floor() as i32;
-                let b = game.native_block([bx, by, bz]);
-                if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
-                    game.native_run_command(&format!("setblock {bx} {by} {bz} minecraft:air destroy"));
+        let dim = game.native_dimension();
+        if let Some(air_state) = game.native_default_state("minecraft:air") {
+            if let Some(who) = game.native_acting_player() {
+                let yaw = who.yaw.to_radians() as f64;
+                let pitch = who.pitch.to_radians() as f64;
+                let dx = -yaw.sin() * pitch.cos();
+                let dy = -pitch.sin();
+                let dz = yaw.cos() * pitch.cos();
+                let [px, py, pz] = who.position;
+                let uid = who.uuid;
+                for step in 1..=range {
+                    let bx = (px + dx * step as f64).floor() as i32;
+                    let by = (py + 1.5 + dy * step as f64).floor() as i32;
+                    let bz = (pz + dz * step as f64).floor() as i32;
+                    let p = [bx, by, bz];
+                    let b = game.native_block(p);
+                    if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
+                        game.native_set_block(dim, p, air_state, 3);
+                        if !game.creative {
+                            if let Some((drop_id, base_cnt)) = rules::quarry_drop_for_block(&b) {
+                                let final_id = if smelt_mod {
+                                    match drop_id {
+                                        "minecraft:raw_iron" => "minecraft:iron_ingot",
+                                        "minecraft:raw_copper" => "minecraft:copper_ingot",
+                                        "minecraft:raw_gold" => "minecraft:gold_ingot",
+                                        "minecraft:cobblestone" => "minecraft:stone",
+                                        _ => drop_id,
+                                    }
+                                } else {
+                                    drop_id
+                                };
+                                let cnt = if fortune_mod { base_cnt + 1 } else { base_cnt };
+                                game.pop_resource(p, ItemStack::new(final_id, cnt));
+                            }
+                        }
+                    }
                 }
+                game.native_run_command("playsound minecraft:entity.guardian.attack player @s ~ ~ ~ 1.2 1.6");
+                game.native_action_bar(
+                    uid,
+                    Text::literal(format!("⚡ [Láser Minero MK{tier}] Haz de {range} bloques disparado (-{cost} FE)")),
+                );
             }
-            game.native_run_command("playsound minecraft:entity.guardian.attack player @s ~ ~ ~ 1.2 1.6");
-            game.native_action_bar(
-                who.uuid,
-                Text::literal(format!("⚡ [Láser Minero MK{tier}] Haz de {range} bloques disparado (-{cost} FE)")),
-            );
         }
         return;
     }
@@ -5417,8 +5535,12 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
         }
 
         // 7. Mining Laser (MK1-MK3): High-energy straight plasma beam mining along look direction
-        if let Some((tier, range, cost)) = rules::laser_tier(held_id) {
+        if let Some((tier, range, base_cost)) = rules::laser_tier(held_id) {
             *canceled = true;
+            let eff_mod = game.held().is_some_and(|h| has_item_module(h, "eff"));
+            let smelt_mod = tier >= 3 || game.held().is_some_and(|h| has_item_module(h, "smelt"));
+            let fortune_mod = game.held().is_some_and(|h| has_item_module(h, "fortune"));
+            let cost = if eff_mod { (base_cost / 2).max(5) } else { base_cost };
             if !game.creative && !consume_player_energy(game, cost) {
                 if let Some(who) = game.native_acting_player() {
                     game.native_action_bar(who.uuid, Text::literal("⚠ [Láser] Sin energía"));
@@ -5428,11 +5550,31 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
             game.native_run_command("playsound minecraft:entity.guardian.attack player @s ~ ~ ~ 1.2 1.6");
             let [cx, cy, cz] = pos;
             let dir = [-face[0], -face[1], -face[2]];
-            for dist in 0..range {
-                let p = [cx + dir[0] * dist, cy + dir[1] * dist, cz + dir[2] * dist];
-                let b = game.native_block(p);
-                if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
-                    game.native_run_command(&format!("setblock {} {} {} minecraft:air destroy", p[0], p[1], p[2]));
+            let dim = game.native_dimension();
+            if let Some(air_state) = game.native_default_state("minecraft:air") {
+                for dist in 0..range {
+                    let p = [cx + dir[0] * dist, cy + dir[1] * dist, cz + dir[2] * dist];
+                    let b = game.native_block(p);
+                    if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
+                        game.native_set_block(dim, p, air_state, 3);
+                        if !game.creative {
+                            if let Some((drop_id, base_cnt)) = rules::quarry_drop_for_block(&b) {
+                                let final_id = if smelt_mod {
+                                    match drop_id {
+                                        "minecraft:raw_iron" => "minecraft:iron_ingot",
+                                        "minecraft:raw_copper" => "minecraft:copper_ingot",
+                                        "minecraft:raw_gold" => "minecraft:gold_ingot",
+                                        "minecraft:cobblestone" => "minecraft:stone",
+                                        _ => drop_id,
+                                    }
+                                } else {
+                                    drop_id
+                                };
+                                let cnt = if fortune_mod { base_cnt + 1 } else { base_cnt };
+                                game.pop_resource(p, ItemStack::new(final_id, cnt));
+                            }
+                        }
+                    }
                 }
             }
             game.native_run_command(&format!("particle minecraft:sonic_boom {} {} {} 0 0 0 0 1", cx, cy, cz));
@@ -6431,6 +6573,16 @@ pub(in crate::game) fn screen_draw(
         let line2 = format!("Torreta Láser: {progress_pct}% (10 daño)");
         game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFFF8_7171, false);
         game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFFCA5A5, false);
+    } else if kind == MachineKind::WirelessCharger {
+        let line1 = format!("FE: {energy}/{max_energy} | Radio: 32 blq");
+        let line2 = "Carga inalámbrica de inventario y armadura".to_string();
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF38_F2FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF88_E5FF, false);
+    } else if kind == MachineKind::TeleporterPad {
+        let line1 = format!("FE: {energy}/{max_energy} | Enlaces: {rate}");
+        let line2 = "Agachate encima para teletransportarte (-1,000 FE)".to_string();
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF2D_D4BF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFC0_84FC, false);
     } else if kind == MachineKind::Recycler {
         let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
         let line2 = format!("Reciclaje de Chatarra: {progress_pct}%");
@@ -7180,6 +7332,8 @@ pub(in crate::game) fn tooltip(
         rules::BLOCK_WIND_TURBINE => &["§eTurbina Eólica (Tier 2): genera más FE cuanto más alto se coloca (hasta +120 FE/t)."],
         rules::BLOCK_HYDROPONIC_CHAMBER => &["§aCámara Hidropónica (Tier 2): cultiva semillas y caucho en 1 bloque con FE."],
         rules::BLOCK_LASER_TURRET => &["§cTorreta Láser Defensiva (Tier 3): ataca mobs cercanos en 16 blq (10 daño)."],
+        rules::BLOCK_WIRELESS_CHARGER => &["§bCargador Inalámbrico de Área (Tier 3): recarga tu equipo en 32 blq."],
+        rules::BLOCK_TELEPORTER_PAD => &["§dPlataforma Teletransportadora (Tier 3): agachate encima para viajar a otro pad."],
         rules::ITEM_WIRELESS_SILO_TABLET => &[
             "§bControl Remoto de Silos: vincula con Shift+Clic en un Controlador.",
             "§7• Clic: ver stock o enviar mano secundaria | Shift+Clic: retirar top x64",

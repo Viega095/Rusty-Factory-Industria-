@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "PEP",
+    "DCD",
+    "NRN"
+  ],
+  "key": {
+    "P": "minecraft:ender_pearl",
+    "E": "rusty_factory:electronic_circuit",
+    "D": "minecraft:diamond",
+    "C": "rusty_factory:machine_casing",
+    "N": "minecraft:netherite_ingot",
+    "R": "rusty_factory:cable_red"
+  },
+  "result": {
+    "id": "rusty_factory:teleporter_pad",
+    "count": 2
+  }
+}
