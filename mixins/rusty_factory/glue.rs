@@ -2369,31 +2369,47 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     }
 
     if kind == MachineKind::SiloCraftingTerminal {
-        // Handle clear-grid-to-silo (button 24 -> burn_ticks == 24) or craft (button 25 -> burn_ticks == 25)
-        if state.burn_left == 24 {
-            state.burn_left = 0;
-            for i in 0..9 {
-                if let Some(st) = entity.items.get_mut(i).and_then(|s| s.take()) {
-                    if let Some(rest) = insert_into_silo_controller(game, pos, st) {
-                        entity.items[i] = Some(rest);
+        if entity.items.len() < 10 {
+            entity.items.resize(10, None);
+        }
+        // Automatic crafting table behavior:
+        // state.progress == 1 means `slot 9` currently holds an unconsumed crafting preview.
+        let matched = match_terminal_craft(&entity.items[0..9]);
+        if state.progress == 1 {
+            if entity.items[9].is_none() {
+                // Player took the crafted item! Consume 1 ingredient from each non-empty slot in 0..=8.
+                for i in 0..9 {
+                    if let Some(s) = entity.items[i].as_mut() {
+                        if s.count <= 1 {
+                            entity.items[i] = None;
+                        } else {
+                            s.count -= 1;
+                        }
+                    }
+                }
+                state.progress = 0;
+            } else {
+                // Update or clear preview if grid changed
+                match matched {
+                    Some((out_id, out_cnt)) => {
+                        let same = entity.items[9]
+                            .as_ref()
+                            .is_some_and(|s| s.item.as_ref() == out_id && s.count == out_cnt);
+                        if !same {
+                            entity.items[9] = Some(ItemStack::new(out_id, out_cnt));
+                        }
+                    }
+                    None => {
+                        entity.items[9] = None;
+                        state.progress = 0;
                     }
                 }
             }
-        } else if state.burn_left == 25 {
-            state.burn_left = 0;
-            if entity.items.len() >= 10 && entity.items[9].is_none() {
-                if let Some((out_id, out_cnt)) = match_terminal_craft(&entity.items[0..9]) {
-                    for i in 0..9 {
-                        if let Some(s) = entity.items[i].as_mut() {
-                            if s.count <= 1 {
-                                entity.items[i] = None;
-                            } else {
-                                s.count -= 1;
-                            }
-                        }
-                    }
-                    entity.items[9] = Some(ItemStack::new(out_id, out_cnt));
-                }
+        }
+        if state.progress == 0 && entity.items[9].is_none() {
+            if let Some((out_id, out_cnt)) = match_terminal_craft(&entity.items[0..9]) {
+                entity.items[9] = Some(ItemStack::new(out_id, out_cnt));
+                state.progress = 1;
             }
         }
         let (list, silos_n, chests_n) = sorted_silo_network(game, pos, state.auto_io, state.enabled);
@@ -2406,10 +2422,14 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             let slot_idx = (state.quarry_y_offset - 1) as usize;
             state.quarry_y_offset = 0;
             if let Some((target_item, _, _)) = list.get(page * 27 + slot_idx) {
-                let out_room = match entity.items.get(9).and_then(|s| s.as_ref()) {
-                    None => 64u32,
-                    Some(cur) if cur.item.as_ref() == target_item.as_str() => 64u32.saturating_sub(cur.count),
-                    Some(_) => 0u32,
+                let out_room = if state.progress == 1 {
+                    0u32
+                } else {
+                    match entity.items.get(9).and_then(|s| s.as_ref()) {
+                        None => 64u32,
+                        Some(cur) if cur.item.as_ref() == target_item.as_str() => 64u32.saturating_sub(cur.count),
+                        Some(_) => 0u32,
+                    }
                 };
                 if out_room == 0 {
                     // Output slot occupied by another item; do not consume from silo
@@ -3272,43 +3292,6 @@ pub(in crate::game) fn submit(
     }
 
     if rules::is_item_pipe(block) {
-        let Some(st) = load_state(entity) else {
-            return;
-        };
-        if st.belt_item.is_empty() {
-            return;
-        }
-        let t = ((st.progress as f32 + if st.progress < 10 { draw.partial } else { 0.0 }) / 10.0).clamp(0.0, 1.0);
-        let from_off = rules::offset_from_dir_index(st.pipe_from);
-        let to_off = rules::offset_from_dir_index(st.pipe_to);
-        let (ix, iy, iz) = if t < 0.5 {
-            let u = t * 2.0;
-            (
-                0.5 + from_off[0] as f32 * 0.5 * (1.0 - u),
-                0.5 + from_off[1] as f32 * 0.5 * (1.0 - u),
-                0.5 + from_off[2] as f32 * 0.5 * (1.0 - u),
-            )
-        } else {
-            let u = (t - 0.5) * 2.0;
-            (
-                0.5 + to_off[0] as f32 * 0.5 * u,
-                0.5 + to_off[1] as f32 * 0.5 * u,
-                0.5 + to_off[2] as f32 * 0.5 * u,
-            )
-        };
-        let stack = ItemStack::new(&st.belt_item, 1);
-        draw.push();
-        draw.translate([ix, iy, iz]);
-        draw.rotate_about([0.0, 1.0, 0.0], (draw.game_time as f32 + draw.partial) * 4.0, [0.0, 0.0, 0.0]);
-        draw.scale([0.30, 0.30, 0.30]);
-        let _ = game.native_draw_item(
-            draw,
-            &stack,
-            DisplayContext::Fixed,
-            None,
-            pos[0].wrapping_mul(31) ^ pos[2],
-        );
-        draw.pop();
         return;
     }
 
@@ -4051,14 +4034,15 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     let Some((_, rad_half, base_cost)) = rules::drill_tier(&held_id) else {
         return;
     };
-    if !is_drill_3x3(held) {
-        return;
-    }
     let eff_mod = has_item_module(held, "eff");
     let smelt_mod = has_item_module(held, "smelt");
     let fortune_mod = has_item_module(held, "fortune");
+    let drill_area = is_drill_3x3(held);
     let cost = if eff_mod { (base_cost / 2).max(5) } else { base_cost };
     if !game.creative && !consume_player_energy(game, cost) {
+        return;
+    }
+    if !drill_area {
         return;
     }
     let (u_axes, v_axes): ([i32; 3], [i32; 3]) = if let Some(who) = game.native_acting_player() {
@@ -4081,7 +4065,7 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     };
     DRILL_BREAKING.store(true, std::sync::atomic::Ordering::Relaxed);
     let [cx, cy, cz] = pos;
-    for u in -rad_half..=rad_half {
+    'outer: for u in -rad_half..=rad_half {
         for v in -rad_half..=rad_half {
             if u == 0 && v == 0 {
                 continue;
@@ -4093,6 +4077,9 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
             ];
             let b = game.native_block(p);
             if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
+                if !game.creative && !consume_player_energy(game, cost) {
+                    break 'outer;
+                }
                 game.native_set_block(dim, p, air_state, 3);
                 if !game.creative {
                     if let Some((drop_id, base_cnt)) = rules::quarry_drop_for_block(&b) {
@@ -5006,8 +4993,8 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
             return;
         }
 
-        // 3. Mining Drill (MK1 3x3, MK2 3x3, MK3 5x5): Crouch toggles area/1x1; Click excavates using FE
-        if let Some((tier, rad_half, base_cost)) = rules::drill_tier(held_id) {
+        // 3. Mining Drill (MK1 3x3, MK2 3x3, MK3 5x5): Crouch + Right-Click toggles area/1x1 (Left-Click mines)
+        if let Some((tier, rad_half, _)) = rules::drill_tier(held_id) {
             let area_label = if rad_half >= 2 { "5x5" } else { "3x3" };
             if is_crouching {
                 *canceled = true;
@@ -5023,52 +5010,6 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                         format!("⚡ [Taladro MK{tier}] Modo: 1x1 Precisión")
                     };
                     game.native_action_bar(who.uuid, Text::literal(msg));
-                }
-                return;
-            } else if game.held().is_some_and(is_drill_3x3) {
-                *canceled = true;
-                let eff_mod = game.held().is_some_and(|h| has_item_module(h, "eff"));
-                let cost = if eff_mod { (base_cost / 2).max(5) } else { base_cost };
-                if !game.creative && !consume_player_energy(game, cost) {
-                    if let Some(who) = game.native_acting_player() {
-                        game.native_action_bar(
-                            who.uuid,
-                            Text::literal("⚠ [Taladro] Sin energía (recarga o lleva una Batería en el inventario)"),
-                        );
-                    }
-                    return;
-                }
-                let [cx, cy, cz] = pos;
-                let (u_axes, v_axes): ([i32; 3], [i32; 3]) = if face[1] != 0 {
-                    ([1, 0, 0], [0, 0, 1])
-                } else if face[2] != 0 {
-                    ([1, 0, 0], [0, 1, 0])
-                } else {
-                    ([0, 0, 1], [0, 1, 0])
-                };
-                let dim = game.native_dimension();
-                if let Some(air_state) = game.native_default_state("minecraft:air") {
-                    for u in -rad_half..=rad_half {
-                        for v in -rad_half..=rad_half {
-                            let p = [
-                                cx + u_axes[0] * u + v_axes[0] * v,
-                                cy + u_axes[1] * u + v_axes[1] * v,
-                                cz + u_axes[2] * u + v_axes[2] * v,
-                            ];
-                            let b = game.native_block(p);
-                            if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
-                                game.native_set_block(dim, p, air_state, 3);
-                                if !game.creative {
-                                    if let Some((drop_id, cnt)) = rules::quarry_drop_for_block(&b) {
-                                        game.pop_resource(p, ItemStack::new(drop_id, cnt));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal(format!("⚡ [Taladro MK{tier}] {area_label} Excavado (-{cost} FE)")));
                 }
                 return;
             }
@@ -5555,12 +5496,6 @@ pub(in crate::game) fn menu_button(entity: &mut ModBlockEntity, id: i32) {
             23 if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) => {
                 state.auto_io = !state.auto_io;
             }
-            24 if kind == MachineKind::SiloCraftingTerminal => {
-                state.burn_left = 24;
-            }
-            25 if kind == MachineKind::SiloCraftingTerminal => {
-                state.burn_left = 25;
-            }
             30..=56 if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) => {
                 state.quarry_y_offset = 1 + (id - 30);
             }
@@ -5766,8 +5701,6 @@ pub(in crate::game) fn screen_draw(
         }
         game.native_text(batch, "→", [x + 88.0, y + 104.0], 0xFF55_5555, false);
         if kind == MachineKind::SiloCraftingTerminal {
-            draw_button(game, batch, origin, [73.0, 82.0, 10.0, 10.0], "x", 0xFF7A_3030);
-            draw_button(game, batch, origin, [82.0, 118.0, 34.0, 12.0], "Craft", 0xFF2B_8A3E);
             game.native_text(batch, "Salida", [x + 126.0, y + 88.0], 0xFF3A_3A3A, false);
             game.native_fill(batch, [x + 133.0, y + 99.0, 18.0, 18.0], 0xFF37_3737);
             game.native_fill(batch, [x + 134.0, y + 100.0, 17.0, 17.0], 0xFF8B_8B8B);
@@ -6235,10 +6168,6 @@ pub(in crate::game) fn screen_click(
             *button = Some(20);
         } else if in_rect(at, [52.0, 64.0, 13.0, 13.0]) {
             *button = Some(21);
-        } else if kind == MachineKind::SiloCraftingTerminal && in_rect(at, [73.0, 82.0, 10.0, 10.0]) {
-            *button = Some(24);
-        } else if kind == MachineKind::SiloCraftingTerminal && in_rect(at, [82.0, 118.0, 34.0, 12.0]) {
-            *button = Some(25);
         } else {
             for row in 0..3 {
                 for col in 0..9 {
