@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "CCC",
+    "COC",
+    "CCC"
+  ],
+  "key": {
+    "C": "minecraft:coal_block",
+    "O": "minecraft:obsidian"
+  },
+  "result": {
+    "id": "minecraft:diamond",
+    "count": 1
+  }
+}

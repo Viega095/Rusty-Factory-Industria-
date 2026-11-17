@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "NBN",
+    "EGE",
+    "DRD"
+  ],
+  "key": {
+    "N": "minecraft:netherite_ingot",
+    "B": "rusty_factory:energy_battery_mk2",
+    "E": "rusty_factory:electronic_circuit",
+    "G": "rusty_factory:geothermal_generator",
+    "D": "minecraft:diamond_block",
+    "R": "rusty_factory:cable_red"
+  },
+  "result": {
+    "id": "rusty_factory:nuclear_reactor",
+    "count": 1
+  }
+}

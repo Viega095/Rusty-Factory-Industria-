@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "DOD",
+    "GBG",
+    "DOD"
+  ],
+  "key": {
+    "D": "minecraft:diamond",
+    "O": "minecraft:obsidian",
+    "G": "minecraft:gold_ingot",
+    "B": "minecraft:blaze_powder"
+  },
+  "result": {
+    "id": "rusty_factory:netherite_seed_core",
+    "count": 1
+  }
+}

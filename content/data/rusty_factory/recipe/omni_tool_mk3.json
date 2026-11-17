@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "DCO",
+    " N ",
+    " R "
+  ],
+  "key": {
+    "D": "rusty_factory:mining_drill_mk3",
+    "C": "rusty_factory:electric_chainsaw_mk3",
+    "O": "rusty_factory:omni_tool_mk2",
+    "N": "minecraft:netherite_ingot",
+    "R": "rusty_factory:battery_pack"
+  },
+  "result": {
+    "id": "rusty_factory:omni_tool_mk3",
+    "count": 1
+  }
+}

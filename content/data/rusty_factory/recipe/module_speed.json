@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "RSR",
+    "ECE",
+    "RSR"
+  ],
+  "key": {
+    "R": "minecraft:redstone",
+    "S": "rusty_factory:speed_upgrade",
+    "E": "rusty_factory:electronic_circuit",
+    "C": "rusty_factory:cable_gold"
+  },
+  "result": {
+    "id": "rusty_factory:module_speed",
+    "count": 1
+  }
+}

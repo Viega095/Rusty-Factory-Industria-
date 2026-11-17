@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "GOG",
+    "ECE",
+    "GOG"
+  ],
+  "key": {
+    "G": "minecraft:ghast_tear",
+    "O": "minecraft:obsidian",
+    "E": "rusty_factory:electronic_circuit",
+    "C": "minecraft:emerald"
+  },
+  "result": {
+    "id": "rusty_factory:module_silk_touch",
+    "count": 1
+  }
+}

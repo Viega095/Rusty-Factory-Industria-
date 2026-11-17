@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "RLR",
+    "NLN",
+    " B "
+  ],
+  "key": {
+    "R": "rusty_factory:cable_red",
+    "L": "rusty_factory:mining_laser_mk2",
+    "N": "minecraft:netherite_ingot",
+    "B": "rusty_factory:energy_battery_mk2"
+  },
+  "result": {
+    "id": "rusty_factory:mining_laser_mk3",
+    "count": 1
+  }
+}

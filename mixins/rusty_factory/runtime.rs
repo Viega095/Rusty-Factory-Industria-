@@ -149,6 +149,8 @@ pub const BLOCK_STEAM_TURBINE: &str = "rusty_factory:steam_turbine";
 pub const BLOCK_TESSERACT: &str = "rusty_factory:tesseract";
 pub const BLOCK_INDUSTRIAL_SILO: &str = "rusty_factory:industrial_silo";
 pub const BLOCK_SILO_CONTROLLER: &str = "rusty_factory:silo_controller";
+pub const BLOCK_SILO_CRAFTING_TERMINAL: &str = "rusty_factory:silo_crafting_terminal";
+pub const BLOCK_NUCLEAR_REACTOR: &str = "rusty_factory:nuclear_reactor";
 pub const BLOCK_RECYCLER: &str = "rusty_factory:recycler";
 
 // Item IDs (29 items)
@@ -197,17 +199,79 @@ pub const ITEM_QUANTUM_HELMET: &str = "rusty_factory:quantum_helmet";
 pub const ITEM_QUANTUM_CHESTPLATE: &str = "rusty_factory:quantum_chestplate";
 pub const ITEM_QUANTUM_LEGGINGS: &str = "rusty_factory:quantum_leggings";
 pub const ITEM_QUANTUM_BOOTS: &str = "rusty_factory:quantum_boots";
+pub const ITEM_CHAINSAW_MK2: &str = "rusty_factory:electric_chainsaw_mk2";
+pub const ITEM_CHAINSAW_MK3: &str = "rusty_factory:electric_chainsaw_mk3";
+pub const ITEM_MINING_LASER_MK2: &str = "rusty_factory:mining_laser_mk2";
+pub const ITEM_MINING_LASER_MK3: &str = "rusty_factory:mining_laser_mk3";
+pub const ITEM_PLASMA_SWORD_MK1: &str = "rusty_factory:plasma_sword_mk1";
+pub const ITEM_PLASMA_SWORD_MK2: &str = "rusty_factory:plasma_sword_mk2";
+pub const ITEM_PLASMA_SWORD_MK3: &str = "rusty_factory:plasma_sword_mk3";
+pub const ITEM_OMNI_TOOL_MK2: &str = "rusty_factory:omni_tool_mk2";
+pub const ITEM_OMNI_TOOL_MK3: &str = "rusty_factory:omni_tool_mk3";
+pub const ITEM_ITEM_MAGNET_MK2: &str = "rusty_factory:item_magnet_mk2";
+pub const ITEM_ITEM_MAGNET_MK3: &str = "rusty_factory:item_magnet_mk3";
+pub const ITEM_QUANTUM_BATTERY: &str = "rusty_factory:quantum_battery";
+pub const ITEM_MODULE_AUTO_SMELT: &str = "rusty_factory:module_auto_smelt";
+pub const ITEM_MODULE_FORTUNE: &str = "rusty_factory:module_fortune";
+pub const ITEM_MODULE_SILK_TOUCH: &str = "rusty_factory:module_silk_touch";
+pub const ITEM_MODULE_SPEED: &str = "rusty_factory:module_speed";
+pub const ITEM_NETHERITE_SEED_CORE: &str = "rusty_factory:netherite_seed_core";
 
 pub fn is_battery_item(item: &str) -> bool {
-    matches!(item, ITEM_BATTERY | ITEM_BATTERY_MK2 | ITEM_BATTERY_PACK)
+    matches!(
+        item,
+        ITEM_BATTERY | ITEM_BATTERY_MK2 | ITEM_BATTERY_PACK | ITEM_QUANTUM_BATTERY
+    )
 }
 
-/// Returns `(tier, radius_half, fe_cost)` for Mining Drills.
+/// Returns `(tier, radius_half, fe_cost)` for Mining Drills & Omni-Tools.
 pub fn drill_tier(item: &str) -> Option<(u8, i32, i32)> {
     match item {
         ITEM_MINING_DRILL => Some((1, 1, 45)),
         ITEM_MINING_DRILL_MK2 => Some((2, 1, 25)),
         ITEM_MINING_DRILL_MK3 => Some((3, 2, 15)),
+        ITEM_OMNI_TOOL_MK2 => Some((2, 1, 20)),
+        ITEM_OMNI_TOOL_MK3 => Some((3, 2, 10)),
+        _ => None,
+    }
+}
+
+/// Returns `(tier, max_logs, fe_cost)` for Chainsaws & Omni-Tools.
+pub fn chainsaw_tier(item: &str) -> Option<(u8, usize, i32)> {
+    match item {
+        ITEM_CHAINSAW => Some((1, 64, 30)),
+        ITEM_CHAINSAW_MK2 | ITEM_OMNI_TOOL_MK2 => Some((2, 128, 20)),
+        ITEM_CHAINSAW_MK3 | ITEM_OMNI_TOOL_MK3 => Some((3, 256, 10)),
+        _ => None,
+    }
+}
+
+/// Returns `(tier, range, fe_cost)` for Mining Lasers.
+pub fn laser_tier(item: &str) -> Option<(u8, i32, i32)> {
+    match item {
+        ITEM_MINING_LASER => Some((1, 4, 40)),
+        ITEM_MINING_LASER_MK2 => Some((2, 8, 30)),
+        ITEM_MINING_LASER_MK3 => Some((3, 16, 20)),
+        _ => None,
+    }
+}
+
+/// Returns `(tier, radius, fe_cost)` for Item Magnets.
+pub fn magnet_tier(item: &str) -> Option<(u8, i32, i32)> {
+    match item {
+        ITEM_ITEM_MAGNET => Some((1, 12, 10)),
+        ITEM_ITEM_MAGNET_MK2 => Some((2, 24, 5)),
+        ITEM_ITEM_MAGNET_MK3 => Some((3, 40, 2)),
+        _ => None,
+    }
+}
+
+/// Returns `(tier, bonus_damage, fe_cost)` for Plasma Swords.
+pub fn sword_tier(item: &str) -> Option<(u8, i32, i32)> {
+    match item {
+        ITEM_PLASMA_SWORD_MK1 => Some((1, 9, 20)),
+        ITEM_PLASMA_SWORD_MK2 => Some((2, 12, 15)),
+        ITEM_PLASMA_SWORD_MK3 => Some((3, 16, 10)),
         _ => None,
     }
 }
@@ -227,12 +291,15 @@ pub fn battery_capacity(item: &str) -> Option<i32> {
         ITEM_BATTERY => Some(50_000),
         ITEM_BATTERY_MK2 => Some(250_000),
         ITEM_BATTERY_PACK => Some(1_000_000),
-        ITEM_MINING_DRILL_MK2 => Some(100_000),
-        ITEM_MINING_DRILL_MK3 => Some(250_000),
+        ITEM_QUANTUM_BATTERY => Some(5_000_000),
+        ITEM_MINING_DRILL_MK2 | ITEM_CHAINSAW_MK2 | ITEM_MINING_LASER_MK2 | ITEM_PLASMA_SWORD_MK2 | ITEM_ITEM_MAGNET_MK2 => Some(150_000),
+        ITEM_OMNI_TOOL_MK2 => Some(300_000),
+        ITEM_MINING_DRILL_MK3 | ITEM_CHAINSAW_MK3 | ITEM_MINING_LASER_MK3 | ITEM_PLASMA_SWORD_MK3 | ITEM_ITEM_MAGNET_MK3 => Some(500_000),
+        ITEM_OMNI_TOOL_MK3 => Some(1_000_000),
         ITEM_JETPACK_MK2 => Some(500_000),
         ITEM_STEEL_HELMET | ITEM_STEEL_CHESTPLATE | ITEM_STEEL_LEGGINGS | ITEM_STEEL_BOOTS => Some(25_000),
         ITEM_QUANTUM_HELMET | ITEM_QUANTUM_CHESTPLATE | ITEM_QUANTUM_LEGGINGS | ITEM_QUANTUM_BOOTS => Some(250_000),
-        ITEM_MINING_DRILL | ITEM_MINING_LASER | ITEM_CHAINSAW | ITEM_JETPACK | ITEM_JET_BOOTS
+        ITEM_MINING_DRILL | ITEM_MINING_LASER | ITEM_CHAINSAW | ITEM_PLASMA_SWORD_MK1 | ITEM_JETPACK | ITEM_JET_BOOTS
         | ITEM_SOLAR_HELMET | ITEM_INDUSTRIAL_HELMET | ITEM_INDUSTRIAL_CHESTPLATE
         | ITEM_INDUSTRIAL_LEGGINGS | ITEM_INDUSTRIAL_BOOTS => Some(50_000),
         _ => None,
@@ -300,6 +367,8 @@ pub enum MachineKind {
     Tesseract,
     IndustrialSilo,
     SiloController,
+    SiloCraftingTerminal,
+    NuclearReactor,
     Recycler,
 }
 
@@ -339,6 +408,8 @@ impl MachineKind {
             BLOCK_TESSERACT => Some(Self::Tesseract),
             BLOCK_INDUSTRIAL_SILO => Some(Self::IndustrialSilo),
             BLOCK_SILO_CONTROLLER => Some(Self::SiloController),
+            BLOCK_SILO_CRAFTING_TERMINAL => Some(Self::SiloCraftingTerminal),
+            BLOCK_NUCLEAR_REACTOR => Some(Self::NuclearReactor),
             BLOCK_RECYCLER => Some(Self::Recycler),
             _ => None,
         }
@@ -376,6 +447,8 @@ impl MachineKind {
             | Self::SteamTurbine
             | Self::Tesseract
             | Self::SiloController
+            | Self::SiloCraftingTerminal
+            | Self::NuclearReactor
             | Self::Recycler => MachineTier::Tier2,
 
             Self::EnergyBank | Self::EnergyMonitor | Self::FluidTank | Self::IndustrialSilo => MachineTier::Storage,
@@ -414,7 +487,8 @@ impl MachineKind {
             Self::SteamTurbine => 30_000,
             Self::Tesseract => 100_000,
             Self::IndustrialSilo => 0,
-            Self::SiloController => 0,
+            Self::SiloController | Self::SiloCraftingTerminal => 0,
+            Self::NuclearReactor => 500_000,
             Self::Recycler => 4_000,
         }
     }
@@ -437,7 +511,9 @@ impl MachineKind {
             | Self::SteamTurbine
             | Self::Tesseract
             | Self::IndustrialSilo
-            | Self::SiloController => 1,
+            | Self::SiloController
+            | Self::SiloCraftingTerminal
+            | Self::NuclearReactor => 1,
             Self::Recycler => 20,
             Self::ItemExtractor => 10,
             Self::ElectricCrusher => 70,
@@ -478,8 +554,9 @@ impl MachineKind {
             Self::AlloySmelter => 16,
             Self::GeothermalGenerator => 120,
             Self::SteamTurbine => 160,
+            Self::NuclearReactor => 1_000,
             Self::Recycler => 10,
-            Self::UpgradeStation | Self::Tesseract | Self::IndustrialSilo | Self::SiloController => 0,
+            Self::UpgradeStation | Self::Tesseract | Self::IndustrialSilo | Self::SiloController | Self::SiloCraftingTerminal => 0,
         }
     }
 
@@ -541,6 +618,8 @@ impl MachineKind {
             Self::Tesseract => "block.rusty_factory.tesseract",
             Self::IndustrialSilo => "block.rusty_factory.industrial_silo",
             Self::SiloController => "block.rusty_factory.silo_controller",
+            Self::SiloCraftingTerminal => "block.rusty_factory.silo_crafting_terminal",
+            Self::NuclearReactor => "block.rusty_factory.nuclear_reactor",
             Self::Recycler => "block.rusty_factory.recycler",
         }
     }
@@ -571,7 +650,7 @@ impl MachineKind {
             Self::VoidTrashCan => "rusty_factory:gui/void_trash_can",
             Self::ItemPipe | Self::FluidPipe | Self::ItemSplitter | Self::EnergyMonitor | Self::EnergyRelay
             | Self::UpgradeStation | Self::GeothermalGenerator | Self::SteamTurbine | Self::Tesseract
-            | Self::IndustrialSilo | Self::SiloController | Self::Recycler => "rusty_factory:gui/machine",
+            | Self::IndustrialSilo | Self::SiloController | Self::SiloCraftingTerminal | Self::NuclearReactor | Self::Recycler => "rusty_factory:gui/machine",
         }
     }
 }
@@ -1046,6 +1125,7 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
             "minecraft:copper_ingot" | ITEM_COPPER_DUST => Some(RecipeOutput { item: ITEM_COPPER_PLATE, count: 1 }),
             "minecraft:gold_ingot" | ITEM_GOLD_DUST => Some(RecipeOutput { item: ITEM_CIRCUIT, count: 2 }),
             ITEM_RUBBER_BAR => Some(RecipeOutput { item: ITEM_RUBBER_SHEET, count: 3 }),
+            ITEM_NETHERITE_SEED_CORE => Some(RecipeOutput { item: "minecraft:netherite_scrap", count: 1 }),
             _ => None,
         },
 
@@ -1076,6 +1156,8 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
         | MachineKind::Tesseract
         | MachineKind::IndustrialSilo
         | MachineKind::SiloController
+        | MachineKind::SiloCraftingTerminal
+        | MachineKind::NuclearReactor
         | MachineKind::Recycler => None,
     }
 }
@@ -1444,6 +1526,8 @@ pub fn step_machine(
         | MachineKind::Tesseract
         | MachineKind::IndustrialSilo
         | MachineKind::SiloController
+        | MachineKind::SiloCraftingTerminal
+        | MachineKind::NuclearReactor
         | MachineKind::Recycler => StepOutcome {
             status: StepStatus::Idle,
             consume_input: false,

@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "GLG",
+    "ECE",
+    " B "
+  ],
+  "key": {
+    "G": "rusty_factory:gold_plate",
+    "L": "rusty_factory:mining_laser",
+    "E": "rusty_factory:electronic_circuit",
+    "B": "rusty_factory:energy_battery"
+  },
+  "result": {
+    "id": "rusty_factory:mining_laser_mk2",
+    "count": 1
+  }
+}

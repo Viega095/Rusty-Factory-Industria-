@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "C C",
+    "SES",
+    "C C"
+  ],
+  "key": {
+    "C": "minecraft:crafting_table",
+    "S": "rusty_factory:steel_ingot",
+    "E": "rusty_factory:electronic_circuit"
+  },
+  "result": {
+    "id": "rusty_factory:silo_crafting_terminal",
+    "count": 1
+  }
+}

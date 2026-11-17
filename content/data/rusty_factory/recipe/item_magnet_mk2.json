@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "G G",
+    "EME",
+    " G "
+  ],
+  "key": {
+    "G": "rusty_factory:gold_plate",
+    "E": "rusty_factory:electronic_circuit",
+    "M": "rusty_factory:item_magnet"
+  },
+  "result": {
+    "id": "rusty_factory:item_magnet_mk2",
+    "count": 1
+  }
+}

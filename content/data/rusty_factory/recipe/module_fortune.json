@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "DFD",
+    "ECE",
+    "DLD"
+  ],
+  "key": {
+    "D": "minecraft:diamond",
+    "F": "rusty_factory:fortune_upgrade",
+    "E": "rusty_factory:electronic_circuit",
+    "C": "rusty_factory:gold_plate",
+    "L": "minecraft:lapis_lazuli"
+  },
+  "result": {
+    "id": "rusty_factory:module_fortune",
+    "count": 1
+  }
+}

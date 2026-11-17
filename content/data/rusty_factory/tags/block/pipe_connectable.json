@@ -35,6 +35,7 @@
     "rusty_factory:recycler",
     "rusty_factory:silo_controller",
     "rusty_factory:item_pipe_mk2",
-    "rusty_factory:item_pipe_mk3"
+    "rusty_factory:item_pipe_mk3",
+    "rusty_factory:silo_crafting_terminal"
   ]
 }

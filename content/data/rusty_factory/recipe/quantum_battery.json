@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "NRN",
+    "BPB",
+    "NSN"
+  ],
+  "key": {
+    "N": "minecraft:netherite_ingot",
+    "R": "rusty_factory:cable_red",
+    "B": "rusty_factory:battery_pack",
+    "P": "rusty_factory:energy_battery_mk2",
+    "S": "minecraft:nether_star"
+  },
+  "result": {
+    "id": "rusty_factory:quantum_battery",
+    "count": 1
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "D D",
+    "NMN",
+    " R "
+  ],
+  "key": {
+    "D": "minecraft:diamond",
+    "N": "minecraft:ender_pearl",
+    "M": "rusty_factory:item_magnet_mk2",
+    "R": "rusty_factory:cable_red"
+  },
+  "result": {
+    "id": "rusty_factory:item_magnet_mk3",
+    "count": 1
+  }
+}

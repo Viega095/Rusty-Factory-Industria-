@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "BFB",
+    "ECE",
+    "BFB"
+  ],
+  "key": {
+    "B": "minecraft:blaze_powder",
+    "F": "minecraft:furnace",
+    "E": "rusty_factory:electronic_circuit",
+    "C": "rusty_factory:copper_plate"
+  },
+  "result": {
+    "id": "rusty_factory:module_auto_smelt",
+    "count": 1
+  }
+}

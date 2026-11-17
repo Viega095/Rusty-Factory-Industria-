@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "DCD",
+    "NCN",
+    " R "
+  ],
+  "key": {
+    "D": "minecraft:diamond",
+    "C": "rusty_factory:electric_chainsaw_mk2",
+    "N": "minecraft:netherite_ingot",
+    "R": "rusty_factory:energy_battery_mk2"
+  },
+  "result": {
+    "id": "rusty_factory:electric_chainsaw_mk3",
+    "count": 1
+  }
+}

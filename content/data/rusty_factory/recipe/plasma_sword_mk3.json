@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    " N ",
+    " P ",
+    "RBR"
+  ],
+  "key": {
+    "N": "minecraft:netherite_ingot",
+    "P": "rusty_factory:plasma_sword_mk2",
+    "R": "rusty_factory:cable_red",
+    "B": "rusty_factory:battery_pack"
+  },
+  "result": {
+    "id": "rusty_factory:plasma_sword_mk3",
+    "count": 1
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    " G ",
+    " P ",
+    "EBE"
+  ],
+  "key": {
+    "G": "minecraft:diamond",
+    "P": "rusty_factory:plasma_sword_mk1",
+    "E": "rusty_factory:cable_gold",
+    "B": "rusty_factory:energy_battery_mk2"
+  },
+  "result": {
+    "id": "rusty_factory:plasma_sword_mk2",
+    "count": 1
+  }
+}
