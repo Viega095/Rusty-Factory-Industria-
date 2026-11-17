@@ -1,5 +1,23 @@
 {
   "template": "minecraft:netherite_sword",
   "max_stack_size": 1,
-  "rarity": "epic"
+  "rarity": "epic",
+  "components": {
+    "minecraft:attribute_modifiers": [
+      {
+        "type": "minecraft:attack_damage",
+        "id": "minecraft:base_attack_damage",
+        "amount": 16.0,
+        "operation": "add_value",
+        "slot": "mainhand"
+      },
+      {
+        "type": "minecraft:attack_speed",
+        "id": "minecraft:base_attack_speed",
+        "amount": -1.8,
+        "operation": "add_value",
+        "slot": "mainhand"
+      }
+    ]
+  }
 }
