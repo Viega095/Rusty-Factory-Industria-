@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
 pub const ID: &str = "rusty_factory";
-pub const VERSION: &str = "0.4.1";
+pub const VERSION: &str = "1.0.0";
 pub const MENU: &str = "rusty_factory:machine";
 pub const MENU_SINGLE: &str = "rusty_factory:single";
 
