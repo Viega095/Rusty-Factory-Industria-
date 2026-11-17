@@ -481,7 +481,81 @@ fn match_terminal_craft(grid: &[Option<ItemStack>]) -> Option<(&'static str, u32
     {
         return Some((rules::ITEM_STEEL_GEAR, 2));
     }
+    // 8 iron_ingot + 1 redstone center -> machine_casing
+    if non_empty.len() == 9 && g(4) == Some("minecraft:redstone")
+        && [0, 1, 2, 3, 5, 6, 7, 8].iter().all(|&i| g(i) == Some("minecraft:iron_ingot"))
+    {
+        return Some((rules::BLOCK_CASING, 1));
+    }
+    // 6 iron_ingot top/bottom + 3 glass middle -> 6 item_pipe
+    if non_empty.len() == 9
+        && [0, 1, 2, 6, 7, 8].iter().all(|&i| g(i) == Some("minecraft:iron_ingot"))
+        && [3, 4, 5].iter().all(|&i| g(i) == Some("minecraft:glass"))
+    {
+        return Some((rules::BLOCK_ITEM_PIPE, 6));
+    }
+    // 3 rubber_bar top + 6 iron_ingot -> 6 conveyor_belt
+    if non_empty.len() == 9
+        && [0, 1, 2].iter().all(|&i| matches!(g(i), Some(rules::ITEM_RUBBER_BAR | rules::ITEM_RUBBER_SHEET)))
+        && [3, 4, 5, 6, 7, 8].iter().all(|&i| g(i) == Some("minecraft:iron_ingot"))
+    {
+        return Some((rules::BLOCK_CONVEYOR, 6));
+    }
+    // 3 copper_ingot middle -> 6 copper_cable
+    if non_empty.len() == 3 && [3, 4, 5].iter().all(|&i| g(i) == Some("minecraft:copper_ingot")) {
+        return Some((rules::BLOCK_CABLE, 6));
+    }
+    // 4 diamond corners + 4 gold cross + blaze_powder center? Wait: netherite_seed_core = D O D / G B G / D O D
+    if non_empty.len() == 9
+        && [0, 2, 6, 8].iter().all(|&i| g(i) == Some("minecraft:diamond"))
+        && [1, 7].iter().all(|&i| g(i) == Some("minecraft:obsidian"))
+        && [3, 5].iter().all(|&i| g(i) == Some("minecraft:gold_ingot"))
+        && g(4) == Some("minecraft:blaze_powder")
+    {
+        return Some((rules::ITEM_NETHERITE_SEED_CORE, 1));
+    }
     None
+}
+
+/// Pulls 1 unit of `target_item` from the connected Silo/Chest network for auto-refill crafting.
+fn pull_one_from_silo_network(game: &mut Game<'_>, pos: [i32; 3], target_item: &str) -> bool {
+    let (silos, chests) = collect_silo_network(game, pos);
+    for &sp in &silos {
+        let mut took = false;
+        game.native_with_mod_block_entity(sp, |sent| {
+            if let Some(mut sst) = load_state(sent) {
+                if sst.belt_item == target_item && sst.belt_count > 0 {
+                    sst.belt_count -= 1;
+                    if sst.belt_count == 0 {
+                        sst.belt_item.clear();
+                    }
+                    store_state(sent, &sst);
+                    took = true;
+                }
+            }
+        });
+        if took {
+            game.native_block_entity_sync(sp);
+            return true;
+        }
+    }
+    for &cp in &chests {
+        if let Some(BlockEntity::Chest(slots)) = game.world.block_entities.get_mut(&(cp[0], cp[1], cp[2])) {
+            for slot in slots.iter_mut() {
+                if let Some(st) = slot.as_mut() {
+                    if st.item.as_ref() == target_item && st.count > 0 {
+                        if st.count > 1 {
+                            st.count -= 1;
+                        } else {
+                            *slot = None;
+                        }
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Routes `stack` through a `silo_controller` into matching Silos, then empty Silos, then connected Chests.
@@ -2357,14 +2431,21 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         let matched = match_terminal_craft(&entity.items[0..9]);
         if state.progress == 1 {
             if entity.items[9].is_none() {
-                // Player took the crafted item! Consume 1 ingredient from each non-empty slot in 0..=8.
+                // Player took the crafted item! Consume 1 ingredient from each non-empty slot in 0..=8 and auto-refill from Silos.
+                let mut depleted: Vec<(usize, String)> = Vec::new();
                 for i in 0..9 {
                     if let Some(s) = entity.items[i].as_mut() {
                         if s.count <= 1 {
+                            depleted.push((i, s.item.to_string()));
                             entity.items[i] = None;
                         } else {
                             s.count -= 1;
                         }
+                    }
+                }
+                for (i, item_id) in depleted {
+                    if pull_one_from_silo_network(game, pos, &item_id) {
+                        entity.items[i] = Some(ItemStack::new(&item_id, 1));
                     }
                 }
                 state.progress = 0;
@@ -3943,6 +4024,7 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     let eff_mod = has_item_module(held, "eff");
     let smelt_mod = has_item_module(held, "smelt");
     let fortune_mod = has_item_module(held, "fortune");
+    let silk_mod = has_item_module(held, "silk");
     let drill_area = is_drill_3x3(held);
     let cost = if eff_mod { (base_cost / 2).max(5) } else { base_cost };
     if !game.creative && !consume_player_energy(game, cost) {
@@ -3988,7 +4070,9 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
                 }
                 game.native_set_block(dim, p, air_state, 3);
                 if !game.creative {
-                    if let Some((drop_id, base_cnt)) = rules::quarry_drop_for_block(&b) {
+                    if silk_mod {
+                        game.pop_resource(p, ItemStack::new(&b, 1));
+                    } else if let Some((drop_id, base_cnt)) = rules::quarry_drop_for_block(&b) {
                         let final_id = if smelt_mod {
                             match drop_id {
                                 "minecraft:raw_iron" => "minecraft:iron_ingot",
@@ -6597,10 +6681,29 @@ fn tick_player_equipment(game: &mut Game<'_>) {
             if has_item_module(st, "mag") {
                 has_mag = true;
             }
+            if has_item_module(st, "speed") {
+                speed_lvl = (speed_lvl + 1).max(0);
+            }
+        }
+    }
+    let has_haste = game.held().is_some_and(|h| has_item_module(h, "speed"));
+    let mut inv_mag_radius = 0i32;
+    for slot in game.inventory.iter() {
+        if let Some(st) = slot.as_ref() {
+            if matches!(st.item.as_ref(), rules::ITEM_ITEM_MAGNET_MK2 | rules::ITEM_ITEM_MAGNET_MK3)
+                && (game.creative || get_item_energy(st) > 0)
+            {
+                let r = if st.item.as_ref() == rules::ITEM_ITEM_MAGNET_MK3 { 28 } else { 16 };
+                inv_mag_radius = inv_mag_radius.max(r);
+            }
         }
     }
     if has_hover {
         game.native_run_command("effect give @s minecraft:slow_falling 2 0 true");
+    }
+    if now % 10 == 0 && inv_mag_radius > 0 {
+        game.native_run_command(&format!("tp @e[type=item,distance=..{inv_mag_radius}] @s"));
+        game.native_run_command(&format!("tp @e[type=experience_orb,distance=..{inv_mag_radius}] @s"));
     }
     if now % 40 == 0 {
         if jump_lvl >= 0 {
@@ -6608,6 +6711,9 @@ fn tick_player_equipment(game: &mut Game<'_>) {
         }
         if speed_lvl >= 0 {
             game.native_run_command(&format!("effect give @s minecraft:speed 3 {speed_lvl} true"));
+        }
+        if has_haste {
+            game.native_run_command("effect give @s minecraft:haste 3 1 true");
         }
         if res_lvl >= 0 {
             game.native_run_command(&format!("effect give @s minecraft:resistance 3 {res_lvl} true"));
