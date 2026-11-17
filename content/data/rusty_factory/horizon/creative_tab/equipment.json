@@ -41,6 +41,8 @@
     "rusty_factory:quantum_chestplate",
     "rusty_factory:quantum_leggings",
     "rusty_factory:quantum_boots",
-    "rusty_factory:jetpack_mk2"
+    "rusty_factory:jetpack_mk2",
+    "rusty_factory:wireless_silo_tablet",
+    "rusty_factory:quantum_backpack"
   ]
 }

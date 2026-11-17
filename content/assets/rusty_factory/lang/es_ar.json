@@ -140,5 +140,10 @@
   "item.rusty_factory.module_fortune": "Módulo: Fortuna Eléctrica",
   "item.rusty_factory.module_silk_touch": "Módulo: Toque de Seda",
   "item.rusty_factory.module_speed": "Módulo: Velocidad Overclock",
-  "item.rusty_factory.netherite_seed_core": "Núcleo Precursor de Netherite"
+  "item.rusty_factory.netherite_seed_core": "Núcleo Precursor de Netherite",
+  "block.rusty_factory.wind_turbine": "Turbina Eólica (Tier 2)",
+  "block.rusty_factory.hydroponic_chamber": "Cámara Hidropónica (Tier 2)",
+  "block.rusty_factory.laser_turret": "Torreta Láser Defensiva (Tier 3)",
+  "item.rusty_factory.wireless_silo_tablet": "Control Remoto de Silos",
+  "item.rusty_factory.quantum_backpack": "Mochila Cuántica Dimensional"
 }

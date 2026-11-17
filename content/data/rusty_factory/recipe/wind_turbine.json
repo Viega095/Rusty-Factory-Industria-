@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    " I ",
+    "IGI",
+    "SCS"
+  ],
+  "key": {
+    "I": "rusty_factory:iron_plate",
+    "G": "rusty_factory:steel_gear",
+    "S": "rusty_factory:steel_ingot",
+    "C": "rusty_factory:copper_cable"
+  },
+  "result": {
+    "id": "rusty_factory:wind_turbine",
+    "count": 1
+  }
+}

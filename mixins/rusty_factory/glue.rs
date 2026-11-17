@@ -2548,6 +2548,113 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         return;
     }
 
+    if kind == MachineKind::WindTurbine {
+        let alt_rate = (15 + ((pos[1] - 60).max(0) / 2)).min(120);
+        let mut net_rate = 0;
+        if state.enabled && state.energy < kind.max_energy() {
+            let prod = alt_rate.min(kind.max_energy() - state.energy);
+            state.energy += prod;
+            net_rate = prod;
+        }
+        if state.energy > 0 {
+            let sent = distribute_energy(game, pos, state.energy.min(240), false);
+            state.energy -= sent;
+        }
+        update_lit_state(game, pos, net_rate > 0);
+        let pct = ((alt_rate * 100) / 120).clamp(0, 100);
+        entity.data = vec![
+            if net_rate > 0 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
+            state.energy,
+            kind.max_energy(),
+            pct,
+            alt_rate,
+            i32::from(state.enabled),
+            0, 0, 0, 0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
+    if kind == MachineKind::HydroponicChamber {
+        let period = rules::effective_work_ticks(kind, speed_upgrades).max(1);
+        let cost = rules::effective_energy_cost(kind, speed_upgrades);
+        let mut status = StepStatus::Idle;
+        let out_item = entity.items.first().and_then(|s| s.as_ref()).and_then(|s| {
+            rules::lookup_recipe(MachineKind::HydroponicChamber, s.item.as_ref())
+        });
+        if state.enabled && out_item.is_some() {
+            let out_full = entity.items.get(rules::SLOT_OUTPUT).and_then(|s| s.as_ref()).is_some_and(|s| s.count >= 64);
+            if out_full {
+                status = StepStatus::OutputFull;
+            } else if state.energy < cost {
+                status = StepStatus::NoPower;
+            } else {
+                status = StepStatus::Working;
+                state.energy -= cost;
+                state.progress += 1;
+                if state.progress >= period {
+                    state.progress = 0;
+                    if let Some(rec) = out_item {
+                        let produced = ItemStack::new(rec.item, rec.count);
+                        store_or_route_output(game, pos, entity, state.auto_io, produced);
+                    }
+                }
+            }
+        } else {
+            state.progress = 0;
+        }
+        if state.auto_io && entity.items.get(rules::SLOT_OUTPUT).is_some_and(|s| s.is_some()) {
+            try_auto_eject_output(game, pos, entity, 4);
+        }
+        update_lit_state(game, pos, status == StepStatus::Working);
+        let pct = ((state.progress * 100) / period).clamp(0, 100);
+        entity.data = vec![
+            status as i32,
+            state.energy,
+            kind.max_energy(),
+            pct,
+            if status == StepStatus::Working { -cost } else { 0 },
+            i32::from(state.enabled),
+            i32::from(state.auto_io),
+            0, 0, 0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
+    if kind == MachineKind::LaserTurret {
+        let period = (15 - speed_upgrades as i32 * 2).max(5);
+        let mut fired = false;
+        if state.enabled && state.energy >= 40 {
+            state.progress += 1;
+            if state.progress >= period {
+                state.progress = 0;
+                state.energy -= 40;
+                fired = true;
+                let [cx, cy, cz] = pos;
+                game.native_run_command(&format!(
+                    "execute positioned {cx}.5 {cy}.8 {cz}.5 run damage @e[type=!player,type=!item,type=!experience_orb,type=!armor_stand,distance=..16,limit=1,sort=nearest] 10 minecraft:lightning_bolt"
+                ));
+                game.native_run_command(&format!(
+                    "particle minecraft:electric_spark {cx}.5 {cy}.9 {cz}.5 0.6 0.6 0.6 0.1 8"
+                ));
+            }
+        }
+        update_lit_state(game, pos, state.enabled && state.energy >= 40);
+        let pct = ((state.progress * 100) / period.max(1)).clamp(0, 100);
+        entity.data = vec![
+            if fired || (state.enabled && state.energy >= 40) { StepStatus::Working as i32 } else { StepStatus::NoPower as i32 },
+            state.energy,
+            kind.max_energy(),
+            pct,
+            if fired { -40 } else { 0 },
+            i32::from(state.enabled),
+            0, 0, 0, 0,
+        ];
+        store_state(entity, &state);
+        return;
+    }
+
     if kind == MachineKind::Tesseract {
         // 1. Wireless cross-world energy sharing with other Tesseracts
         let mut peers: Vec<[i32; 3]> = Vec::new();
@@ -4196,6 +4303,74 @@ pub(in crate::game) fn use_item(game: &mut Game<'_>, stack: &ItemStack, claimed:
         return;
     }
 
+    if held_id == rules::ITEM_WIRELESS_SILO_TABLET {
+        *claimed = true;
+        let Some(bound) = get_bound_pos(stack) else {
+            if let Some(who) = game.native_acting_player() {
+                game.native_action_bar(who.uuid, Text::literal("📡 [Tablet Silo] Shift + Clic en un Controlador de Silos para vincular."));
+            }
+            return;
+        };
+        if !game.creative && !consume_player_energy(game, 50) {
+            if let Some(who) = game.native_acting_player() {
+                game.native_action_bar(who.uuid, Text::literal("⚠ [Tablet Silo] Sin energía (50 FE)"));
+            }
+            return;
+        }
+        if let Some(off_stack) = game.offhand.take() {
+            let sent_name = off_stack.item.split(':').nth(1).unwrap_or(&off_stack.item).to_owned();
+            let sent_cnt = off_stack.count;
+            let rest = insert_into_silo_controller(game, bound, off_stack);
+            game.offhand = rest;
+            if let Some(who) = game.native_acting_player() {
+                game.native_action_bar(who.uuid, Text::literal(format!("📡 [Tablet Silo] Enviado {sent_name} x{sent_cnt} a la red!")));
+            }
+            return;
+        }
+        let (list, silos_n, _) = sorted_silo_network(game, bound, false, false);
+        if is_crouching {
+            if let Some((top_id, _, _)) = list.first() {
+                let mut taken = 0u32;
+                for _ in 0..64 {
+                    if pull_one_from_silo_network(game, bound, top_id) {
+                        taken += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if taken > 0 {
+                    if let Some(who) = game.native_acting_player() {
+                        let p = [who.position[0].floor() as i32, who.position[1].floor() as i32, who.position[2].floor() as i32];
+                        game.pop_resource(p, ItemStack::new(top_id, taken));
+                        game.native_action_bar(who.uuid, Text::literal(format!("📡 [Tablet Silo] Retirado x{taken} ({top_id})")));
+                    }
+                }
+            }
+        } else if let Some(who) = game.native_acting_player() {
+            let preview: Vec<String> = list.iter().take(3).map(|(id, c, _)| {
+                let s = id.split(':').nth(1).unwrap_or(id);
+                format!("{s}:{c}")
+            }).collect();
+            let summary = if preview.is_empty() { "Vacío".to_owned() } else { preview.join(" | ") };
+            game.native_action_bar(who.uuid, Text::literal(format!("📡 [Tablet Silo] ({silos_n} silos): {summary}")));
+        }
+        return;
+    }
+
+    if held_id == rules::ITEM_QUANTUM_BACKPACK {
+        *claimed = true;
+        let mut now_on = true;
+        if let Some(held) = game.held_mut() {
+            now_on = !is_qpack_on(held);
+            set_qpack_on(held, now_on);
+        }
+        if let Some(who) = game.native_acting_player() {
+            let lbl = if now_on { "ACTIVADO" } else { "DESACTIVADO" };
+            game.native_action_bar(who.uuid, Text::literal(format!("🎒 [Mochila Cuántica] Auto-envío a Silos: {lbl}")));
+        }
+        return;
+    }
+
     if let Some((tier, range, cost)) = rules::laser_tier(held_id) {
         *claimed = true;
         if !game.creative && !consume_player_energy(game, cost) {
@@ -5146,6 +5321,70 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
             return;
         }
 
+        // 7a. Wireless Silo Tablet & Quantum Backpack: Shift+Click on Silo/Controller binds; Click uses
+        if matches!(held_id.as_str(), rules::ITEM_WIRELESS_SILO_TABLET | rules::ITEM_QUANTUM_BACKPACK) {
+            *canceled = true;
+            if is_crouching
+                && matches!(
+                    block_id.as_str(),
+                    rules::BLOCK_SILO_CONTROLLER | rules::BLOCK_SILO_CRAFTING_TERMINAL | rules::BLOCK_INDUSTRIAL_SILO
+                )
+            {
+                if let Some(held) = game.held_mut() {
+                    set_bound_pos(held, pos);
+                }
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(
+                        who.uuid,
+                        Text::literal(format!("🔗 Vinculado a la red de Silos en [{}, {}, {}]", pos[0], pos[1], pos[2])),
+                    );
+                }
+                return;
+            }
+            if held_id == rules::ITEM_QUANTUM_BACKPACK {
+                let mut now_on = true;
+                if let Some(held) = game.held_mut() {
+                    now_on = !is_qpack_on(held);
+                    set_qpack_on(held, now_on);
+                }
+                if let Some(who) = game.native_acting_player() {
+                    let lbl = if now_on { "ACTIVADO" } else { "DESACTIVADO" };
+                    game.native_action_bar(who.uuid, Text::literal(format!("🎒 [Mochila Cuántica] Auto-envío a Silos: {lbl}")));
+                }
+                return;
+            }
+            let bound_opt = game.held().and_then(get_bound_pos);
+            let Some(bound) = bound_opt else {
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(who.uuid, Text::literal("📡 [Tablet Silo] Shift + Clic en un Controlador de Silos para vincular."));
+                }
+                return;
+            };
+            if !game.creative && !consume_player_energy(game, 50) {
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(who.uuid, Text::literal("⚠ [Tablet Silo] Sin energía (50 FE)"));
+                }
+                return;
+            }
+            if let Some(off_stack) = game.offhand.take() {
+                let sent_name = off_stack.item.split(':').nth(1).unwrap_or(&off_stack.item).to_owned();
+                let sent_cnt = off_stack.count;
+                game.offhand = insert_into_silo_controller(game, bound, off_stack);
+                if let Some(who) = game.native_acting_player() {
+                    game.native_action_bar(who.uuid, Text::literal(format!("📡 [Tablet Silo] Enviado {sent_name} x{sent_cnt} a la red!")));
+                }
+            } else if let Some(who) = game.native_acting_player() {
+                let (list, silos_n, _) = sorted_silo_network(game, bound, false, false);
+                let preview: Vec<String> = list.iter().take(3).map(|(id, c, _)| {
+                    let s = id.split(':').nth(1).unwrap_or(id);
+                    format!("{s}:{c}")
+                }).collect();
+                let summary = if preview.is_empty() { "Vacío".to_owned() } else { preview.join(" | ") };
+                game.native_action_bar(who.uuid, Text::literal(format!("📡 [Tablet Silo] ({silos_n} silos): {summary}")));
+            }
+            return;
+        }
+
         // 7. Mining Laser (MK1-MK3): High-energy straight plasma beam mining along look direction
         if let Some((tier, range, cost)) = rules::laser_tier(held_id) {
             *canceled = true;
@@ -5606,7 +5845,8 @@ pub(in crate::game) fn screen(block: &str, screen: &mut Option<NativeScreen>) {
             | MachineKind::IndustrialSilo
             | MachineKind::GeothermalGenerator
             | MachineKind::SteamTurbine
-            | MachineKind::NuclearReactor => {
+            | MachineKind::NuclearReactor
+            | MachineKind::WindTurbine => {
                 vec![Some([80.0, 34.0])] // Centered 1-slot
             }
             MachineKind::SiloController => {
@@ -6145,6 +6385,21 @@ pub(in crate::game) fn screen_draw(
         let line2 = format!("Núcleo Nuclear: {progress_pct}% (Diamante/Nether)");
         game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF4A_DE80, false);
         game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFBB_F7D0, false);
+    } else if kind == MachineKind::WindTurbine {
+        let line1 = format!("FE: {energy}/{max_energy} (+{rate}/t)");
+        let line2 = format!("Viento por Altura: {progress_pct}%");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF38_F2FF, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFE2_E8F0, false);
+    } else if kind == MachineKind::HydroponicChamber {
+        let line1 = format!("FE: {energy}/{max_energy} | Cultivo Hidropónico");
+        let line2 = format!("Crecimiento: {progress_pct}% (Slot 0 = Semilla)");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF4A_DE80, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF86_EFAC, false);
+    } else if kind == MachineKind::LaserTurret {
+        let line1 = format!("FE: {energy}/{max_energy} | Radio: 16 blq");
+        let line2 = format!("Torreta Láser: {progress_pct}% (10 daño)");
+        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFFF8_7171, false);
+        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFFCA5A5, false);
     } else if kind == MachineKind::Recycler {
         let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
         let line2 = format!("Reciclaje de Chatarra: {progress_pct}%");
@@ -6705,6 +6960,46 @@ fn tick_player_equipment(game: &mut Game<'_>) {
         game.native_run_command(&format!("tp @e[type=item,distance=..{inv_mag_radius}] @s"));
         game.native_run_command(&format!("tp @e[type=experience_orb,distance=..{inv_mag_radius}] @s"));
     }
+    if now % 20 == 0 {
+        let mut qpack_bound: Option<[i32; 3]> = None;
+        for slot in game.inventory.iter() {
+            if let Some(st) = slot.as_ref() {
+                if st.item.as_ref() == rules::ITEM_QUANTUM_BACKPACK
+                    && is_qpack_on(st)
+                    && (game.creative || get_item_energy(st) >= 10)
+                {
+                    if let Some(b) = get_bound_pos(st) {
+                        qpack_bound = Some(b);
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some(bound) = qpack_bound {
+            for idx in 9..game.inventory.len() {
+                let is_bulk = game.inventory[idx].as_ref().is_some_and(|st| {
+                    st.count >= 64
+                        && matches!(
+                            st.item.as_ref(),
+                            "minecraft:cobblestone"
+                                | "minecraft:cobbled_deepslate"
+                                | "minecraft:dirt"
+                                | "minecraft:gravel"
+                                | "minecraft:netherrack"
+                                | "minecraft:andesite"
+                                | "minecraft:diorite"
+                                | "minecraft:granite"
+                        )
+                });
+                if is_bulk {
+                    if let Some(st) = game.inventory[idx].take() {
+                        game.inventory[idx] = insert_into_silo_controller(game, bound, st);
+                    }
+                    break;
+                }
+            }
+        }
+    }
     if now % 40 == 0 {
         if jump_lvl >= 0 {
             game.native_run_command(&format!("effect give @s minecraft:jump_boost 3 {jump_lvl} true"));
@@ -6830,6 +7125,17 @@ pub(in crate::game) fn tooltip(
         rules::BLOCK_SILO_CONTROLLER => &["§7Controlador de Silos: muestra todos los ítems de silos y cofres conectados."],
         rules::BLOCK_SILO_CRAFTING_TERMINAL => &["§bTerminal de Crafteo de Silos: grilla 3x3 conectada a toda tu red de silos y cofres."],
         rules::BLOCK_NUCLEAR_REACTOR => &["§aReactor Nuclear (Tier 3): genera +1,000 FE/t con combustible nuclear."],
+        rules::BLOCK_WIND_TURBINE => &["§eTurbina Eólica (Tier 2): genera más FE cuanto más alto se coloca (hasta +120 FE/t)."],
+        rules::BLOCK_HYDROPONIC_CHAMBER => &["§aCámara Hidropónica (Tier 2): cultiva semillas y caucho en 1 bloque con FE."],
+        rules::BLOCK_LASER_TURRET => &["§cTorreta Láser Defensiva (Tier 3): ataca mobs cercanos en 16 blq (10 daño)."],
+        rules::ITEM_WIRELESS_SILO_TABLET => &[
+            "§bControl Remoto de Silos: vincula con Shift+Clic en un Controlador.",
+            "§7• Clic: ver stock o enviar mano secundaria | Shift+Clic: retirar top x64",
+        ],
+        rules::ITEM_QUANTUM_BACKPACK => &[
+            "§dMochila Cuántica Dimensional: vincula con Shift+Clic en tu red de Silos.",
+            "§7• Clic: activa/desactiva auto-envío de stacks minados a tus Silos",
+        ],
         rules::BLOCK_RECYCLER => &["§7Recicla bloques sobrantes en polvo metálico y materiales."],
         rules::ITEM_MINING_DRILL_MK2 => &["§e[Tier 2] §7Taladro MK2: excava planos 3x3 con menor consumo (25 FE)."],
         rules::ITEM_MINING_DRILL_MK3 => &["§b[Tier 3] §7Taladro MK3: excava planos 5x5 a gran velocidad (15 FE)."],
@@ -6895,6 +7201,25 @@ pub(in crate::game) fn tooltip(
             Text::legacy(&format!("§b🚀 Modo Hover: {hover}")),
             0xFF38_F2FF,
         ));
+    } else if matches!(id, rules::ITEM_WIRELESS_SILO_TABLET | rules::ITEM_QUANTUM_BACKPACK) {
+        if let Some(b) = get_bound_pos(stack) {
+            lines.push((
+                Text::legacy(&format!("§a🔗 Vinculado a: §f[{}, {}, {}]", b[0], b[1], b[2])),
+                0xFF4A_DE80,
+            ));
+        } else {
+            lines.push((
+                Text::legacy("§7Sin vincular (Shift + Clic en Silo/Controlador)"),
+                0xFFAA_B4C4,
+            ));
+        }
+        if id == rules::ITEM_QUANTUM_BACKPACK {
+            let st_txt = if is_qpack_on(stack) { "§aON" } else { "§7OFF" };
+            lines.push((
+                Text::legacy(&format!("§d🎒 Auto-Envío: {st_txt}")),
+                0xFFD0_88FF,
+            ));
+        }
     }
     let mut mods = Vec::new();
     if has_item_module(stack, "nv") {
@@ -6987,6 +7312,8 @@ pub(in crate::game) fn hud(
             rules::ITEM_BATTERY_MK2 => "Batería MK2".to_owned(),
             rules::ITEM_BATTERY_PACK => "Mochila Bat.".to_owned(),
             rules::ITEM_QUANTUM_BATTERY => "Núcleo Cuántico".to_owned(),
+            rules::ITEM_WIRELESS_SILO_TABLET => "Tablet Silo".to_owned(),
+            rules::ITEM_QUANTUM_BACKPACK => "Mochila Cuántica".to_owned(),
             rules::ITEM_JETPACK => "Jetpack".to_owned(),
             rules::ITEM_JETPACK_MK2 => "Jetpack MK2".to_owned(),
             rules::ITEM_JET_BOOTS => "Botas Cohete".to_owned(),
@@ -7328,6 +7655,48 @@ fn set_jetpack_hover(stack: &mut ItemStack, hover: bool) {
     map.insert(
         horizon_world::nbt::JavaString::from("hover"),
         horizon_world::nbt::Tag::Byte(if hover { 1 } else { 0 }),
+    );
+    stack
+        .data_mut()
+        .set_other("minecraft:custom_data", Some(horizon_world::nbt::Tag::Compound(map)));
+}
+
+fn get_bound_pos(stack: &ItemStack) -> Option<[i32; 3]> {
+    let c = stack.custom_data()?;
+    let read_i = |k: &str| match c.get(&horizon_world::nbt::JavaString::from(k)) {
+        Some(horizon_world::nbt::Tag::Int(v)) => Some(*v),
+        _ => None,
+    };
+    Some([read_i("bind_x")?, read_i("bind_y")?, read_i("bind_z")?])
+}
+
+fn set_bound_pos(stack: &mut ItemStack, pos: [i32; 3]) {
+    let mut map = stack.custom_data().cloned().unwrap_or_default();
+    map.insert(horizon_world::nbt::JavaString::from("bind_x"), horizon_world::nbt::Tag::Int(pos[0]));
+    map.insert(horizon_world::nbt::JavaString::from("bind_y"), horizon_world::nbt::Tag::Int(pos[1]));
+    map.insert(horizon_world::nbt::JavaString::from("bind_z"), horizon_world::nbt::Tag::Int(pos[2]));
+    stack
+        .data_mut()
+        .set_other("minecraft:custom_data", Some(horizon_world::nbt::Tag::Compound(map)));
+}
+
+fn is_qpack_on(stack: &ItemStack) -> bool {
+    let key = horizon_world::nbt::JavaString::from("qpack_on");
+    stack
+        .custom_data()
+        .and_then(|c| c.get(&key))
+        .and_then(|t| match t {
+            horizon_world::nbt::Tag::Byte(v) => Some(*v != 0),
+            _ => None,
+        })
+        .unwrap_or(true)
+}
+
+fn set_qpack_on(stack: &mut ItemStack, on: bool) {
+    let mut map = stack.custom_data().cloned().unwrap_or_default();
+    map.insert(
+        horizon_world::nbt::JavaString::from("qpack_on"),
+        horizon_world::nbt::Tag::Byte(if on { 1 } else { 0 }),
     );
     stack
         .data_mut()

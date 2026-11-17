@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "pattern": [
+    "RDR",
+    "ECE",
+    "NSN"
+  ],
+  "key": {
+    "R": "rusty_factory:cable_red",
+    "D": "minecraft:diamond",
+    "E": "rusty_factory:electronic_circuit",
+    "C": "rusty_factory:machine_casing",
+    "N": "minecraft:netherite_ingot",
+    "S": "rusty_factory:energy_battery_mk2"
+  },
+  "result": {
+    "id": "rusty_factory:laser_turret",
+    "count": 1
+  }
+}

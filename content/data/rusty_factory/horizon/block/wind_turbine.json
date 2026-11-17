@@ -1,0 +1,35 @@
+{
+  "template": "minecraft:furnace",
+  "shapes": {
+    "default": [
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.375,
+        1.0
+      ]
+    ]
+  },
+  "collision_shapes": {
+    "default": [
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.375,
+        1.0
+      ]
+    ]
+  },
+  "properties": {
+    "hardness": 3.0,
+    "explosion_resistance": 6.0,
+    "requires_tool": true,
+    "sounds": "minecraft:iron_block",
+    "map_color": 21,
+    "occludes": false
+  }
+}

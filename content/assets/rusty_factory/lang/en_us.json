@@ -140,5 +140,10 @@
   "item.rusty_factory.module_fortune": "Module: Electric Fortune",
   "item.rusty_factory.module_silk_touch": "Module: Silk Touch",
   "item.rusty_factory.module_speed": "Module: Overclock Speed",
-  "item.rusty_factory.netherite_seed_core": "Netherite Synthesis Core"
+  "item.rusty_factory.netherite_seed_core": "Netherite Synthesis Core",
+  "block.rusty_factory.wind_turbine": "Wind Turbine (Tier 2)",
+  "block.rusty_factory.hydroponic_chamber": "Hydroponic Chamber (Tier 2)",
+  "block.rusty_factory.laser_turret": "Defense Laser Turret (Tier 3)",
+  "item.rusty_factory.wireless_silo_tablet": "Wireless Silo Tablet",
+  "item.rusty_factory.quantum_backpack": "Quantum Dimensional Backpack"
 }

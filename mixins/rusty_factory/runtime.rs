@@ -151,6 +151,9 @@ pub const BLOCK_INDUSTRIAL_SILO: &str = "rusty_factory:industrial_silo";
 pub const BLOCK_SILO_CONTROLLER: &str = "rusty_factory:silo_controller";
 pub const BLOCK_SILO_CRAFTING_TERMINAL: &str = "rusty_factory:silo_crafting_terminal";
 pub const BLOCK_NUCLEAR_REACTOR: &str = "rusty_factory:nuclear_reactor";
+pub const BLOCK_WIND_TURBINE: &str = "rusty_factory:wind_turbine";
+pub const BLOCK_HYDROPONIC_CHAMBER: &str = "rusty_factory:hydroponic_chamber";
+pub const BLOCK_LASER_TURRET: &str = "rusty_factory:laser_turret";
 pub const BLOCK_RECYCLER: &str = "rusty_factory:recycler";
 
 // Item IDs (29 items)
@@ -216,6 +219,8 @@ pub const ITEM_MODULE_FORTUNE: &str = "rusty_factory:module_fortune";
 pub const ITEM_MODULE_SILK_TOUCH: &str = "rusty_factory:module_silk_touch";
 pub const ITEM_MODULE_SPEED: &str = "rusty_factory:module_speed";
 pub const ITEM_NETHERITE_SEED_CORE: &str = "rusty_factory:netherite_seed_core";
+pub const ITEM_WIRELESS_SILO_TABLET: &str = "rusty_factory:wireless_silo_tablet";
+pub const ITEM_QUANTUM_BACKPACK: &str = "rusty_factory:quantum_backpack";
 
 pub fn is_battery_item(item: &str) -> bool {
     matches!(
@@ -293,9 +298,9 @@ pub fn battery_capacity(item: &str) -> Option<i32> {
         ITEM_BATTERY_PACK => Some(1_000_000),
         ITEM_QUANTUM_BATTERY => Some(5_000_000),
         ITEM_MINING_DRILL_MK2 | ITEM_CHAINSAW_MK2 | ITEM_MINING_LASER_MK2 | ITEM_PLASMA_SWORD_MK2 | ITEM_ITEM_MAGNET_MK2 => Some(150_000),
-        ITEM_OMNI_TOOL_MK2 => Some(300_000),
+        ITEM_OMNI_TOOL_MK2 | ITEM_WIRELESS_SILO_TABLET => Some(300_000),
         ITEM_MINING_DRILL_MK3 | ITEM_CHAINSAW_MK3 | ITEM_MINING_LASER_MK3 | ITEM_PLASMA_SWORD_MK3 | ITEM_ITEM_MAGNET_MK3 => Some(500_000),
-        ITEM_OMNI_TOOL_MK3 => Some(1_000_000),
+        ITEM_OMNI_TOOL_MK3 | ITEM_QUANTUM_BACKPACK => Some(1_000_000),
         ITEM_JETPACK_MK2 => Some(500_000),
         ITEM_STEEL_HELMET | ITEM_STEEL_CHESTPLATE | ITEM_STEEL_LEGGINGS | ITEM_STEEL_BOOTS => Some(25_000),
         ITEM_QUANTUM_HELMET | ITEM_QUANTUM_CHESTPLATE | ITEM_QUANTUM_LEGGINGS | ITEM_QUANTUM_BOOTS => Some(250_000),
@@ -369,6 +374,9 @@ pub enum MachineKind {
     SiloController,
     SiloCraftingTerminal,
     NuclearReactor,
+    WindTurbine,
+    HydroponicChamber,
+    LaserTurret,
     Recycler,
 }
 
@@ -410,6 +418,9 @@ impl MachineKind {
             BLOCK_SILO_CONTROLLER => Some(Self::SiloController),
             BLOCK_SILO_CRAFTING_TERMINAL => Some(Self::SiloCraftingTerminal),
             BLOCK_NUCLEAR_REACTOR => Some(Self::NuclearReactor),
+            BLOCK_WIND_TURBINE => Some(Self::WindTurbine),
+            BLOCK_HYDROPONIC_CHAMBER => Some(Self::HydroponicChamber),
+            BLOCK_LASER_TURRET => Some(Self::LaserTurret),
             BLOCK_RECYCLER => Some(Self::Recycler),
             _ => None,
         }
@@ -449,6 +460,9 @@ impl MachineKind {
             | Self::SiloController
             | Self::SiloCraftingTerminal
             | Self::NuclearReactor
+            | Self::WindTurbine
+            | Self::HydroponicChamber
+            | Self::LaserTurret
             | Self::Recycler => MachineTier::Tier2,
 
             Self::EnergyBank | Self::EnergyMonitor | Self::FluidTank | Self::IndustrialSilo => MachineTier::Storage,
@@ -489,6 +503,9 @@ impl MachineKind {
             Self::IndustrialSilo => 0,
             Self::SiloController | Self::SiloCraftingTerminal => 0,
             Self::NuclearReactor => 500_000,
+            Self::WindTurbine => 20_000,
+            Self::HydroponicChamber => 8_000,
+            Self::LaserTurret => 50_000,
             Self::Recycler => 4_000,
         }
     }
@@ -513,7 +530,10 @@ impl MachineKind {
             | Self::IndustrialSilo
             | Self::SiloController
             | Self::SiloCraftingTerminal
-            | Self::NuclearReactor => 1,
+            | Self::NuclearReactor
+            | Self::WindTurbine => 1,
+            Self::LaserTurret => 15,
+            Self::HydroponicChamber => 40,
             Self::Recycler => 20,
             Self::ItemExtractor => 10,
             Self::ElectricCrusher => 70,
@@ -555,6 +575,9 @@ impl MachineKind {
             Self::GeothermalGenerator => 120,
             Self::SteamTurbine => 160,
             Self::NuclearReactor => 1_000,
+            Self::WindTurbine => 60,
+            Self::HydroponicChamber => 12,
+            Self::LaserTurret => 40,
             Self::Recycler => 10,
             Self::UpgradeStation | Self::Tesseract | Self::IndustrialSilo | Self::SiloController | Self::SiloCraftingTerminal => 0,
         }
@@ -579,6 +602,8 @@ impl MachineKind {
                 | Self::ChargingPad
                 | Self::AlloySmelter
                 | Self::Tesseract
+                | Self::HydroponicChamber
+                | Self::LaserTurret
                 | Self::Recycler
         )
     }
@@ -620,6 +645,9 @@ impl MachineKind {
             Self::SiloController => "block.rusty_factory.silo_controller",
             Self::SiloCraftingTerminal => "block.rusty_factory.silo_crafting_terminal",
             Self::NuclearReactor => "block.rusty_factory.nuclear_reactor",
+            Self::WindTurbine => "block.rusty_factory.wind_turbine",
+            Self::HydroponicChamber => "block.rusty_factory.hydroponic_chamber",
+            Self::LaserTurret => "block.rusty_factory.laser_turret",
             Self::Recycler => "block.rusty_factory.recycler",
         }
     }
@@ -650,7 +678,8 @@ impl MachineKind {
             Self::VoidTrashCan => "rusty_factory:gui/void_trash_can",
             Self::ItemPipe | Self::FluidPipe | Self::ItemSplitter | Self::EnergyMonitor | Self::EnergyRelay
             | Self::UpgradeStation | Self::GeothermalGenerator | Self::SteamTurbine | Self::Tesseract
-            | Self::IndustrialSilo | Self::SiloController | Self::SiloCraftingTerminal | Self::NuclearReactor | Self::Recycler => "rusty_factory:gui/machine",
+            | Self::IndustrialSilo | Self::SiloController | Self::SiloCraftingTerminal | Self::NuclearReactor
+            | Self::WindTurbine | Self::HydroponicChamber | Self::LaserTurret | Self::Recycler => "rusty_factory:gui/machine",
         }
     }
 }
@@ -1158,7 +1187,21 @@ pub fn lookup_recipe(kind: MachineKind, input: &str) -> Option<RecipeOutput> {
         | MachineKind::SiloController
         | MachineKind::SiloCraftingTerminal
         | MachineKind::NuclearReactor
+        | MachineKind::WindTurbine
+        | MachineKind::LaserTurret
         | MachineKind::Recycler => None,
+
+        MachineKind::HydroponicChamber => match input {
+            "minecraft:wheat_seeds" => Some(RecipeOutput { item: "minecraft:wheat", count: 2 }),
+            "minecraft:carrot" => Some(RecipeOutput { item: "minecraft:carrot", count: 2 }),
+            "minecraft:potato" => Some(RecipeOutput { item: "minecraft:potato", count: 2 }),
+            "minecraft:beetroot_seeds" => Some(RecipeOutput { item: "minecraft:beetroot", count: 2 }),
+            "minecraft:sugar_cane" => Some(RecipeOutput { item: "minecraft:sugar_cane", count: 2 }),
+            "minecraft:kelp" => Some(RecipeOutput { item: "minecraft:kelp", count: 3 }),
+            "minecraft:oak_sapling" => Some(RecipeOutput { item: "minecraft:oak_log", count: 2 }),
+            BLOCK_RUBBER_SAPLING => Some(RecipeOutput { item: ITEM_RAW_SAP, count: 3 }),
+            _ => None,
+        },
     }
 }
 
@@ -1528,6 +1571,9 @@ pub fn step_machine(
         | MachineKind::SiloController
         | MachineKind::SiloCraftingTerminal
         | MachineKind::NuclearReactor
+        | MachineKind::WindTurbine
+        | MachineKind::HydroponicChamber
+        | MachineKind::LaserTurret
         | MachineKind::Recycler => StepOutcome {
             status: StepStatus::Idle,
             consume_input: false,

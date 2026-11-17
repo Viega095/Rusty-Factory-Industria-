@@ -24,6 +24,9 @@
     "rusty_factory:upgrade_station",
     "rusty_factory:quarry",
     "rusty_factory:quarry_mk2",
-    "rusty_factory:quarry_mk3"
+    "rusty_factory:quarry_mk3",
+    "rusty_factory:wind_turbine",
+    "rusty_factory:hydroponic_chamber",
+    "rusty_factory:laser_turret"
   ]
 }

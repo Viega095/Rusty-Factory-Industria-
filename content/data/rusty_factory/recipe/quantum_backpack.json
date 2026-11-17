@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "NEN",
+    "SCS",
+    "RBR"
+  ],
+  "key": {
+    "N": "minecraft:netherite_ingot",
+    "E": "minecraft:ender_chest",
+    "S": "rusty_factory:industrial_silo",
+    "C": "rusty_factory:electronic_circuit",
+    "R": "rusty_factory:cable_red",
+    "B": "rusty_factory:energy_battery_mk2"
+  },
+  "result": {
+    "id": "rusty_factory:quantum_backpack",
+    "count": 1
+  }
+}
