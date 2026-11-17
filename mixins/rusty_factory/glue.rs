@@ -505,7 +505,7 @@ fn match_terminal_craft(grid: &[Option<ItemStack>]) -> Option<(&'static str, u32
     if non_empty.len() == 3 && [3, 4, 5].iter().all(|&i| g(i) == Some("minecraft:copper_ingot")) {
         return Some((rules::BLOCK_CABLE, 6));
     }
-    // 4 diamond corners + 4 gold cross + blaze_powder center? Wait: netherite_seed_core = D O D / G B G / D O D
+    // 4 diamond corners + 4 obsidian/gold + blaze_powder center -> netherite_seed_core
     if non_empty.len() == 9
         && [0, 2, 6, 8].iter().all(|&i| g(i) == Some("minecraft:diamond"))
         && [1, 7].iter().all(|&i| g(i) == Some("minecraft:obsidian"))
@@ -513,6 +513,37 @@ fn match_terminal_craft(grid: &[Option<ItemStack>]) -> Option<(&'static str, u32
         && g(4) == Some("minecraft:blaze_powder")
     {
         return Some((rules::ITEM_NETHERITE_SEED_CORE, 1));
+    }
+    // 3 iron_ingot in V -> bucket
+    if non_empty.len() == 3 && g(3) == Some("minecraft:iron_ingot") && g(5) == Some("minecraft:iron_ingot") && g(7) == Some("minecraft:iron_ingot") {
+        return Some(("minecraft:bucket", 1));
+    }
+    // 5 iron_ingot in V + chest center -> hopper
+    if non_empty.len() == 6 && g(4) == Some("minecraft:chest")
+        && [0, 2, 3, 5, 7].iter().all(|&i| g(i) == Some("minecraft:iron_ingot"))
+    {
+        return Some(("minecraft:hopper", 1));
+    }
+    // 6 glass (top 2 rows) -> 16 glass_pane
+    if non_empty.len() == 6 && [0, 1, 2, 3, 4, 5].iter().all(|&i| g(i) == Some("minecraft:glass")) {
+        return Some(("minecraft:glass_pane", 16));
+    }
+    // 6 iron_ingot (top 2 rows) -> 16 iron_bars
+    if non_empty.len() == 6 && [0, 1, 2, 3, 4, 5].iter().all(|&i| g(i) == Some("minecraft:iron_ingot")) {
+        return Some(("minecraft:iron_bars", 16));
+    }
+    // 6 copper_ingot top/bottom + 3 glass middle -> 6 fluid_pipe
+    if non_empty.len() == 9
+        && [0, 1, 2, 6, 7, 8].iter().all(|&i| g(i) == Some("minecraft:copper_ingot"))
+        && [3, 4, 5].iter().all(|&i| g(i) == Some("minecraft:glass"))
+    {
+        return Some((rules::BLOCK_FLUID_PIPE, 6));
+    }
+    // 8 iron_plate + chest center -> silo_upgrade_5k
+    if non_empty.len() == 9 && g(4) == Some("minecraft:chest")
+        && [0, 1, 2, 3, 5, 6, 7, 8].iter().all(|&i| g(i) == Some(rules::ITEM_IRON_PLATE))
+    {
+        return Some((rules::ITEM_SILO_UPGRADE_5K, 1));
     }
     None
 }
@@ -6563,6 +6594,27 @@ pub(in crate::game) fn screen_tooltip(
     let progress = get(3);
     let auto_io = get(6) != 0;
     let quarry_radius = get(7).clamp(2, 4);
+
+    if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) {
+        if in_rect(at, [7.0, 7.0, 162.0, 54.0]) {
+            lines.push("§aGrilla de Red de Silos".into());
+            lines.push("§7• Clic con ítem en cursor: Depositar en silos".into());
+            lines.push("§7• Clic con cursor vacío: Retirar x64".into());
+        } else if in_rect(at, [7.0, 64.0, 13.0, 13.0]) {
+            lines.push("§bAlternar orden Ascendente / Descendente".into());
+        } else if in_rect(at, [22.0, 64.0, 13.0, 13.0]) {
+            lines.push("§bOrdenar por Cantidad (#) o Nombre (A)".into());
+        } else if in_rect(at, [37.0, 64.0, 13.0, 13.0]) {
+            lines.push("§bPágina Anterior".into());
+        } else if in_rect(at, [52.0, 64.0, 13.0, 13.0]) {
+            lines.push("§bPágina Siguiente".into());
+        } else if in_rect(at, [68.0, 64.0, 88.0, 13.0]) {
+            lines.push("§eBuscador: escribí letras para filtrar por nombre".into());
+        } else if in_rect(at, [157.0, 64.0, 12.0, 13.0]) {
+            lines.push("§cLimpiar búsqueda".into());
+        }
+        return;
+    }
 
     if kind == MachineKind::FluidTank && in_rect(at, [10.0, 24.0, 18.0, 34.0]) {
         let fcode = get(7);
