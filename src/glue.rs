@@ -2,26 +2,9 @@
 // Connects Horizon's native block entity hooks, 3D rendering, world primitives,
 // container menus, screens, and player interactions to `runtime.rs`.
 
-use crate::game::{
-    Game,
-    native_block_entity_draw::BlockEntityDraw,
-    rusty_factory as rules,
-};
-use horizon_assets::item_model::DisplayContext;
-use horizon_client::{
-    containers::{BlockEntity, ModBlockEntity, ModContainer},
-    hud::HudBatch,
-    items::ItemStack,
-    lang,
-    mod_api::{NativeCommand, NativeMod, NativeScreen},
-    text::Text,
-    world_primitives::WorldPrimitives,
-};
-use horizon_core::geometry::Direction;
-use horizon_world::{
-    nbt::{Compound, JavaString, Tag},
-    registry::BlockStateId,
-};
+use crate::host_compat as hc;
+use crate::runtime as rules;
+use mod_api::*;
 use rules::{MachineKind, MachineState, MachineTier, StepStatus};
 
 const STATE_TAG: &str = "rusty_machine";
@@ -33,142 +16,174 @@ const POWER_BTN_RECT: [f32; 4] = [136.0, 18.0, 34.0, 14.0];
 const MODE_BTN_RECT: [f32; 4] = [136.0, 62.0, 34.0, 14.0];
 const RESET_BTN_RECT: [f32; 4] = [98.0, 18.0, 34.0, 14.0];
 
-fn state_key() -> JavaString {
-    JavaString::from(STATE_TAG)
+fn state_key() -> String {
+    STATE_TAG.to_owned()
 }
 
-pub(in crate::game) fn load_state(entity: &ModBlockEntity) -> Option<MachineState> {
-    match entity.nbt.get(&state_key()) {
+pub(crate) fn load_state(entity: &impl hc::HasNbt) -> Option<MachineState> {
+    match entity.nbt().get(&STATE_TAG.into()) {
         Some(Tag::ByteArray(bytes)) => serde_json::from_slice(bytes).ok(),
         _ => None,
     }
 }
 
-pub(in crate::game) fn store_state(entity: &mut ModBlockEntity, state: &MachineState) {
+pub(crate) fn store_state(entity: &mut impl hc::HasNbt, state: &MachineState) {
     if let Ok(bytes) = serde_json::to_vec(state) {
-        entity.nbt.insert(state_key(), Tag::ByteArray(bytes));
+        entity.nbt_mut().insert(STATE_TAG.into(), Tag::ByteArray(bytes));
     }
 }
 
-pub(in crate::game) fn listed(mods: &mut Vec<NativeMod>) {
-    mods.push(NativeMod {
-        id: rules::ID.into(),
-        title: format!("Rusty Factory {}", rules::VERSION),
-        description: lang::get_or(
-            "rusty_factory.mod.description",
-            "Industrial automation: 3D Quarry, Item Pipes, Copper Energy Cables, 3D Animated Conveyor Belts, Crusher, Furnace & Press.",
-        ),
-        keys: Vec::new(),
-    });
+pub(crate) fn all_block_entity_blocks() -> &'static [&'static str] {
+    &[
+        rules::BLOCK_GENERATOR,
+        rules::BLOCK_BIO_GENERATOR,
+        rules::BLOCK_SOLAR,
+        rules::BLOCK_ENERGY_BANK,
+        rules::BLOCK_CABLE_WHITE,
+        rules::BLOCK_CABLE_COPPER,
+        rules::BLOCK_CABLE_GOLD,
+        rules::BLOCK_CABLE_RED,
+        rules::BLOCK_ITEM_PIPE,
+        rules::BLOCK_ITEM_PIPE_MK2,
+        rules::BLOCK_ITEM_PIPE_MK3,
+        rules::BLOCK_EXTRACTOR,
+        rules::BLOCK_CRUSHER,
+        rules::BLOCK_FURNACE,
+        rules::BLOCK_PRESS,
+        rules::BLOCK_ASSEMBLER,
+        rules::BLOCK_VULCANIZER,
+        rules::BLOCK_SAP_EXTRACTOR,
+        rules::BLOCK_QUARRY,
+        rules::BLOCK_QUARRY_MK2,
+        rules::BLOCK_QUARRY_MK3,
+        rules::BLOCK_HARVESTER,
+        rules::BLOCK_BREAKER,
+        rules::BLOCK_PLACER,
+        rules::BLOCK_CONVEYOR,
+        rules::BLOCK_CONVEYOR_MK2,
+        rules::BLOCK_CONVEYOR_MK3,
+        rules::BLOCK_ENERGY_MONITOR,
+        rules::BLOCK_FLUID_TANK,
+        rules::BLOCK_STEAM_BOILER,
+        rules::BLOCK_FLUID_PUMP,
+        rules::BLOCK_TRASH_CAN,
+        rules::BLOCK_ENERGY_RELAY,
+        rules::BLOCK_CHARGING_PAD,
+        rules::BLOCK_FLUID_PIPE,
+        rules::BLOCK_FLUID_PIPE_MK2,
+        rules::BLOCK_FLUID_PIPE_MK3,
+        rules::BLOCK_ITEM_SPLITTER,
+        rules::BLOCK_ALLOY_SMELTER,
+        rules::BLOCK_UPGRADE_STATION,
+        rules::BLOCK_GEOTHERMAL,
+        rules::BLOCK_STEAM_TURBINE,
+        rules::BLOCK_TESSERACT,
+        rules::BLOCK_INDUSTRIAL_SILO,
+        rules::BLOCK_SILO_CONTROLLER,
+        rules::BLOCK_SILO_CRAFTING_TERMINAL,
+        rules::BLOCK_NUCLEAR_REACTOR,
+        rules::BLOCK_WIND_TURBINE,
+        rules::BLOCK_HYDROPONIC_CHAMBER,
+        rules::BLOCK_LASER_TURRET,
+        rules::BLOCK_WIRELESS_CHARGER,
+        rules::BLOCK_TELEPORTER_PAD,
+        rules::BLOCK_RECYCLER,
+        rules::BLOCK_RUBBER_SAP_LOG,
+        rules::BLOCK_RUBBER_SAPLING,
+    ]
 }
 
-pub(in crate::game) fn block_entity(block: &str, entity: &mut Option<(String, Compound)>) {
+pub(crate) fn block_entity(block: &str) -> Option<Compound> {
     let is_tree_tick_block = matches!(block, rules::BLOCK_RUBBER_SAP_LOG | rules::BLOCK_RUBBER_SAPLING);
-    if (MachineKind::from_block_id(block).is_some() || is_tree_tick_block) && entity.is_none() {
+    if MachineKind::from_block_id(block).is_some() || is_tree_tick_block {
         let mut nbt = Compound::default();
         if let Some(kind) = MachineKind::from_block_id(block) {
             if let Ok(bytes) = serde_json::to_vec(&MachineState::new(kind)) {
-                nbt.insert(state_key(), Tag::ByteArray(bytes));
+                nbt.insert(STATE_TAG.into(), Tag::ByteArray(bytes));
             }
         }
-        *entity = Some((block.to_owned(), nbt));
+        Some(nbt)
+    } else {
+        None
     }
 }
 
-pub(in crate::game) fn block_entity_ticks(block: &str, ticks: &mut bool) {
-    if MachineKind::from_block_id(block).is_some()
+pub(crate) fn block_entity_ticks(block: &str) -> bool {
+    MachineKind::from_block_id(block).is_some()
         || matches!(block, rules::BLOCK_RUBBER_SAP_LOG | rules::BLOCK_RUBBER_SAPLING)
-    {
-        *ticks = true;
+}
+
+pub(crate) fn update_tag(_pos: [i32; 3], entity: &ModBlockEntity) -> Option<Compound> {
+    if MachineKind::from_block_id(entity.id()).is_some() {
+        Some(entity.nbt.clone())
+    } else {
+        None
     }
 }
 
-pub(in crate::game) fn update_tag(
-    _pos: [i32; 3],
-    entity: &ModBlockEntity,
-    tag: &mut Option<Compound>,
-) {
-    if MachineKind::from_block_id(&entity.id).is_some() {
-        *tag = Some(entity.nbt.clone());
+pub(crate) fn container(block: &str) -> Option<ModContainer> {
+    let kind = MachineKind::from_block_id(block)?;
+    match kind {
+        MachineKind::CoalGenerator
+        | MachineKind::BioGenerator
+        | MachineKind::SteamBoiler
+        | MachineKind::SolarGenerator
+        | MachineKind::VoidTrashCan
+        | MachineKind::ChargingPad
+        | MachineKind::FluidTank
+        | MachineKind::FluidPump
+        | MachineKind::GeothermalGenerator
+        | MachineKind::SteamTurbine
+        | MachineKind::IndustrialSilo
+        | MachineKind::NuclearReactor => Some(ModContainer {
+            slots: 1,
+            faces: std::array::from_fn(|_| vec![0]),
+            inputs: vec![0],
+            outputs: vec![0],
+            menu: Some(rules::MENU_SINGLE.to_owned()),
+        }),
+        MachineKind::SiloController => Some(ModContainer {
+            slots: 2,
+            faces: std::array::from_fn(|_| vec![0, 1]),
+            inputs: vec![0],
+            outputs: vec![1],
+            menu: Some("rusty_factory:silo_controller".to_owned()),
+        }),
+        MachineKind::SiloCraftingTerminal => Some(ModContainer {
+            slots: 10,
+            faces: std::array::from_fn(|_| vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+            inputs: vec![0, 1, 2, 3, 4, 5, 6, 7, 8],
+            outputs: vec![9],
+            menu: Some("rusty_factory:silo_crafting_terminal".to_owned()),
+        }),
+        MachineKind::EnergyMonitor
+        | MachineKind::EnergyRelay
+        | MachineKind::ConveyorBelt
+        | MachineKind::ItemPipe
+        | MachineKind::FluidPipe
+        | MachineKind::ItemSplitter
+        | MachineKind::UpgradeStation => None,
+        MachineKind::EnergyBank => Some(ModContainer {
+            slots: 1,
+            faces: std::array::from_fn(|_| vec![0]),
+            inputs: vec![0],
+            outputs: vec![0],
+            menu: Some(rules::MENU_SINGLE.to_owned()),
+        }),
+        _ => Some(ModContainer {
+            slots: rules::SLOTS,
+            faces: std::array::from_fn(|_| {
+                vec![rules::SLOT_INPUT, rules::SLOT_FUEL, rules::SLOT_OUTPUT]
+            }),
+            inputs: vec![rules::SLOT_INPUT, rules::SLOT_FUEL],
+            outputs: vec![rules::SLOT_OUTPUT],
+            menu: Some(rules::MENU.to_owned()),
+        }),
     }
 }
 
-pub(in crate::game) fn container(block: &str, container: &mut Option<ModContainer>) {
-    if let Some(kind) = MachineKind::from_block_id(block) {
-        match kind {
-            MachineKind::CoalGenerator
-            | MachineKind::BioGenerator
-            | MachineKind::SteamBoiler
-            | MachineKind::SolarGenerator
-            | MachineKind::VoidTrashCan
-            | MachineKind::ChargingPad
-            | MachineKind::FluidTank
-            | MachineKind::FluidPump
-            | MachineKind::GeothermalGenerator
-            | MachineKind::SteamTurbine
-            | MachineKind::IndustrialSilo
-            | MachineKind::NuclearReactor => {
-                *container = Some(ModContainer {
-                    slots: 1,
-                    faces: std::array::from_fn(|_| vec![0]),
-                    inputs: vec![0],
-                    outputs: vec![0],
-                    menu: Some(rules::MENU_SINGLE.to_owned()),
-                });
-            }
-            MachineKind::SiloController => {
-                *container = Some(ModContainer {
-                    slots: 2,
-                    faces: std::array::from_fn(|_| vec![0, 1]),
-                    inputs: vec![0],
-                    outputs: vec![1],
-                    menu: Some("rusty_factory:silo_controller".to_owned()),
-                });
-            }
-            MachineKind::SiloCraftingTerminal => {
-                *container = Some(ModContainer {
-                    slots: 10,
-                    faces: std::array::from_fn(|_| vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
-                    inputs: vec![0, 1, 2, 3, 4, 5, 6, 7, 8],
-                    outputs: vec![9],
-                    menu: Some("rusty_factory:silo_crafting_terminal".to_owned()),
-                });
-            }
-            MachineKind::EnergyMonitor
-            | MachineKind::EnergyRelay
-            | MachineKind::ConveyorBelt
-            | MachineKind::ItemPipe
-            | MachineKind::FluidPipe
-            | MachineKind::ItemSplitter
-            | MachineKind::UpgradeStation => {
-                *container = None;
-            }
-            MachineKind::EnergyBank => {
-                *container = Some(ModContainer {
-                    slots: 1,
-                    faces: std::array::from_fn(|_| vec![0]),
-                    inputs: vec![0],
-                    outputs: vec![0],
-                    menu: Some(rules::MENU_SINGLE.to_owned()),
-                });
-            }
-            _ => {
-                *container = Some(ModContainer {
-                    slots: rules::SLOTS,
-                    faces: std::array::from_fn(|_| {
-                        vec![rules::SLOT_INPUT, rules::SLOT_FUEL, rules::SLOT_OUTPUT]
-                    }),
-                    inputs: vec![rules::SLOT_INPUT, rules::SLOT_FUEL],
-                    outputs: vec![rules::SLOT_OUTPUT],
-                    menu: Some(rules::MENU.to_owned()),
-                });
-            }
-        }
-    }
-}
-
-fn fuel_burn_ticks(stack: &ItemStack) -> Option<i32> {
-    match &*stack.item {
+fn fuel_burn_ticks(host: &dyn Host, stack: &ItemStack) -> Option<i32> {
+    match hc::item_id(host, stack).as_str() {
         rules::ITEM_BATTERY => Some(-1),
         rules::ITEM_BIO_FUEL => Some(3200),
         rules::ITEM_RAW_SAP => Some(800),
@@ -232,11 +247,11 @@ fn is_item_container_block(block_id: &str) -> bool {
 }
 
 /// Grows a full Rubber Tree (`rubber_log`, `rubber_sap_log` with golden sap cavities, and `rubber_leaves`) at `pos`.
-fn grow_rubber_tree(game: &mut Game<'_>, pos: [i32; 3]) {
-    let dim = game.native_dimension();
-    let seed = game.world.game_time ^ ((pos[0] as i64).wrapping_mul(31) ^ (pos[2] as i64));
+fn grow_rubber_tree(host: &mut dyn ServerHost, pos: [i32; 3]) {
+    let dim = host.dimension();
+    let seed = hc::game_time(host) ^ ((pos[0] as i64).wrapping_mul(31) ^ (pos[2] as i64));
     for (p, block_id, opt_prop) in rules::rubber_tree_blocks(pos, seed) {
-        let cur = game.native_block(p);
+        let cur = hc::block_id_at(host, p);
         let can_place = p == pos
             || matches!(
                 cur.as_str(),
@@ -251,20 +266,19 @@ fn grow_rubber_tree(game: &mut Game<'_>, pos: [i32; 3]) {
         if !can_place {
             continue;
         }
-        if let Some(st) = game.native_default_state(block_id) {
-            game.native_set_block(dim, p, st, 3);
+        if hc::set_block_by_id(host, p, block_id) {
             if let Some((k, v)) = opt_prop {
-                game.native_set_block_property(p, k, v);
+                host.set_block_property(p, k, v);
             }
             if block_id == rules::BLOCK_RUBBER_SAP_LOG {
-                game.native_set_block_property(p, "lit", "true");
+                host.set_block_property(p, "lit", "true");
             }
         }
     }
 }
 
 /// Scans all connected `industrial_silo`s / `silo_controller`s and adjacent chests/barrels.
-fn collect_silo_network(game: &Game<'_>, start: [i32; 3]) -> (Vec<[i32; 3]>, Vec<[i32; 3]>) {
+fn collect_silo_network(host: &dyn Host, start: [i32; 3]) -> (Vec<[i32; 3]>, Vec<[i32; 3]>) {
     let mut silos = Vec::new();
     let mut chests = Vec::new();
     let mut visited = std::collections::HashSet::new();
@@ -281,7 +295,7 @@ fn collect_silo_network(game: &Game<'_>, start: [i32; 3]) -> (Vec<[i32; 3]>, Vec
             if !visited.insert(nb) {
                 continue;
             }
-            let b = game.native_block(nb);
+            let b = hc::block_id_at(host, nb);
             if b == rules::BLOCK_INDUSTRIAL_SILO {
                 silos.push(nb);
                 q.push_back(nb);
@@ -296,26 +310,16 @@ fn collect_silo_network(game: &Game<'_>, start: [i32; 3]) -> (Vec<[i32; 3]>, Vec
 }
 
 /// Aggregates all items across connected Silos and nearby Chests, sorted by total count descending.
-fn aggregate_silo_network(game: &Game<'_>, start: [i32; 3]) -> (Vec<(String, u32, bool)>, usize, usize) {
-    let (silos, chests) = collect_silo_network(game, start);
+fn aggregate_silo_network(host: &dyn Host, start: [i32; 3]) -> (Vec<(String, u32, bool)>, usize, usize) {
+    let (silos, chests) = collect_silo_network(host, start);
     let mut map: std::collections::BTreeMap<String, (u32, bool)> = std::collections::BTreeMap::new();
 
     for sp in &silos {
-        if let Some(BlockEntity::Mod(ent)) = game.world.block_entities.get(&(sp[0], sp[1], sp[2])) {
-            if let Some(st) = load_state(ent) {
-                if !st.belt_item.is_empty() && st.belt_count > 0 {
-                    let e = map.entry(st.belt_item).or_insert((0, true));
-                    e.0 = e.0.saturating_add(st.belt_count);
-                    e.1 = true;
-                }
-            }
-        }
-    }
-    for cp in &chests {
-        if let Some(BlockEntity::Chest(slots)) = game.world.block_entities.get(&(cp[0], cp[1], cp[2])) {
-            for slot in slots.iter().flatten() {
-                let e = map.entry(slot.item.to_string()).or_insert((0, false));
-                e.0 = e.0.saturating_add(slot.count);
+        if let Some(st) = hc::read_machine_state(host, *sp) {
+            if !st.belt_item.is_empty() && st.belt_count > 0 {
+                let e = map.entry(st.belt_item).or_insert((0, true));
+                e.0 = e.0.saturating_add(st.belt_count);
+                e.1 = true;
             }
         }
     }
@@ -325,12 +329,12 @@ fn aggregate_silo_network(game: &Game<'_>, start: [i32; 3]) -> (Vec<(String, u32
 }
 
 fn sorted_silo_network(
-    game: &Game<'_>,
+    host: &dyn Host,
     start: [i32; 3],
     sort_by_name: bool,
     ascending: bool,
 ) -> (Vec<(String, u32, bool)>, usize, usize) {
-    let (mut list, silos_n, chests_n) = aggregate_silo_network(game, start);
+    let (mut list, silos_n, chests_n) = aggregate_silo_network(host, start);
     list.sort_by(|a, b| {
         let ord = if sort_by_name {
             let sa = a.0.split(':').nth(1).unwrap_or(&a.0);
@@ -352,13 +356,13 @@ fn get_terminal_search() -> String {
 }
 
 fn filtered_silo_network(
-    game: &Game<'_>,
+    host: &dyn Host,
     start: [i32; 3],
     sort_by_name: bool,
     ascending: bool,
     query: &str,
 ) -> (Vec<(String, u32, bool)>, usize, usize) {
-    let (mut list, silos_n, chests_n) = sorted_silo_network(game, start, sort_by_name, ascending);
+    let (mut list, silos_n, chests_n) = sorted_silo_network(host, start, sort_by_name, ascending);
     let q = query.trim().to_ascii_lowercase();
     if !q.is_empty() {
         list.retain(|(id, _, _)| {
@@ -369,11 +373,11 @@ fn filtered_silo_network(
     (list, silos_n, chests_n)
 }
 
-pub(in crate::game) fn key_event(game: &mut Game<'_>, key: &str, pressed: bool) {
-    if !pressed || !game.native_on(rules::ID) {
+pub(crate) fn key_event(host: &mut dyn ClientHost, key: &str, pressed: bool) {
+    if !pressed {
         return;
     }
-    if !game.native_screen_shown() {
+    if !host.mod_screen().is_some() {
         TERMINAL_OPEN.store(false, std::sync::atomic::Ordering::Relaxed);
         return;
     }
@@ -400,8 +404,13 @@ pub(in crate::game) fn key_event(game: &mut Game<'_>, key: &str, pressed: bool) 
     }
 }
 
-fn match_terminal_craft(grid: &[Option<ItemStack>]) -> Option<(&'static str, u32)> {
-    let g = |i: usize| grid.get(i).and_then(|s| s.as_ref()).map(|s| s.item.as_ref());
+fn match_terminal_craft(host: &dyn Host, grid: &[Option<ItemStack>]) -> Option<(&'static str, u32)> {
+    let ids: [Option<String>; 9] = std::array::from_fn(|i| {
+        grid.get(i)
+            .and_then(|s| s.as_ref())
+            .map(|s| hc::item_id(host, s))
+    });
+    let g = |i: usize| ids[i].as_deref();
     let non_empty: Vec<(usize, &str)> = (0..9).filter_map(|i| g(i).map(|id| (i, id))).collect();
     if non_empty.is_empty() {
         return None;
@@ -549,11 +558,11 @@ fn match_terminal_craft(grid: &[Option<ItemStack>]) -> Option<(&'static str, u32
 }
 
 /// Pulls 1 unit of `target_item` from the connected Silo/Chest network for auto-refill crafting.
-fn pull_one_from_silo_network(game: &mut Game<'_>, pos: [i32; 3], target_item: &str) -> bool {
-    let (silos, chests) = collect_silo_network(game, pos);
+fn pull_one_from_silo_network(host: &mut dyn ServerHost, pos: [i32; 3], target_item: &str) -> bool {
+    let (silos, chests) = collect_silo_network(host, pos);
     for &sp in &silos {
         let mut took = false;
-        game.native_with_mod_block_entity(sp, |sent| {
+        hc::with_mod_block_entity(host, sp, |sent| {
             if let Some(mut sst) = load_state(sent) {
                 if sst.belt_item == target_item && sst.belt_count > 0 {
                     sst.belt_count -= 1;
@@ -566,42 +575,28 @@ fn pull_one_from_silo_network(game: &mut Game<'_>, pos: [i32; 3], target_item: &
             }
         });
         if took {
-            game.native_block_entity_sync(sp);
+            host.block_entity_sync(sp);
             return true;
         }
     }
     for &cp in &chests {
-        if let Some(BlockEntity::Chest(slots)) = game.world.block_entities.get_mut(&(cp[0], cp[1], cp[2])) {
-            for slot in slots.iter_mut() {
-                if let Some(st) = slot.as_mut() {
-                    if st.item.as_ref() == target_item && st.count > 0 {
-                        if st.count > 1 {
-                            st.count -= 1;
-                        } else {
-                            *slot = None;
-                        }
-                        return true;
-                    }
-                }
-            }
+        if hc::take_one_matching_from_container(host, cp, target_item) {
+            return true;
         }
     }
     false
 }
 
 /// Routes `stack` through a `silo_controller` into matching Silos, then empty Silos, then connected Chests.
-fn insert_into_silo_controller(game: &mut Game<'_>, pos: [i32; 3], mut stack: ItemStack) -> Option<ItemStack> {
-    let (silos, chests) = collect_silo_network(game, pos);
+fn insert_into_silo_controller(host: &mut dyn ServerHost, pos: [i32; 3], mut stack: ItemStack) -> Option<ItemStack> {
+    let (silos, chests) = collect_silo_network(host, pos);
+    let item_str = hc::item_id(host, &stack);
     // 1. Silos already holding this exact item
     for &sp in &silos {
-        let matches_item = game
-            .world
-            .block_entities
-            .get(&(sp[0], sp[1], sp[2]))
-            .and_then(|be| if let BlockEntity::Mod(e) = be { load_state(e) } else { None })
-            .is_some_and(|st| st.belt_item == stack.item.as_ref());
+        let matches_item = hc::read_machine_state(host, sp)
+            .is_some_and(|st| st.belt_item == item_str);
         if matches_item {
-            match insert_into_silo(game, sp, stack) {
+            match insert_into_silo(host, sp, stack) {
                 None => return None,
                 Some(rest) => stack = rest,
             }
@@ -609,14 +604,10 @@ fn insert_into_silo_controller(game: &mut Game<'_>, pos: [i32; 3], mut stack: It
     }
     // 2. Empty Silos
     for &sp in &silos {
-        let is_empty = game
-            .world
-            .block_entities
-            .get(&(sp[0], sp[1], sp[2]))
-            .and_then(|be| if let BlockEntity::Mod(e) = be { load_state(e) } else { None })
+        let is_empty = hc::read_machine_state(host, sp)
             .is_some_and(|st| st.belt_item.is_empty());
         if is_empty {
-            match insert_into_silo(game, sp, stack) {
+            match insert_into_silo(host, sp, stack) {
                 None => return None,
                 Some(rest) => stack = rest,
             }
@@ -624,7 +615,7 @@ fn insert_into_silo_controller(game: &mut Game<'_>, pos: [i32; 3], mut stack: It
     }
     // 3. Connected Chests
     for &cp in &chests {
-        match game.native_insert_item(cp, Direction::Up, stack) {
+        match hc::insert_item_rem(host, cp, Direction::Up, stack) {
             None => return None,
             Some(rest) => stack = rest,
         }
@@ -633,13 +624,13 @@ fn insert_into_silo_controller(game: &mut Game<'_>, pos: [i32; 3], mut stack: It
 }
 
 /// Inserts `stack` into an `industrial_silo` ONLY if it is empty or already holds that exact item type.
-fn insert_into_silo(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) -> Option<ItemStack> {
-    if game.native_block(pos) != rules::BLOCK_INDUSTRIAL_SILO {
+fn insert_into_silo(host: &mut dyn ServerHost, pos: [i32; 3], stack: ItemStack) -> Option<ItemStack> {
+    if hc::block_id_at(host, pos) != rules::BLOCK_INDUSTRIAL_SILO {
         return Some(stack);
     }
-    let item_id = stack.item.to_string();
-    let mut rem = stack.count;
-    let changed = game.native_with_mod_block_entity(pos, |entity| {
+    let item_id = hc::item_id(host, &stack);
+    let mut rem = stack.count();
+    let changed = hc::with_mod_block_entity(host, pos, |entity| {
         let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::IndustrialSilo));
         if !st.belt_item.is_empty() && st.belt_item != item_id {
             return false;
@@ -657,31 +648,31 @@ fn insert_into_silo(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) -> Opt
         true
     });
     if changed == Some(true) {
-        game.native_block_entity_sync(pos);
+        host.block_entity_sync(pos);
     }
     if rem == 0 {
         None
     } else {
-        Some(ItemStack::new(&stack.item, rem))
+        hc::make_stack(host, &hc::item_id(host, &stack), rem)
     }
 }
 
-/// Inserts `stack` onto a conveyor belt's `MachineState` if it is empty or can batch more of the same item.
+/// Inserts `stack` onto a conveyor belt's `MachineState` if it is empty or can draw more of the same item.
 /// Returns `None` if all items were accepted, or `Some(leftover)`.
-fn insert_into_conveyor(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) -> Option<ItemStack> {
-    let block = game.native_block(pos);
+fn insert_into_conveyor(host: &mut dyn ServerHost, pos: [i32; 3], stack: ItemStack) -> Option<ItemStack> {
+    let block = hc::block_id_at(host, pos);
     let Some((_, max_batch)) = rules::conveyor_tier(&block) else {
         return Some(stack);
     };
     let mut accepted = 0u32;
-    let changed = game.native_with_mod_block_entity(pos, |entity| {
+    let item_id = hc::item_id(host, &stack);
+    let changed = hc::with_mod_block_entity(host, pos, |entity| {
         let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ConveyorBelt));
         if !st.enabled {
             return false;
         }
-        let item_id = stack.item.to_string();
         if st.belt_item.is_empty() {
-            let take = stack.count.min(max_batch);
+            let take = stack.count().min(max_batch);
             st.belt_item = item_id;
             st.belt_count = take;
             st.progress = 0;
@@ -690,7 +681,7 @@ fn insert_into_conveyor(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
             true
         } else if st.belt_item == item_id && st.belt_count < max_batch {
             let space = max_batch - st.belt_count;
-            let take = stack.count.min(space);
+            let take = stack.count().min(space);
             st.belt_count += take;
             accepted = take;
             store_state(entity, &st);
@@ -700,10 +691,10 @@ fn insert_into_conveyor(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
         }
     });
     if changed == Some(true) && accepted > 0 {
-        game.native_block_entity_sync(pos);
-        if stack.count > accepted {
+        host.block_entity_sync(pos);
+        if stack.count() > accepted {
             let mut rest = stack;
-            rest.count -= accepted;
+            let _ = rest.set_count(rest.count().saturating_sub(accepted).max(1));
             Some(rest)
         } else {
             None
@@ -715,12 +706,11 @@ fn insert_into_conveyor(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
 
 /// Inserts `stack` into a Create-style Filtered Round-Robin Item Splitter (`rusty_factory:item_splitter`),
 /// routing matching items to filtered faces (Left / Front / Right) and dropping into open air if unattached!
-fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) -> Option<ItemStack> {
-    if game.native_block(pos) != rules::BLOCK_ITEM_SPLITTER {
+fn insert_into_splitter(host: &mut dyn ServerHost, pos: [i32; 3], stack: ItemStack) -> Option<ItemStack> {
+    if hc::block_id_at(host, pos) != rules::BLOCK_ITEM_SPLITTER {
         return Some(stack);
     }
-    let facing = game
-        .native_block_property(pos, "facing")
+    let facing = hc::block_property_at(host, pos, "facing")
         .unwrap_or_else(|| "north".to_owned());
     let out_offsets = [
         rules::conveyor_exit_offset(&facing, "turn_left"),
@@ -729,14 +719,14 @@ fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
     ];
     let mut start_idx = 0usize;
     let mut filters = [String::new(), String::new(), String::new()];
-    game.native_with_mod_block_entity(pos, |entity| {
+    hc::with_mod_block_entity(host, pos, |entity| {
         if let Some(st) = load_state(entity) {
             start_idx = (st.progress as usize) % 3;
             filters = st.splitter_filters;
         }
     });
 
-    let item_id = stack.item.to_string();
+    let item_id = hc::item_id(host, &stack);
     let has_matching_filter = filters.iter().any(|f| !f.is_empty() && *f == item_id);
 
     for step in 0..3 {
@@ -752,25 +742,25 @@ fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
 
         let off = out_offsets[idx];
         let target = [pos[0] + off[0], pos[1] + off[1], pos[2] + off[2]];
-        let tb = game.native_block(target);
+        let tb = hc::block_id_at(host, target);
         let is_air = matches!(tb.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air");
         let leftover = if rules::is_conveyor_block(&tb) {
-            insert_into_conveyor(game, target, stack.clone())
+            insert_into_conveyor(host, target, stack.clone())
         } else if rules::is_item_pipe(&tb) {
-            insert_into_pipe(game, pos, target, stack.clone(), None)
+            insert_into_pipe(host, pos, target, stack.clone(), None)
         } else if tb == rules::BLOCK_INDUSTRIAL_SILO {
-            insert_into_silo(game, target, stack.clone())
+            insert_into_silo(host, target, stack.clone())
         } else if tb == rules::BLOCK_SILO_CONTROLLER {
-            insert_into_silo_controller(game, target, stack.clone())
+            insert_into_silo_controller(host, target, stack.clone())
         } else if is_item_container_block(&tb) {
-            match game.native_insert_item(target, Direction::Up, stack.clone()) {
+            match hc::insert_item_rem(host, target, Direction::Up, stack.clone()) {
                 None => None,
-                Some(r) => game.native_insert_item(target, Direction::North, r),
+                Some(r) => hc::insert_item_rem(host, target, Direction::North, r),
             }
         } else if is_air {
             let target_below = [target[0], target[1] - 1, target[2]];
-            if rules::is_conveyor_block(&game.native_block(target_below)) {
-                insert_into_conveyor(game, target_below, stack.clone())
+            if rules::is_conveyor_block(&hc::block_id_at(host, target_below)) {
+                insert_into_conveyor(host, target_below, stack.clone())
             } else if has_matching_filter {
                 let drop_pos = [
                     pos[0] as f64 + 0.5 + off[0] as f64 * 0.65,
@@ -778,7 +768,7 @@ fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
                     pos[2] as f64 + 0.5 + off[2] as f64 * 0.65,
                 ];
                 let vel = [off[0] as f64 * 0.12, 0.06, off[2] as f64 * 0.12];
-                game.spawn_item(stack.clone(), drop_pos, vel, 10);
+                hc::spawn_item(host, stack.clone(), drop_pos);
                 None
             } else {
                 Some(stack.clone())
@@ -786,9 +776,9 @@ fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
         } else {
             Some(stack.clone())
         };
-        if leftover.as_ref().map_or(0, |r| r.count) < stack.count {
+        if leftover.as_ref().map_or(0, |r| r.count()) < stack.count() {
             let next_idx = ((idx + 1) % 3) as i32;
-            game.native_with_mod_block_entity(pos, |entity| {
+            hc::with_mod_block_entity(host, pos, |entity| {
                 let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ItemSplitter));
                 st.progress = next_idx;
                 store_state(entity, &st);
@@ -801,13 +791,13 @@ fn insert_into_splitter(game: &mut Game<'_>, pos: [i32; 3], stack: ItemStack) ->
 
 /// Inserts `stack` into an `item_pipe`'s `ModBlockEntity` so it visibly travels through the glass tube.
 fn insert_into_pipe(
-    game: &mut Game<'_>,
+    host: &mut dyn ServerHost,
     from_pos: [i32; 3],
     pipe_pos: [i32; 3],
     stack: ItemStack,
     target_pos: Option<[i32; 3]>,
 ) -> Option<ItemStack> {
-    if !rules::is_item_pipe(&game.native_block(pipe_pos)) {
+    if !rules::is_item_pipe(&hc::block_id_at(host, pipe_pos)) {
         return Some(stack);
     }
     let from_off = [from_pos[0] - pipe_pos[0], from_pos[1] - pipe_pos[1], from_pos[2] - pipe_pos[2]];
@@ -815,8 +805,8 @@ fn insert_into_pipe(
     let next_step = rules::find_next_pipe_step(
         pipe_pos,
         target_pos,
-        |p| rules::is_item_pipe(&game.native_block(p)) && p != from_pos,
-        |p| p != from_pos && (is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p))),
+        |p| rules::is_item_pipe(&hc::block_id_at(host, p)) && p != from_pos,
+        |p| p != from_pos && (is_item_container_block(&hc::block_id_at(host, p)) || rules::is_conveyor_block(&hc::block_id_at(host, p))),
     );
     let (to_dir, final_target) = if let Some((step, tgt)) = next_step {
         let to_off = [step[0] - pipe_pos[0], step[1] - pipe_pos[1], step[2] - pipe_pos[2]];
@@ -825,13 +815,14 @@ fn insert_into_pipe(
         (rules::opposite_dir_index(from_dir), target_pos)
     };
 
-    let inserted = game.native_with_mod_block_entity(pipe_pos, |entity| {
+    let item_id = hc::item_id(host, &stack);
+    let inserted = hc::with_mod_block_entity(host, pipe_pos, |entity| {
         let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ItemPipe));
         if !st.belt_item.is_empty() {
             return false;
         }
-        st.belt_item = stack.item.to_string();
-        st.belt_count = stack.count;
+        st.belt_item = item_id.clone();
+        st.belt_count = stack.count();
         st.progress = 0;
         st.pipe_from = from_dir;
         st.pipe_to = to_dir;
@@ -845,7 +836,7 @@ fn insert_into_pipe(
         true
     });
     if inserted == Some(true) {
-        game.native_block_entity_sync(pipe_pos);
+        host.block_entity_sync(pipe_pos);
         None
     } else {
         Some(stack)
@@ -855,26 +846,26 @@ fn insert_into_pipe(
 /// Routes `stack` from `source_pos` into connected `rusty_factory:item_pipe` networks (step-by-step visible travel)
 /// or directly into adjacent containers / conveyor belts.
 /// Returns the remaining stack (`None` if all items were inserted).
-fn route_item_from(game: &mut Game<'_>, source_pos: [i32; 3], mut stack: ItemStack) -> Option<ItemStack> {
+fn route_item_from(host: &mut dyn ServerHost, source_pos: [i32; 3], mut stack: ItemStack) -> Option<ItemStack> {
     // 1. Try direct adjacent containers first (except conveyors)
     for d in rules::DIRS {
         let adj = [source_pos[0] + d[0], source_pos[1] + d[1], source_pos[2] + d[2]];
-        let blk = game.native_block(adj);
+        let blk = hc::block_id_at(host, adj);
         if blk == rules::BLOCK_INDUSTRIAL_SILO {
-            match insert_into_silo(game, adj, stack) {
+            match insert_into_silo(host, adj, stack) {
                 None => return None,
                 Some(rest) => stack = rest,
             }
         } else if blk == rules::BLOCK_SILO_CONTROLLER {
-            match insert_into_silo_controller(game, adj, stack) {
+            match insert_into_silo_controller(host, adj, stack) {
                 None => return None,
                 Some(rest) => stack = rest,
             }
         } else if !rules::is_conveyor_block(&blk) && is_item_container_block(&blk) {
-            match game.native_insert_item(adj, Direction::Up, stack) {
+            match hc::insert_item_rem(host, adj, Direction::Up, stack) {
                 None => return None,
                 Some(rest) => {
-                    stack = match game.native_insert_item(adj, Direction::North, rest) {
+                    stack = match hc::insert_item_rem(host, adj, Direction::North, rest) {
                         None => return None,
                         Some(r2) => r2,
                     };
@@ -886,14 +877,14 @@ fn route_item_from(game: &mut Game<'_>, source_pos: [i32; 3], mut stack: ItemSta
     // 2. Try adjacent item_pipes if the network has a reachable target
     let targets = rules::find_connected_item_targets(
         source_pos,
-        |p| rules::is_item_pipe(&game.native_block(p)),
-        |p| p != source_pos && (is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p)) || game.native_block(p) == rules::BLOCK_ITEM_SPLITTER),
+        |p| rules::is_item_pipe(&hc::block_id_at(host, p)),
+        |p| p != source_pos && (is_item_container_block(&hc::block_id_at(host, p)) || rules::is_conveyor_block(&hc::block_id_at(host, p)) || hc::block_id_at(host, p) == rules::BLOCK_ITEM_SPLITTER),
     );
     if !targets.is_empty() {
         for d in rules::DIRS {
             let adj = [source_pos[0] + d[0], source_pos[1] + d[1], source_pos[2] + d[2]];
-            if rules::is_item_pipe(&game.native_block(adj)) {
-                if insert_into_pipe(game, source_pos, adj, stack.clone(), None).is_none() {
+            if rules::is_item_pipe(&hc::block_id_at(host, adj)) {
+                if insert_into_pipe(host, source_pos, adj, stack.clone(), None).is_none() {
                     return None;
                 }
             }
@@ -903,8 +894,8 @@ fn route_item_from(game: &mut Game<'_>, source_pos: [i32; 3], mut stack: ItemSta
     // 3. Try adjacent conveyor belts
     for d in rules::DIRS {
         let adj = [source_pos[0] + d[0], source_pos[1] + d[1], source_pos[2] + d[2]];
-        if rules::is_conveyor_block(&game.native_block(adj)) {
-            match insert_into_conveyor(game, adj, stack) {
+        if rules::is_conveyor_block(&hc::block_id_at(host, adj)) {
+            match insert_into_conveyor(host, adj, stack) {
                 None => return None,
                 Some(rest) => stack = rest,
             }
@@ -916,25 +907,23 @@ fn route_item_from(game: &mut Game<'_>, source_pos: [i32; 3], mut stack: ItemSta
 
 /// Auto-ejects up to `max_count` items from `entity.items[SLOT_OUTPUT]` into connected pipes/belts/chests.
 fn try_auto_eject_output(
-    game: &mut Game<'_>,
+    host: &mut dyn ServerHost,
     pos: [i32; 3],
-    entity: &mut ModBlockEntity,
+    entity: &mut ModBlockEntityView<'_>,
     max_count: u32,
 ) {
     let Some(out_stack) = entity.items.get(rules::SLOT_OUTPUT).cloned().flatten() else {
         return;
     };
-    let send_count = out_stack.count.min(max_count).max(1);
-    let to_send = ItemStack {
-        count: send_count,
-        ..out_stack.clone()
-    };
-    let leftover = route_item_from(game, pos, to_send);
-    let sent = send_count - leftover.as_ref().map_or(0, |r| r.count);
+    let send_count = out_stack.count().min(max_count).max(1);
+    let mut to_send = out_stack.clone();
+    let _ = to_send.set_count(send_count);
+    let leftover = route_item_from(host, pos, to_send);
+    let sent = send_count - leftover.as_ref().map_or(0, |r| r.count());
     if sent > 0 {
         if let Some(Some(slot_ref)) = entity.items.get_mut(rules::SLOT_OUTPUT) {
-            if slot_ref.count > sent {
-                slot_ref.count -= sent;
+            if slot_ref.count() > sent {
+                let _ = slot_ref.set_count(slot_ref.count() - sent);
             } else {
                 entity.items[rules::SLOT_OUTPUT] = None;
             }
@@ -945,7 +934,7 @@ fn try_auto_eject_output(
 /// Distributes FE from a Generator, Solar Panel, or Energy Bank across connected copper cables and adjacent machines.
 /// If `source_is_bank` is true, it will not send energy into another Energy Bank (preventing loops).
 fn distribute_energy(
-    game: &mut Game<'_>,
+    host: &mut dyn ServerHost,
     gen_pos: [i32; 3],
     available: i32,
     source_is_bank: bool,
@@ -955,9 +944,9 @@ fn distribute_energy(
     }
     let targets = rules::find_connected_consumers(
         gen_pos,
-        |p| rules::is_cable(&game.native_block(p)),
+        |p| rules::is_cable(&hc::block_id_at(host, p)),
         |p| {
-            let Some(k) = MachineKind::from_block_id(&game.native_block(p)) else {
+            let Some(k) = MachineKind::from_block_id(&hc::block_id_at(host, p)) else {
                 return false;
             };
             if source_is_bank && k == MachineKind::EnergyBank {
@@ -972,11 +961,11 @@ fn distribute_energy(
         if remaining <= 0 {
             break;
         }
-        let Some(kind) = MachineKind::from_block_id(&game.native_block(target_pos)) else {
+        let Some(kind) = MachineKind::from_block_id(&hc::block_id_at(host, target_pos)) else {
             continue;
         };
         let mut transferred = 0;
-        game.native_with_mod_block_entity(target_pos, |target_entity| {
+        hc::with_mod_block_entity(host, target_pos, |target_entity| {
             let mut st = load_state(target_entity).unwrap_or_else(|| MachineState::new(kind));
             let space = (kind.max_energy() - st.energy).max(0);
             let send = remaining.min(space).min(300);
@@ -994,10 +983,10 @@ fn distribute_energy(
 
 /// Updates a machine block's `lit` blockstate property (`true` when actively working, `false` otherwise)
 /// so its block model switches to the animated `*_on` texture and emits light.
-fn update_lit_state(game: &mut Game<'_>, pos: [i32; 3], working: bool) {
+fn update_lit_state(host: &mut dyn ServerHost, pos: [i32; 3], working: bool) {
     let want = if working { "true" } else { "false" };
-    if game.native_block_property(pos, "lit").as_deref() != Some(want) {
-        game.native_set_block_property(pos, "lit", want);
+    if hc::block_property_at(host, pos, "lit").as_deref() != Some(want) {
+        host.set_block_property(pos, "lit", want);
     }
 }
 
@@ -1005,19 +994,19 @@ fn update_lit_state(game: &mut Game<'_>, pos: [i32; 3], working: bool) {
 /// Advances the travelling item smoothly from `pipe_from` to `pipe_to`,
 /// then hands it off to the next pipe, conveyor belt, or destination container.
 fn tick_item_pipe(
-    game: &mut Game<'_>,
+    host: &mut dyn ServerHost,
     pos: [i32; 3],
-    entity: &mut ModBlockEntity,
+    entity: &mut ModBlockEntityView<'_>,
     state: &mut MachineState,
 ) {
     if state.belt_item.is_empty() {
         return;
     }
-    let pipe_ticks = rules::item_pipe_ticks(&entity.id);
+    let pipe_ticks = rules::item_pipe_ticks(&entity.id());
     if state.progress < pipe_ticks {
         state.progress += 1;
         store_state(entity, state);
-        game.native_block_entity_sync(pos);
+        host.block_entity_sync(pos);
         if state.progress < pipe_ticks {
             return;
         }
@@ -1028,25 +1017,25 @@ fn tick_item_pipe(
     let preferred = if state.pipe_has_target { Some(state.pipe_target) } else { None };
     let is_pipe_target = |p: [i32; 3]| {
         p != from_pos
-            && (is_item_container_block(&game.native_block(p))
-                || rules::is_conveyor_block(&game.native_block(p))
-                || game.native_block(p) == rules::BLOCK_ITEM_SPLITTER)
+            && (is_item_container_block(&hc::block_id_at(host, p))
+                || rules::is_conveyor_block(&hc::block_id_at(host, p))
+                || hc::block_id_at(host, p) == rules::BLOCK_ITEM_SPLITTER)
     };
     let next_step = rules::find_next_pipe_step(
         pos,
         preferred,
-        |p| rules::is_item_pipe(&game.native_block(p)) && p != from_pos,
+        |p| rules::is_item_pipe(&hc::block_id_at(host, p)) && p != from_pos,
         is_pipe_target,
     );
 
-    let stack = ItemStack::new(&state.belt_item, state.belt_count.max(1));
+    let Some(stack) = hc::make_stack(host, &state.belt_item, state.belt_count.max(1)) else { return; };
 
     // If there is no target at all in front of this pipe, check if this is an open pipe end (air) and drop cleanly
     let Some((step_pos, final_target)) = next_step else {
         let opp = rules::offset_from_dir_index(rules::opposite_dir_index(state.pipe_from));
         let open_pos = [pos[0] + opp[0], pos[1] + opp[1], pos[2] + opp[2]];
         if matches!(
-            game.native_block(open_pos).as_str(),
+            hc::block_id_at(host, open_pos).as_str(),
             "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
         ) {
             let drop_pos = [
@@ -1055,32 +1044,32 @@ fn tick_item_pipe(
                 pos[2] as f64 + 0.5 + opp[2] as f64 * 0.6,
             ];
             let vel = [opp[0] as f64 * 0.12, 0.06, opp[2] as f64 * 0.12];
-            game.spawn_item(stack, drop_pos, vel, 10);
+            hc::spawn_item(host, stack, drop_pos);
             state.belt_item.clear();
             state.belt_count = 0;
             state.progress = 0;
             state.pipe_has_target = false;
             store_state(entity, state);
-            game.native_block_entity_sync(pos);
+            host.block_entity_sync(pos);
         }
         return;
     };
 
-    let step_block = game.native_block(step_pos);
+    let step_block = hc::block_id_at(host, step_pos);
     let leftover = if rules::is_item_pipe(&step_block) {
-        insert_into_pipe(game, pos, step_pos, stack.clone(), Some(final_target))
+        insert_into_pipe(host, pos, step_pos, stack.clone(), Some(final_target))
     } else if step_block == rules::BLOCK_ITEM_SPLITTER {
-        insert_into_splitter(game, step_pos, stack.clone())
+        insert_into_splitter(host, step_pos, stack.clone())
     } else if step_block == rules::BLOCK_INDUSTRIAL_SILO {
-        insert_into_silo(game, step_pos, stack.clone())
+        insert_into_silo(host, step_pos, stack.clone())
     } else if step_block == rules::BLOCK_SILO_CONTROLLER {
-        insert_into_silo_controller(game, step_pos, stack.clone())
+        insert_into_silo_controller(host, step_pos, stack.clone())
     } else if rules::is_conveyor_block(&step_block) {
-        insert_into_conveyor(game, step_pos, stack.clone())
+        insert_into_conveyor(host, step_pos, stack.clone())
     } else {
-        match game.native_insert_item(step_pos, Direction::Up, stack.clone()) {
+        match hc::insert_item_rem(host, step_pos, Direction::Up, stack.clone()) {
             None => None,
-            Some(rest) => game.native_insert_item(step_pos, Direction::North, rest),
+            Some(rest) => hc::insert_item_rem(host, step_pos, Direction::North, rest),
         }
     };
 
@@ -1091,25 +1080,25 @@ fn tick_item_pipe(
             state.progress = 0;
             state.pipe_has_target = false;
             store_state(entity, state);
-            game.native_block_entity_sync(pos);
+            host.block_entity_sync(pos);
         }
-        Some(rest) if rest.count < state.belt_count => {
-            state.belt_count = rest.count;
+        Some(rest) if rest.count() < state.belt_count => {
+            state.belt_count = rest.count();
             store_state(entity, state);
-            game.native_block_entity_sync(pos);
+            host.block_entity_sync(pos);
         }
         Some(_) => {
             // Destination chest/target is full! Try any other reachable target in the network (including branching back!)
             state.pipe_has_target = false;
             let all_targets = rules::find_connected_item_targets(
                 pos,
-                |p| rules::is_item_pipe(&game.native_block(p)),
+                |p| rules::is_item_pipe(&hc::block_id_at(host, p)),
                 |p| {
                     p != final_target
                         && p != step_pos
-                        && (is_item_container_block(&game.native_block(p))
-                            || rules::is_conveyor_block(&game.native_block(p))
-                            || game.native_block(p) == rules::BLOCK_ITEM_SPLITTER)
+                        && (is_item_container_block(&hc::block_id_at(host, p))
+                            || rules::is_conveyor_block(&hc::block_id_at(host, p))
+                            || hc::block_id_at(host, p) == rules::BLOCK_ITEM_SPLITTER)
                 },
             );
             let mut rerouted = false;
@@ -1117,24 +1106,24 @@ fn tick_item_pipe(
                 if let Some((alt_step, _)) = rules::find_next_pipe_step(
                     pos,
                     Some(alt),
-                    |p| rules::is_item_pipe(&game.native_block(p)),
+                    |p| rules::is_item_pipe(&hc::block_id_at(host, p)),
                     |p| p == alt,
                 ) {
-                    let alt_blk = game.native_block(alt_step);
+                    let alt_blk = hc::block_id_at(host, alt_step);
                     let rem = if rules::is_item_pipe(&alt_blk) {
-                        insert_into_pipe(game, pos, alt_step, stack.clone(), Some(alt))
+                        insert_into_pipe(host, pos, alt_step, stack.clone(), Some(alt))
                     } else if alt_blk == rules::BLOCK_ITEM_SPLITTER {
-                        insert_into_splitter(game, alt_step, stack.clone())
+                        insert_into_splitter(host, alt_step, stack.clone())
                     } else if alt_blk == rules::BLOCK_INDUSTRIAL_SILO {
-                        insert_into_silo(game, alt_step, stack.clone())
+                        insert_into_silo(host, alt_step, stack.clone())
                     } else if alt_blk == rules::BLOCK_SILO_CONTROLLER {
-                        insert_into_silo_controller(game, alt_step, stack.clone())
+                        insert_into_silo_controller(host, alt_step, stack.clone())
                     } else if rules::is_conveyor_block(&alt_blk) {
-                        insert_into_conveyor(game, alt_step, stack.clone())
+                        insert_into_conveyor(host, alt_step, stack.clone())
                     } else {
-                        match game.native_insert_item(alt_step, Direction::Up, stack.clone()) {
+                        match hc::insert_item_rem(host, alt_step, Direction::Up, stack.clone()) {
                             None => None,
-                            Some(r) => game.native_insert_item(alt_step, Direction::North, r),
+                            Some(r) => hc::insert_item_rem(host, alt_step, Direction::North, r),
                         }
                     };
                     if rem.is_none() {
@@ -1143,14 +1132,14 @@ fn tick_item_pipe(
                         state.progress = 0;
                         state.pipe_has_target = false;
                         store_state(entity, state);
-                        game.native_block_entity_sync(pos);
+                        host.block_entity_sync(pos);
                         rerouted = true;
                         break;
                     } else if let Some(r) = rem {
-                        if r.count < state.belt_count {
-                            state.belt_count = r.count;
+                        if r.count() < state.belt_count {
+                            state.belt_count = r.count();
                             store_state(entity, state);
-                            game.native_block_entity_sync(pos);
+                            host.block_entity_sync(pos);
                             rerouted = true;
                             break;
                         }
@@ -1170,18 +1159,16 @@ fn tick_item_pipe(
 /// 3. Smoothly advances `state.progress` from `0` to `max_ticks` (20 / 10 / 5 by tier).
 /// 4. At the end of the animation, pushes into the next belt/pipe/container, OR drops into the world if at the end!
 fn tick_conveyor(
-    game: &mut Game<'_>,
+    host: &mut dyn ServerHost,
     pos: [i32; 3],
-    entity: &mut ModBlockEntity,
+    entity: &mut ModBlockEntityView<'_>,
     state: &mut MachineState,
 ) {
-    let dim = game.native_dimension();
-    let (max_ticks, max_batch) = rules::conveyor_tier(&entity.id).unwrap_or((20, 1));
-    let facing = game
-        .native_block_property(pos, "facing")
+    let dim = host.dimension();
+    let (max_ticks, max_batch) = rules::conveyor_tier(&entity.id()).unwrap_or((20, 1));
+    let facing = hc::block_property_at(host, pos, "facing")
         .unwrap_or_else(|| "north".to_owned());
-    let shape = game
-        .native_block_property(pos, "shape")
+    let shape = hc::block_property_at(host, pos, "shape")
         .unwrap_or_else(|| "straight".to_owned());
     let front_off = rules::conveyor_exit_offset(&facing, &shape);
     let (_, back_off) = rules::conveyor_offsets(&facing);
@@ -1198,44 +1185,45 @@ fn tick_conveyor(
 
     // 1. Pick up dropped item entities lying on top of this belt if empty
     if state.belt_item.is_empty() {
-        let dropped = game.native_item_entities(
-            dim,
-            [pos[0] as f64 + 0.1, pos[1] as f64, pos[2] as f64 + 0.1],
-            [pos[0] as f64 + 0.9, pos[1] as f64 + 1.15, pos[2] as f64 + 0.9],
-        );
-        if let Some(first) = dropped.first() {
-            let take = first.stack.count.min(max_batch);
-            state.belt_item = first.stack.item.to_string();
+        let picked = host.level(dim).and_then(|level| {
+            let ents = level.entities_in(
+                host,
+                [pos[0] as f64 + 0.1, pos[1] as f64, pos[2] as f64 + 0.1],
+                [pos[0] as f64 + 0.9, pos[1] as f64 + 1.15, pos[2] as f64 + 0.9],
+            )?;
+            for e in ents {
+                if let Some(ie) = host.item_entity(e) {
+                    if let Some(st) = ie.stack(host) {
+                        return Some((ie, st));
+                    }
+                }
+            }
+            None
+        });
+        if let Some((ie, st)) = picked {
+            let take = st.count().min(max_batch);
+            state.belt_item = hc::item_id(host, &st);
             state.belt_count = take;
             state.progress = 0;
-            let mut rem = first.stack.clone();
-            rem.count = first.stack.count.saturating_sub(take);
-            game.native_set_item_entity(dim, first.id, rem);
+            let rem = st.shrink(take);
+            if let Some(r) = rem { let _ = ie.set_stack(host, r); } else { let _ = ie.set_never_pickup(host); }
             store_state(entity, state);
-            game.native_block_entity_sync(pos);
+            host.block_entity_sync(pos);
             return;
         }
     }
 
     // 2. If Auto-Pull (`state.auto_io`) is enabled and belt is empty, pull up to `max_batch` from container behind
     if state.auto_io && state.belt_item.is_empty() {
-        let back_block = game.native_block(back_pos);
+        let back_block = hc::block_id_at(host, back_pos);
         if !rules::is_conveyor_block(&back_block) && is_item_container_block(&back_block) {
-            if let Some(slots) = game.native_container_slots(dim, back_pos, Direction::Down) {
-                for s in slots {
-                    if s.can_take && s.stack.is_some() {
-                        if let Some(pulled) =
-                            game.native_extract_item(dim, back_pos, Direction::Down, s.slot, max_batch)
-                        {
-                            state.belt_item = pulled.item.to_string();
-                            state.belt_count = pulled.count;
-                            state.progress = 0;
-                            store_state(entity, state);
-                            game.native_block_entity_sync(pos);
-                            return;
-                        }
-                    }
-                }
+            if let Some(pulled) = hc::extract_item_at(host, back_pos, Some(Direction::Down), max_batch) {
+                state.belt_item = hc::item_id(host, &pulled);
+                state.belt_count = pulled.count();
+                state.progress = 0;
+                store_state(entity, state);
+                host.block_entity_sync(pos);
+                return;
             }
         }
     }
@@ -1248,14 +1236,14 @@ fn tick_conveyor(
     if state.progress < max_ticks {
         state.progress += 1;
         store_state(entity, state);
-        game.native_block_entity_sync(pos);
+        host.block_entity_sync(pos);
         // If an inline Belt Filter is attached and item does NOT match filter (whitelist/blacklist), deflect to the side!
         if state.progress >= (max_ticks / 2).max(1)
             && state.belt_filter_attached
             && !state.splitter_filters[0].is_empty()
             && !belt_filter_matches(&state.splitter_filters[0], &state.belt_item, state.belt_filter_blacklist)
         {
-            let stack = ItemStack::new(&state.belt_item, state.belt_count.max(1));
+            let Some(stack) = hc::make_stack(host, &state.belt_item, state.belt_count.max(1)) else { return; };
             let side_offs = [
                 rules::conveyor_exit_offset(&facing, "turn_right"),
                 rules::conveyor_exit_offset(&facing, "turn_left"),
@@ -1263,14 +1251,14 @@ fn tick_conveyor(
             let mut deflected = false;
             for soff in side_offs {
                 let sp = [pos[0] + soff[0], pos[1], pos[2] + soff[2]];
-                let sb = game.native_block(sp);
+                let sb = hc::block_id_at(host, sp);
                 if rules::is_conveyor_block(&sb) {
-                    if insert_into_conveyor(game, sp, stack.clone()).is_none() {
+                    if insert_into_conveyor(host, sp, stack.clone()).is_none() {
                         deflected = true;
                         break;
                     }
                 } else if is_item_container_block(&sb) {
-                    if game.native_insert_item(sp, Direction::Up, stack.clone()).is_none() {
+                    if hc::insert_item_rem(host, sp, Direction::Up, stack.clone()).is_none() {
                         deflected = true;
                         break;
                     }
@@ -1281,7 +1269,7 @@ fn tick_conveyor(
                         pos[2] as f64 + 0.5 + soff[2] as f64 * 0.68,
                     ];
                     let vel = [soff[0] as f64 * 0.12, 0.06, soff[2] as f64 * 0.12];
-                    game.spawn_item(stack.clone(), drop_pos, vel, 10);
+                    hc::spawn_item(host, stack.clone(), drop_pos);
                     deflected = true;
                     break;
                 }
@@ -1291,28 +1279,28 @@ fn tick_conveyor(
                 state.belt_count = 0;
                 state.progress = 0;
                 store_state(entity, state);
-                game.native_block_entity_sync(pos);
+                host.block_entity_sync(pos);
                 return;
             }
         }
         // If an Item Splitter sits directly on top of this belt, feed it once item reaches center
         if state.progress >= (max_ticks / 2).max(1) {
             let above_pos = [pos[0], pos[1] + 1, pos[2]];
-            if game.native_block(above_pos) == rules::BLOCK_ITEM_SPLITTER {
-                let stack = ItemStack::new(&state.belt_item, state.belt_count.max(1));
-                let leftover = insert_into_splitter(game, above_pos, stack);
+            if hc::block_id_at(host, above_pos) == rules::BLOCK_ITEM_SPLITTER {
+                let Some(stack) = hc::make_stack(host, &state.belt_item, state.belt_count.max(1)) else { return; };
+                let leftover = insert_into_splitter(host, above_pos, stack);
                 if leftover.is_none() {
                     state.belt_item.clear();
                     state.belt_count = 0;
                     state.progress = 0;
                     store_state(entity, state);
-                    game.native_block_entity_sync(pos);
+                    host.block_entity_sync(pos);
                     return;
                 } else if let Some(rest) = leftover {
-                    if rest.count < state.belt_count {
-                        state.belt_count = rest.count;
+                    if rest.count() < state.belt_count {
+                        state.belt_count = rest.count();
                         store_state(entity, state);
-                        game.native_block_entity_sync(pos);
+                        host.block_entity_sync(pos);
                     }
                 }
             }
@@ -1323,23 +1311,23 @@ fn tick_conveyor(
     }
 
     // 4. Animation finished: push forward into next belt/pipe/container, OR drop into world at the end!
-    let stack = ItemStack::new(&state.belt_item, state.belt_count.max(1));
-    let front_block = game.native_block(front_pos);
+    let Some(stack) = hc::make_stack(host, &state.belt_item, state.belt_count.max(1)) else { return; };
+    let front_block = hc::block_id_at(host, front_pos);
     let mut dropped_at_end = false;
     let leftover = if rules::is_conveyor_block(&front_block) {
-        insert_into_conveyor(game, front_pos, stack)
+        insert_into_conveyor(host, front_pos, stack)
     } else if front_block == rules::BLOCK_ITEM_SPLITTER {
-        insert_into_splitter(game, front_pos, stack)
+        insert_into_splitter(host, front_pos, stack)
     } else if rules::is_item_pipe(&front_block) {
-        insert_into_pipe(game, pos, front_pos, stack, None)
+        insert_into_pipe(host, pos, front_pos, stack, None)
     } else if front_block == rules::BLOCK_INDUSTRIAL_SILO {
-        insert_into_silo(game, front_pos, stack)
+        insert_into_silo(host, front_pos, stack)
     } else if front_block == rules::BLOCK_SILO_CONTROLLER {
-        insert_into_silo_controller(game, front_pos, stack)
+        insert_into_silo_controller(host, front_pos, stack)
     } else if is_item_container_block(&front_block) {
-        match game.native_insert_item(front_pos, Direction::Up, stack) {
+        match hc::insert_item_rem(host, front_pos, Direction::Up, stack) {
             None => None,
-            Some(r) => game.native_insert_item(front_pos, Direction::North, r),
+            Some(r) => hc::insert_item_rem(host, front_pos, Direction::North, r),
         }
     } else if front_block == "minecraft:air" || front_block == "minecraft:cave_air" || front_block == "minecraft:void_air" {
         let drop_pos = [
@@ -1352,14 +1340,14 @@ fn tick_conveyor(
             0.06,
             front_off[2] as f64 * 0.10,
         ];
-        game.spawn_item(stack, drop_pos, vel, 10);
+        hc::spawn_item(host, stack, drop_pos);
         dropped_at_end = true;
         None
     } else {
         // Blocked by a solid non-container block at the end: check if there's a belt 1 block below (step-down)
         let below_front = [front_pos[0], front_pos[1] - 1, front_pos[2]];
-        if rules::is_conveyor_block(&game.native_block(below_front)) {
-            insert_into_conveyor(game, below_front, stack)
+        if rules::is_conveyor_block(&hc::block_id_at(host, below_front)) {
+            insert_into_conveyor(host, below_front, stack)
         } else {
             Some(stack)
         }
@@ -1370,12 +1358,12 @@ fn tick_conveyor(
         state.belt_count = 0;
         state.progress = 0;
         store_state(entity, state);
-        game.native_block_entity_sync(pos);
+        host.block_entity_sync(pos);
     } else if let Some(rest) = leftover {
-        if rest.count < state.belt_count {
-            state.belt_count = rest.count;
+        if rest.count() < state.belt_count {
+            state.belt_count = rest.count();
             store_state(entity, state);
-            game.native_block_entity_sync(pos);
+            host.block_entity_sync(pos);
         }
     }
 }
@@ -1384,9 +1372,9 @@ fn tick_conveyor(
 /// Excavates blocks in a `5x5`, `7x7`, or `9x9` area behind the Quarry down to Bedrock,
 /// moves the 3D gantry & laser to the mined block, and outputs drops into its buffer or pipes/chests!
 fn tick_quarry(
-    game: &mut Game<'_>,
+    host: &mut dyn ServerHost,
     pos: [i32; 3],
-    entity: &mut ModBlockEntity,
+    entity: &mut ModBlockEntityView<'_>,
     state: &mut MachineState,
     fuel_ticks: Option<i32>,
     speed_upgrades: u32,
@@ -1394,13 +1382,13 @@ fn tick_quarry(
 ) -> (StepStatus, i32) {
     let outcome = rules::step_machine(state, None, fuel_ticks, None, speed_upgrades);
     if outcome.consume_fuel {
-        consume_one_fuel(entity);
+        consume_one_fuel(host, entity);
     }
     if outcome.status != StepStatus::Working {
         return (outcome.status, 0);
     }
 
-    let (tier_radius, tier_speed, tier_fortune) = rules::quarry_tier(&entity.id);
+    let (tier_radius, tier_speed, tier_fortune) = rules::quarry_tier(&entity.id());
     if state.quarry_radius < tier_radius {
         state.quarry_radius = tier_radius;
     }
@@ -1410,14 +1398,14 @@ fn tick_quarry(
 
     // Check if output slot is completely full before mining
     if let Some(existing) = entity.items[rules::SLOT_OUTPUT].as_ref() {
-        let max_s = game.native_max_stack_size(&existing.item).unwrap_or(64);
-        if existing.count >= max_s {
+        let max_s = host.max_stack_size(existing.item()).unwrap_or(64);
+        if existing.count() >= max_s {
             if state.auto_io {
-                try_auto_eject_output(game, pos, entity, 8);
+                try_auto_eject_output(host, pos, entity, 8);
             }
             if entity.items[rules::SLOT_OUTPUT]
                 .as_ref()
-                .is_some_and(|s| s.count >= max_s)
+                .is_some_and(|s| s.count() >= max_s)
             {
                 return (StepStatus::OutputFull, 0);
             }
@@ -1429,12 +1417,11 @@ fn tick_quarry(
 
     if state.progress >= needed {
         state.progress = 0;
-        let facing = game
-            .native_block_property(pos, "facing")
+        let facing = hc::block_property_at(host, pos, "facing")
             .unwrap_or_else(|| "north".to_owned());
         let side = state.quarry_side_len();
         let layer_area = side * side;
-        let dim = game.native_dimension();
+        let dim = host.dimension();
         let (min_x, max_x, min_z, max_z) =
             rules::quarry_area_bounds(pos, &facing, state.quarry_radius);
 
@@ -1448,22 +1435,15 @@ fn tick_quarry(
                         if sp == pos {
                             continue;
                         }
-                        let b = game.native_block(sp);
+                        let b = hc::block_id_at(host, sp);
                         if let Some((drop_item, base_count)) = rules::quarry_drop_for_block(&b) {
-                            if let Some(air_state) = game.native_default_state("minecraft:air") {
-                                game.native_set_block(dim, sp, air_state, 3);
-                            }
+                            hc::set_block_by_id(host, sp, "minecraft:air");
                             state.quarry_mined += 1;
                             state.last_target = sp;
-                            let produced = ItemStack {
-                                item: drop_item.into(),
-                                count: base_count,
-                                damage: 0,
-                                extra: None,
-                            };
-                            store_or_route_output(game, pos, entity, state.auto_io, produced);
+                            let produced = hc::make_stack(host, &drop_item, base_count).expect("valid item");
+                            store_or_route_output(host, pos, entity, state.auto_io, produced);
                             store_state(entity, state);
-                            game.native_block_entity_sync(pos);
+                            host.block_entity_sync(pos);
                             cleared_surface = true;
                             break 'surface;
                         }
@@ -1489,11 +1469,9 @@ fn tick_quarry(
                 state.quarry_y_offset += 1;
             }
 
-            let block_id = game.native_block(target_pos);
+            let block_id = hc::block_id_at(host, target_pos);
             if let Some((drop_item, base_count)) = rules::quarry_drop_for_block(&block_id) {
-                if let Some(air_state) = game.native_default_state("minecraft:air") {
-                    game.native_set_block(dim, target_pos, air_state, 3);
-                }
+                hc::set_block_by_id(host, target_pos, "minecraft:air");
                 state.quarry_mined += 1;
                 state.last_target = target_pos;
 
@@ -1502,23 +1480,18 @@ fn tick_quarry(
                 } else {
                     0
                 };
-                let produced = ItemStack {
-                    item: drop_item.into(),
-                    count: base_count + bonus,
-                    damage: 0,
-                    extra: None,
-                };
+                let produced = hc::make_stack(host, &drop_item, base_count + bonus).expect("valid item");
 
-                store_or_route_output(game, pos, entity, state.auto_io, produced);
+                store_or_route_output(host, pos, entity, state.auto_io, produced);
                 store_state(entity, state);
-                game.native_block_entity_sync(pos);
+                host.block_entity_sync(pos);
                 break;
             }
         }
     }
 
     if state.auto_io && entity.items[rules::SLOT_OUTPUT].is_some() {
-        try_auto_eject_output(game, pos, entity, 4);
+        try_auto_eject_output(host, pos, entity, 4);
     }
 
     (StepStatus::Working, -cost)
@@ -1526,21 +1499,22 @@ fn tick_quarry(
 
 /// Inserts `produced` into connected pipes/containers (if `auto_io`) or `SLOT_OUTPUT`.
 fn store_or_route_output(
-    game: &mut Game<'_>,
+    host: &mut dyn ServerHost,
     pos: [i32; 3],
-    entity: &mut ModBlockEntity,
+    entity: &mut ModBlockEntityView<'_>,
     auto_io: bool,
-    produced: ItemStack,
+    produced: impl Into<Option<ItemStack>>,
 ) {
+    let Some(produced) = produced.into() else { return; };
     let mut rest = Some(produced);
     if auto_io {
-        rest = route_item_from(game, pos, rest.take().unwrap());
+        rest = route_item_from(host, pos, rest.take().unwrap());
     }
     if let Some(leftover) = rest {
         match entity.items[rules::SLOT_OUTPUT].as_mut() {
-            Some(existing) if &*existing.item == &*leftover.item => {
-                let max_s = game.native_max_stack_size(&existing.item).unwrap_or(64);
-                existing.count = (existing.count + leftover.count).min(max_s);
+            Some(existing) if &*hc::item_id(host, &existing) == &*hc::item_id(host, &leftover) => {
+                let max_s = host.max_stack_size(existing.item()).unwrap_or(64);
+                let _ = existing.set_count((existing.count() + leftover.count()).min(max_s));
             }
             None => {
                 entity.items[rules::SLOT_OUTPUT] = Some(leftover);
@@ -1554,9 +1528,9 @@ fn store_or_route_output(
 /// Scans a configurable `5x5`, `7x7`, or `9x9` area behind it, replants mature crops (`age=0`),
 /// harvests sugar cane / bamboo / melons / pumpkins / wood logs, and routes drops into pipes/chests!
 fn tick_harvester(
-    game: &mut Game<'_>,
+    host: &mut dyn ServerHost,
     pos: [i32; 3],
-    entity: &mut ModBlockEntity,
+    entity: &mut ModBlockEntityView<'_>,
     state: &mut MachineState,
     fuel_ticks: Option<i32>,
     speed_upgrades: u32,
@@ -1564,7 +1538,7 @@ fn tick_harvester(
 ) -> (StepStatus, i32) {
     let outcome = rules::step_machine(state, None, fuel_ticks, None, speed_upgrades);
     if outcome.consume_fuel {
-        consume_one_fuel(entity);
+        consume_one_fuel(host, entity);
     }
     if outcome.status != StepStatus::Working {
         return (outcome.status, 0);
@@ -1578,12 +1552,11 @@ fn tick_harvester(
 
     if state.progress >= needed {
         state.progress = 0;
-        let facing = game
-            .native_block_property(pos, "facing")
+        let facing = hc::block_property_at(host, pos, "facing")
             .unwrap_or_else(|| "north".to_owned());
         let side = state.quarry_side_len();
         let layer_area = side * side;
-        let dim = game.native_dimension();
+        let dim = host.dimension();
 
         for _ in 0..8 {
             let target_pos = rules::harvester_target_pos(pos, &facing, state);
@@ -1593,8 +1566,8 @@ fn tick_harvester(
                 state.quarry_y_offset = (state.quarry_y_offset + 1) % 2;
             }
 
-            let block_id = game.native_block(target_pos);
-            let age_prop = game.native_block_property(target_pos, "age");
+            let block_id = hc::block_id_at(host, target_pos);
+            let age_prop = hc::block_property_at(host, target_pos, "age");
             if let Some((drop_item, base_count, replant)) =
                 rules::harvester_drop_for_block(&block_id, age_prop.as_deref())
             {
@@ -1605,10 +1578,8 @@ fn tick_harvester(
                 ) && target_pos[1] == pos[1]
                 {
                     let above = [target_pos[0], target_pos[1] + 1, target_pos[2]];
-                    if game.native_block(above) == block_id {
-                        if let Some(air_state) = game.native_default_state("minecraft:air") {
-                            game.native_set_block(dim, above, air_state, 3);
-                        }
+                    if hc::block_id_at(host, above) == block_id {
+                        hc::set_block_by_id(host, above, "minecraft:air");
                         state.last_target = above;
                     } else {
                         continue;
@@ -1620,32 +1591,25 @@ fn tick_harvester(
                     } else {
                         "0"
                     };
-                    game.native_set_block_property(target_pos, "age", reset_age);
+                    host.set_block_property(target_pos, "age", reset_age);
                     state.last_target = target_pos;
                 } else {
-                    if let Some(air_state) = game.native_default_state("minecraft:air") {
-                        game.native_set_block(dim, target_pos, air_state, 3);
-                    }
+                    hc::set_block_by_id(host, target_pos, "minecraft:air");
                     state.last_target = target_pos;
                 }
 
                 state.quarry_mined += 1;
-                let produced = ItemStack {
-                    item: drop_item.into(),
-                    count: base_count + fortune_upgrades.min(4),
-                    damage: 0,
-                    extra: None,
-                };
-                store_or_route_output(game, pos, entity, state.auto_io, produced);
+                let produced = hc::make_stack(host, &drop_item, base_count + fortune_upgrades.min(4)).expect("valid item");
+                store_or_route_output(host, pos, entity, state.auto_io, produced);
                 store_state(entity, state);
-                game.native_block_entity_sync(pos);
+                host.block_entity_sync(pos);
                 break;
             }
         }
     }
 
     if state.auto_io && entity.items[rules::SLOT_OUTPUT].is_some() {
-        try_auto_eject_output(game, pos, entity, 4);
+        try_auto_eject_output(host, pos, entity, 4);
     }
 
     (StepStatus::Working, -cost)
@@ -1656,9 +1620,9 @@ fn tick_harvester(
 /// through connected `rusty_factory:item_pipe` networks or `conveyor_belt`s!
 /// If `SLOT_INPUT` contains an item, it acts as a Smart Filter (only extracting matching items).
 fn tick_extractor(
-    game: &mut Game<'_>,
+    host: &mut dyn ServerHost,
     pos: [i32; 3],
-    entity: &mut ModBlockEntity,
+    entity: &mut ModBlockEntityView<'_>,
     state: &mut MachineState,
     speed_upgrades: u32,
 ) -> StepStatus {
@@ -1668,13 +1632,13 @@ fn tick_extractor(
     }
 
     if state.progress == 0 {
-        let dim = game.native_dimension();
+        let dim = host.dimension();
         let filter_item = entity.items[rules::SLOT_INPUT]
             .as_ref()
-            .map(|s| s.item.to_string());
+            .map(|s| hc::item_id(host, &s));
         let mut pipe_batch = 4u32;
         for [dx, dy, dz] in rules::NEIGHBORS_6 {
-            let b = game.native_block([pos[0] + dx, pos[1] + dy, pos[2] + dz]);
+            let b = hc::block_id_at(host, [pos[0] + dx, pos[1] + dy, pos[2] + dz]);
             if rules::is_item_pipe(&b) {
                 pipe_batch = pipe_batch.max(rules::item_pipe_batch(&b));
             }
@@ -1683,23 +1647,23 @@ fn tick_extractor(
 
         let targets = rules::find_connected_item_targets(
             pos,
-            |p| rules::is_item_pipe(&game.native_block(p)),
-            |p| is_item_container_block(&game.native_block(p)),
+            |p| rules::is_item_pipe(&hc::block_id_at(host, p)),
+            |p| is_item_container_block(&hc::block_id_at(host, p)),
         );
 
         for [dx, dy, dz] in rules::NEIGHBORS_6 {
             let adj = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
-            let adj_block = game.native_block(adj);
+            let adj_block = hc::block_id_at(host, adj);
             if adj_block == rules::BLOCK_INDUSTRIAL_SILO {
-                let mut extracted: Option<ItemStack> = None;
-                game.native_with_mod_block_entity(adj, |sent| {
+                let mut take_info: Option<(String, u32)> = None;
+                hc::with_mod_block_entity(host, adj, |sent| {
                     if let Some(mut sst) = load_state(sent) {
                         let matches_filter = filter_item
                             .as_deref()
                             .is_none_or(|f| f == sst.belt_item);
                         if matches_filter && !sst.belt_item.is_empty() && sst.belt_count > 0 {
                             let take = sst.belt_count.min(batch_size);
-                            extracted = Some(ItemStack::new(&sst.belt_item, take));
+                            take_info = Some((sst.belt_item.clone(), take));
                             sst.belt_count -= take;
                             if sst.belt_count == 0 {
                                 sst.belt_item.clear();
@@ -1708,10 +1672,11 @@ fn tick_extractor(
                         }
                     }
                 });
+                let extracted = take_info.and_then(|(id, take)| hc::make_stack(host, &id, take));
                 if let Some(st_out) = extracted {
-                    game.native_block_entity_sync(adj);
-                    if let Some(rest) = route_item_from(game, pos, st_out) {
-                        let _ = insert_into_silo(game, adj, rest);
+                    host.block_entity_sync(adj);
+                    if let Some(rest) = route_item_from(host, pos, st_out) {
+                        let _ = insert_into_silo(host, adj, rest);
                     } else {
                         state.quarry_mined += 1;
                     }
@@ -1732,8 +1697,7 @@ fn tick_extractor(
                     if dest == adj {
                         continue;
                     }
-                    let moved = game.native_move_items(
-                        dim,
+                    let moved = hc::move_items(host,
                         adj,
                         Direction::Down,
                         dest,
@@ -1756,9 +1720,9 @@ fn tick_extractor(
 /// Simulates the Directional Block Breaker (`rusty_factory:block_breaker`):
 /// Mines the block directly in front of its `facing` face (ideal for cobblestone/obsidian generators).
 fn tick_breaker(
-    game: &mut Game<'_>,
+    host: &mut dyn ServerHost,
     pos: [i32; 3],
-    entity: &mut ModBlockEntity,
+    entity: &mut ModBlockEntityView<'_>,
     state: &mut MachineState,
     fuel_ticks: Option<i32>,
     speed_upgrades: u32,
@@ -1766,14 +1730,13 @@ fn tick_breaker(
 ) -> (StepStatus, i32) {
     let outcome = rules::step_machine(state, None, fuel_ticks, None, speed_upgrades);
     if outcome.consume_fuel {
-        consume_one_fuel(entity);
+        consume_one_fuel(host, entity);
     }
     if outcome.status != StepStatus::Working {
         return (outcome.status, 0);
     }
 
-    let facing = game
-        .native_block_property(pos, "facing")
+    let facing = hc::block_property_at(host, pos, "facing")
         .unwrap_or_else(|| "north".to_owned());
     let (front_off, _) = rules::conveyor_offsets(&facing);
     let target_pos = [
@@ -1781,7 +1744,7 @@ fn tick_breaker(
         pos[1] + front_off[1],
         pos[2] + front_off[2],
     ];
-    let block_id = game.native_block(target_pos);
+    let block_id = hc::block_id_at(host, target_pos);
     let Some((drop_item, base_count)) = rules::quarry_drop_for_block(&block_id) else {
         state.progress = 0;
         return (StepStatus::Idle, 0);
@@ -1794,22 +1757,15 @@ fn tick_breaker(
 
     if state.progress >= needed {
         state.progress = 0;
-        let dim = game.native_dimension();
-        if let Some(air_state) = game.native_default_state("minecraft:air") {
-            game.native_set_block(dim, target_pos, air_state, 3);
-        }
+        let dim = host.dimension();
+        hc::set_block_by_id(host, target_pos, "minecraft:air");
         state.quarry_mined += 1;
-        let produced = ItemStack {
-            item: drop_item.into(),
-            count: base_count + fortune_upgrades.min(4),
-            damage: 0,
-            extra: None,
-        };
-        store_or_route_output(game, pos, entity, state.auto_io, produced);
+        let produced = hc::make_stack(host, &drop_item, base_count + fortune_upgrades.min(4)).expect("valid item");
+        store_or_route_output(host, pos, entity, state.auto_io, produced);
     }
 
     if state.auto_io && entity.items[rules::SLOT_OUTPUT].is_some() {
-        try_auto_eject_output(game, pos, entity, 4);
+        try_auto_eject_output(host, pos, entity, 4);
     }
 
     (StepStatus::Working, -cost)
@@ -1818,16 +1774,16 @@ fn tick_breaker(
 /// Simulates the Automated Block Placer (`rusty_factory:block_placer`):
 /// Places block items from `SLOT_INPUT` into the world directly in front of its `facing` face when air.
 fn tick_placer(
-    game: &mut Game<'_>,
+    host: &mut dyn ServerHost,
     pos: [i32; 3],
-    entity: &mut ModBlockEntity,
+    entity: &mut ModBlockEntityView<'_>,
     state: &mut MachineState,
     fuel_ticks: Option<i32>,
     speed_upgrades: u32,
 ) -> (StepStatus, i32) {
     let outcome = rules::step_machine(state, None, fuel_ticks, None, speed_upgrades);
     if outcome.consume_fuel {
-        consume_one_fuel(entity);
+        consume_one_fuel(host, entity);
     }
     if outcome.status != StepStatus::Working {
         return (outcome.status, 0);
@@ -1837,13 +1793,13 @@ fn tick_placer(
         state.progress = 0;
         return (StepStatus::Idle, 0);
     };
-    let Some(place_state) = game.native_default_state(&in_stack.item) else {
+    let place_block_id = hc::item_id(host, &in_stack);
+    if host.block_key(&place_block_id).is_none() {
         state.progress = 0;
         return (StepStatus::Idle, 0);
-    };
+    }
 
-    let facing = game
-        .native_block_property(pos, "facing")
+    let facing = hc::block_property_at(host, pos, "facing")
         .unwrap_or_else(|| "north".to_owned());
     let (front_off, _) = rules::conveyor_offsets(&facing);
     let target_pos = [
@@ -1851,7 +1807,7 @@ fn tick_placer(
         pos[1] + front_off[1],
         pos[2] + front_off[2],
     ];
-    let current_block = game.native_block(target_pos);
+    let current_block = hc::block_id_at(host, target_pos);
     if !matches!(
         current_block.as_str(),
         "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" | "minecraft:water"
@@ -1867,16 +1823,9 @@ fn tick_placer(
 
     if state.progress >= needed {
         state.progress = 0;
-        let dim = game.native_dimension();
-        if game.native_set_block(dim, target_pos, place_state, 3) {
+        if hc::set_block_by_id(host, target_pos, &place_block_id) {
             state.quarry_mined += 1;
-            if let Some(s) = entity.items[rules::SLOT_INPUT].as_mut() {
-                if s.count > 1 {
-                    s.count -= 1;
-                } else {
-                    entity.items[rules::SLOT_INPUT] = None;
-                }
-            }
+            entity.items[rules::SLOT_INPUT] = in_stack.shrink(1);
         }
     }
 
@@ -1887,9 +1836,9 @@ fn tick_placer(
 /// Scans adjacent blocks (and vertical trunk columns around it) for `rubber_sap_log` or `rubber_log`,
 /// extracts `raw_sap` without destroying the tree, and refills sap cavities over time!
 fn tick_sap_extractor(
-    game: &mut Game<'_>,
+    host: &mut dyn ServerHost,
     pos: [i32; 3],
-    entity: &mut ModBlockEntity,
+    entity: &mut ModBlockEntityView<'_>,
     state: &mut MachineState,
     fuel_ticks: Option<i32>,
     speed_upgrades: u32,
@@ -1897,7 +1846,7 @@ fn tick_sap_extractor(
 ) -> (StepStatus, i32) {
     let outcome = rules::step_machine(state, None, fuel_ticks, None, speed_upgrades);
     if outcome.consume_fuel {
-        consume_one_fuel(entity);
+        consume_one_fuel(host, entity);
     }
     if outcome.status != StepStatus::Working {
         return (outcome.status, 0);
@@ -1908,9 +1857,9 @@ fn tick_sap_extractor(
     'search: for [dx, _, dz] in [[-1, 0, 0], [1, 0, 0], [0, 0, -1], [0, 0, 1]] {
         for dy in 0..=4 {
             let p = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
-            let bid = game.native_block(p);
+            let bid = hc::block_id_at(host, p);
             if bid == rules::BLOCK_RUBBER_SAP_LOG {
-                let has_sap = game.native_block_property(p, "lit").as_deref() == Some("true");
+                let has_sap = hc::block_property_at(host, p, "lit").as_deref() == Some("true");
                 found_trunk = Some((p, has_sap));
                 if has_sap {
                     break 'search;
@@ -1934,59 +1883,51 @@ fn tick_sap_extractor(
     if state.progress >= needed {
         state.progress = 0;
         if is_active_cavity {
-            game.native_set_block_property(trunk_pos, "lit", "false");
+            host.set_block_property(trunk_pos, "lit", "false");
         }
         let base_sap = if is_active_cavity { 3 } else { 1 };
         let sap_count = base_sap + fortune_upgrades.min(4);
         state.quarry_mined += sap_count as i32;
         state.last_target = trunk_pos;
 
-        let produced = ItemStack {
-            item: rules::ITEM_RAW_SAP.into(),
-            count: sap_count,
-            damage: 0,
-            extra: None,
-        };
-        store_or_route_output(game, pos, entity, state.auto_io, produced);
+        let produced = hc::make_stack(host, rules::ITEM_RAW_SAP.into(), sap_count).expect("valid item");
+        store_or_route_output(host, pos, entity, state.auto_io, produced);
         store_state(entity, state);
-        game.native_block_entity_sync(pos);
+        host.block_entity_sync(pos);
     }
 
     if state.auto_io && entity.items[rules::SLOT_OUTPUT].is_some() {
-        try_auto_eject_output(game, pos, entity, 4);
+        try_auto_eject_output(host, pos, entity, 4);
     }
 
     (StepStatus::Working, -cost)
 }
 
-fn consume_one_fuel(entity: &mut ModBlockEntity) {
+fn consume_one_fuel(host: &dyn Host, entity: &mut ModBlockEntityView<'_>) {
     let slot_idx = if entity.items.len() == 1 { 0 } else { rules::SLOT_FUEL };
-    if let Some(Some(fuel_stack)) = entity.items.get_mut(slot_idx) {
-        let is_lava = &*fuel_stack.item == "minecraft:lava_bucket";
-        if fuel_stack.count > 1 {
-            fuel_stack.count -= 1;
+    if let Some(fuel_stack) = entity.items.get(slot_idx).and_then(|s| s.clone()) {
+        let is_lava = hc::item_id(host, &fuel_stack) == "minecraft:lava_bucket";
+        if fuel_stack.count() > 1 {
+            entity.items[slot_idx] = fuel_stack.shrink(1);
         } else {
-            entity.items[slot_idx] = is_lava.then(|| ItemStack {
-                item: "minecraft:bucket".into(),
-                count: 1,
-                damage: 0,
-                extra: None,
-            });
+            entity.items[slot_idx] = if is_lava {
+                hc::make_stack(host, "minecraft:bucket", 1)
+            } else {
+                None
+            };
         }
     }
 }
 
-pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut ModBlockEntity) {
-    if !game.native_on(rules::ID) {
-        return;
-    }
-    tick_player_equipment(game);
+pub(crate) fn tick(host: &mut dyn ServerHost, pos: [i32; 3], entity: &mut ModBlockEntityView<'_>) {
+    let block_id = hc::block_id_at(host, pos);
+    tick_player_equipment(host);
 
     // 1. Rubber Sapling automatic growth tick (grows into a full Rubber Tree after ~8 seconds)
-    if entity.id == rules::BLOCK_RUBBER_SAPLING {
+    if block_id == rules::BLOCK_RUBBER_SAPLING {
         let t = entity.data.first().copied().unwrap_or(0) + 1;
         if t >= 160 {
-            grow_rubber_tree(game, pos);
+            grow_rubber_tree(host, pos);
         } else {
             entity.data = vec![t];
         }
@@ -1994,12 +1935,12 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     }
 
     // 2. Rubber Sap Log Cavity natural sap regeneration tick (refills golden resin after ~10 seconds)
-    if entity.id == rules::BLOCK_RUBBER_SAP_LOG {
-        let is_full = game.native_block_property(pos, "lit").as_deref() == Some("true");
+    if entity.id() == rules::BLOCK_RUBBER_SAP_LOG {
+        let is_full = hc::block_property_at(host, pos, "lit").as_deref() == Some("true");
         if !is_full {
             let t = entity.data.first().copied().unwrap_or(0) + 1;
             if t >= 200 {
-                game.native_set_block_property(pos, "lit", "true");
+                host.set_block_property(pos, "lit", "true");
                 entity.data = vec![0];
             } else {
                 entity.data = vec![t];
@@ -2008,7 +1949,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         return;
     }
 
-    let Some(kind) = MachineKind::from_block_id(&entity.id) else {
+    let Some(kind) = MachineKind::from_block_id(&entity.id()) else {
         return;
     };
     let min_slots = match kind {
@@ -2035,12 +1976,12 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     let mut state = load_state(entity).unwrap_or_else(|| MachineState::new(kind));
     let speed_upgrades = entity.items.get(rules::SLOT_UPGRADE)
         .and_then(|s| s.as_ref())
-        .filter(|s| &*s.item == rules::ITEM_SPEED_UPGRADE)
-        .map_or(0, |s| s.count);
+        .filter(|s| &*hc::item_id(host, &s) == rules::ITEM_SPEED_UPGRADE)
+        .map_or(0, |s| s.count());
     let fortune_upgrades = entity.items.get(rules::SLOT_UPGRADE)
         .and_then(|s| s.as_ref())
-        .filter(|s| &*s.item == rules::ITEM_FORTUNE_UPGRADE)
-        .map_or(0, |s| s.count);
+        .filter(|s| &*hc::item_id(host, &s) == rules::ITEM_FORTUNE_UPGRADE)
+        .map_or(0, |s| s.count());
 
     if kind == MachineKind::FluidPipe {
         if state.fluid_amount > 0 {
@@ -2049,31 +1990,23 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 state.fluid_kind.clear();
             }
             store_state(entity, &state);
-            game.native_block_entity_sync(pos);
+            host.block_entity_sync(pos);
         }
         return;
     }
 
     if kind == MachineKind::ItemSplitter {
-        if state.enabled && state.auto_io && (game.world.game_time % 5 == 0) {
-            let dim = game.native_dimension();
-            let facing = game
-                .native_block_property(pos, "facing")
+        if state.enabled && state.auto_io && (hc::game_time(host) % 5 == 0) {
+            let dim = host.dimension();
+            let facing = hc::block_property_at(host, pos, "facing")
                 .unwrap_or_else(|| "north".to_owned());
             let (_, back_off) = rules::conveyor_offsets(&facing);
             let back_pos = [pos[0] + back_off[0], pos[1] + back_off[1], pos[2] + back_off[2]];
-            let back_block = game.native_block(back_pos);
+            let back_block = hc::block_id_at(host, back_pos);
             if !rules::is_conveyor_block(&back_block) && is_item_container_block(&back_block) {
-                if let Some(slots) = game.native_container_slots(dim, back_pos, Direction::Down) {
-                    for s in slots {
-                        if s.can_take && s.stack.is_some() {
-                            if let Some(pulled) = game.native_extract_item(dim, back_pos, Direction::Down, s.slot, 1) {
-                                if let Some(rest) = insert_into_splitter(game, pos, pulled) {
-                                    let _ = game.native_insert_item(back_pos, Direction::Up, rest);
-                                }
-                                break;
-                            }
-                        }
+                if let Some(pulled) = hc::extract_item_at(host, back_pos, Some(Direction::Down), 1) {
+                    if let Some(rest) = insert_into_splitter(host, pos, pulled) {
+                        let _ = hc::insert_item_rem(host, back_pos, Direction::Up, rest);
                     }
                 }
             }
@@ -2082,22 +2015,22 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     }
 
     if kind == MachineKind::ItemPipe {
-        tick_item_pipe(game, pos, entity, &mut state);
+        tick_item_pipe(host, pos, entity, &mut state);
         store_state(entity, &state);
         return;
     }
 
     if kind == MachineKind::ConveyorBelt {
         if state.enabled {
-            tick_conveyor(game, pos, entity, &mut state);
+            tick_conveyor(host, pos, entity, &mut state);
         }
         store_state(entity, &state);
         return;
     }
 
     if kind == MachineKind::ItemExtractor {
-        let status = tick_extractor(game, pos, entity, &mut state, speed_upgrades);
-        update_lit_state(game, pos, status == StepStatus::Working);
+        let status = tick_extractor(host, pos, entity, &mut state, speed_upgrades);
+        update_lit_state(host, pos, status == StepStatus::Working);
         let period = rules::effective_work_ticks(kind, speed_upgrades).max(1);
         let pct = ((state.progress * 100) / period).clamp(0, 100);
         entity.data = vec![
@@ -2119,9 +2052,9 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     if kind == MachineKind::VoidTrashCan {
         if entity.items.iter().any(|s| s.is_some()) {
             entity.items = vec![None];
-            update_lit_state(game, pos, true);
+            update_lit_state(host, pos, true);
         } else {
-            update_lit_state(game, pos, false);
+            update_lit_state(host, pos, false);
         }
         entity.data = vec![StepStatus::Working as i32, 0, 1, 0, 0, 1, 0, 0, 0, 0];
         store_state(entity, &state);
@@ -2134,7 +2067,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         let mut detected_fluid: Option<&'static str> = None;
         for [dx, dy, dz] in rules::NEIGHBORS_6 {
             let check_p = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
-            let b = game.native_block(check_p);
+            let b = hc::block_id_at(host, check_p);
             if matches!(b.as_str(), "minecraft:water" | "minecraft:flowing_water") {
                 detected_fluid = Some("water");
                 break;
@@ -2160,22 +2093,22 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                     let mut pipe_bonus = 0i32;
                     for [dx, dy, dz] in rules::NEIGHBORS_6 {
                         let target = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
-                        let tb = game.native_block(target);
+                        let tb = hc::block_id_at(host, target);
                         if tb == rules::BLOCK_FLUID_TANK {
                             tank_targets.push(target);
                         } else if rules::is_fluid_pipe(&tb) {
                             pipe_bonus = pipe_bonus.max(rules::fluid_pipe_rate(&tb));
-                            game.native_with_mod_block_entity(target, |p_ent| {
+                            hc::with_mod_block_entity(host, target, |p_ent| {
                                 let mut p_st = load_state(p_ent).unwrap_or_else(|| MachineState::new(MachineKind::FluidPipe));
                                 p_st.fluid_kind = fk.to_owned();
                                 p_st.fluid_amount = rules::fluid_pipe_cap(&tb);
                                 store_state(p_ent, &p_st);
                             });
-                            game.native_block_entity_sync(target);
+                            host.block_entity_sync(target);
                             let tanks = rules::find_connected_item_targets(
                                 target,
-                                |p| rules::is_fluid_pipe(&game.native_block(p)),
-                                |p| game.native_block(p) == rules::BLOCK_FLUID_TANK,
+                                |p| rules::is_fluid_pipe(&hc::block_id_at(host, p)),
+                                |p| hc::block_id_at(host, p) == rules::BLOCK_FLUID_TANK,
                             );
                             tank_targets.extend(tanks);
                         }
@@ -2183,7 +2116,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                     let effective_pump_mb = pump_mb.max(pipe_bonus);
                     for tank_pos in tank_targets {
                         let mut filled_now = false;
-                        game.native_with_mod_block_entity(tank_pos, |t_ent| {
+                        hc::with_mod_block_entity(host, tank_pos, |t_ent| {
                             let mut t_st = load_state(t_ent).unwrap_or_else(|| MachineState::new(MachineKind::FluidTank));
                             if (t_st.fluid_kind.is_empty() || t_st.fluid_kind == fk)
                                 && t_st.fluid_amount < rules::FLUID_TANK_MAX_MB
@@ -2195,7 +2128,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                             }
                         });
                         if filled_now {
-                            game.native_set_block_property(tank_pos, "lit", "true");
+                            host.set_block_property(tank_pos, "lit", "true");
                             break;
                         }
                     }
@@ -2204,7 +2137,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 }
             }
         }
-        update_lit_state(game, pos, status == StepStatus::Working);
+        update_lit_state(host, pos, status == StepStatus::Working);
         let fcode = rules::fluid_code(&state.fluid_kind);
         let rate_mb = if status == StepStatus::Working {
             100 + (speed_upgrades.min(8) as i32) * 50
@@ -2234,18 +2167,20 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     if kind == MachineKind::GeothermalGenerator {
         // Consume lava_bucket in slot 0 or pull lava from adjacent FluidTank/FluidPipe
         if let Some(Some(slot0)) = entity.items.first_mut() {
-            if slot0.item.as_ref() == "minecraft:lava_bucket" && state.fluid_amount + 1000 <= rules::FLUID_TANK_MAX_MB {
+            if hc::item_id(host, &slot0).as_str() == "minecraft:lava_bucket" && state.fluid_amount + 1000 <= rules::FLUID_TANK_MAX_MB {
                 state.fluid_kind = "lava".to_owned();
                 state.fluid_amount += 1000;
-                *slot0 = ItemStack::new("minecraft:bucket", 1);
+                if let Some(b) = hc::make_stack(host, "minecraft:bucket", 1) {
+                    *slot0 = b;
+                }
             }
         }
         if state.fluid_amount < 500 {
             for d in rules::DIRS {
                 let adj = [pos[0] + d[0], pos[1] + d[1], pos[2] + d[2]];
-                if matches!(game.native_block(adj).as_str(), rules::BLOCK_FLUID_TANK | rules::BLOCK_FLUID_PIPE | rules::BLOCK_FLUID_PIPE_MK2 | rules::BLOCK_FLUID_PIPE_MK3) {
+                if matches!(hc::block_id_at(host, adj).as_str(), rules::BLOCK_FLUID_TANK | rules::BLOCK_FLUID_PIPE | rules::BLOCK_FLUID_PIPE_MK2 | rules::BLOCK_FLUID_PIPE_MK3) {
                     let mut pulled = 0;
-                    game.native_with_mod_block_entity(adj, |other| {
+                    hc::with_mod_block_entity(host, adj, |other| {
                         if let Some(mut ost) = load_state(other) {
                             if ost.fluid_kind == "lava" && ost.fluid_amount > 0 {
                                 let take = ost.fluid_amount.min(250);
@@ -2277,10 +2212,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             net_rate = produced_fe;
         }
         if state.energy > 0 {
-            let sent = distribute_energy(game, pos, state.energy.min(240), false);
+            let sent = distribute_energy(host, pos, state.energy.min(240), false);
             state.energy -= sent;
         }
-        update_lit_state(game, pos, net_rate > 0);
+        update_lit_state(host, pos, net_rate > 0);
         entity.data = vec![
             if net_rate > 0 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
             state.energy,
@@ -2298,9 +2233,9 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         if state.fluid_amount < 500 {
             for d in rules::DIRS {
                 let adj = [pos[0] + d[0], pos[1] + d[1], pos[2] + d[2]];
-                if matches!(game.native_block(adj).as_str(), rules::BLOCK_STEAM_BOILER | rules::BLOCK_FLUID_TANK | rules::BLOCK_FLUID_PIPE | rules::BLOCK_FLUID_PIPE_MK2 | rules::BLOCK_FLUID_PIPE_MK3) {
+                if matches!(hc::block_id_at(host, adj).as_str(), rules::BLOCK_STEAM_BOILER | rules::BLOCK_FLUID_TANK | rules::BLOCK_FLUID_PIPE | rules::BLOCK_FLUID_PIPE_MK2 | rules::BLOCK_FLUID_PIPE_MK3) {
                     let mut pulled = 0;
-                    game.native_with_mod_block_entity(adj, |other| {
+                    hc::with_mod_block_entity(host, adj, |other| {
                         if let Some(mut ost) = load_state(other) {
                             if ost.fluid_kind == "steam" && ost.fluid_amount > 0 {
                                 let take = ost.fluid_amount.min(300);
@@ -2332,10 +2267,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             net_rate = produced_fe;
         }
         if state.energy > 0 {
-            let sent = distribute_energy(game, pos, state.energy.min(320), false);
+            let sent = distribute_energy(host, pos, state.energy.min(320), false);
             state.energy -= sent;
         }
-        update_lit_state(game, pos, net_rate > 0);
+        update_lit_state(host, pos, net_rate > 0);
         entity.data = vec![
             if net_rate > 0 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
             state.energy,
@@ -2358,8 +2293,8 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             if state.progress >= 20 {
                 state.progress = 0;
                 if let Some(in_stack) = entity.items[rules::SLOT_INPUT].as_mut() {
-                    if in_stack.count > 1 {
-                        in_stack.count -= 1;
+                    if in_stack.count() > 1 {
+                        let _ = in_stack.set_count(in_stack.count().saturating_sub(1).max(1));
                     } else {
                         entity.items[rules::SLOT_INPUT] = None;
                     }
@@ -2374,11 +2309,11 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 ];
                 let pick = SCRAP_DROPS[(state.quarry_mined as usize) % SCRAP_DROPS.len()];
                 state.quarry_mined += 1;
-                let prod = ItemStack::new(pick, 1);
-                store_or_route_output(game, pos, entity, state.auto_io, prod);
+                let prod = hc::make_stack(host, pick, 1);
+                store_or_route_output(host, pos, entity, state.auto_io, prod);
             }
         }
-        update_lit_state(game, pos, working);
+        update_lit_state(host, pos, working);
         entity.data = vec![
             if working { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
             state.energy,
@@ -2396,15 +2331,15 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     if kind == MachineKind::IndustrialSilo {
         let cap = state.silo_capacity.max(2_048);
         if let Some(Some(slot0)) = entity.items.first_mut() {
-            let in_id = slot0.item.to_string();
+            let in_id = hc::item_id(host, &slot0);
             if state.belt_item.is_empty() || state.belt_item == in_id {
                 let space = cap.saturating_sub(state.belt_count);
-                let add = slot0.count.min(space);
+                let add = slot0.count().min(space);
                 if add > 0 {
                     state.belt_item = in_id;
                     state.belt_count += add;
-                    if slot0.count > add {
-                        slot0.count -= add;
+                    if slot0.count() > add {
+                        let _ = slot0.set_count(slot0.count().saturating_sub(add).max(1));
                     } else {
                         entity.items[0] = None;
                     }
@@ -2425,18 +2360,18 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
 
     if kind == MachineKind::SiloController {
         if let Some(in_stack) = entity.items.first_mut().and_then(|s| s.take()) {
-            if let Some(rest) = insert_into_silo_controller(game, pos, in_stack) {
+            if let Some(rest) = insert_into_silo_controller(host, pos, in_stack) {
                 entity.items[0] = Some(rest);
             }
         }
         let search = get_terminal_search();
-        let (list, silos_n, chests_n) = filtered_silo_network(game, pos, state.auto_io, state.enabled, &search);
+        let (list, silos_n, chests_n) = filtered_silo_network(host, pos, state.auto_io, state.enabled, &search);
         let max_page = (list.len().saturating_sub(1) / 27) as i32;
         if state.quarry_cursor > max_page {
             state.quarry_cursor = max_page;
         }
         let page = state.quarry_cursor.max(0) as usize;
-        update_lit_state(game, pos, silos_n + chests_n > 0);
+        update_lit_state(host, pos, silos_n + chests_n > 0);
         entity.data = vec![
             if silos_n + chests_n > 0 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
             silos_n as i32,
@@ -2459,24 +2394,24 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         }
         // Automatic crafting table behavior:
         // state.progress == 1 means `slot 9` currently holds an unconsumed crafting preview.
-        let matched = match_terminal_craft(&entity.items[0..9]);
+        let matched = match_terminal_craft(host, &entity.items[0..9]);
         if state.progress == 1 {
             if entity.items[9].is_none() {
                 // Player took the crafted item! Consume 1 ingredient from each non-empty slot in 0..=8 and auto-refill from Silos.
                 let mut depleted: Vec<(usize, String)> = Vec::new();
                 for i in 0..9 {
                     if let Some(s) = entity.items[i].as_mut() {
-                        if s.count <= 1 {
-                            depleted.push((i, s.item.to_string()));
+                        if s.count() <= 1 {
+                            depleted.push((i, hc::item_id(host, &s)));
                             entity.items[i] = None;
                         } else {
-                            s.count -= 1;
+                            let _ = s.set_count(s.count().saturating_sub(1).max(1));
                         }
                     }
                 }
                 for (i, item_id) in depleted {
-                    if pull_one_from_silo_network(game, pos, &item_id) {
-                        entity.items[i] = Some(ItemStack::new(&item_id, 1));
+                    if pull_one_from_silo_network(host, pos, &item_id) {
+                        entity.items[i] = hc::make_stack(host, &item_id, 1);
                     }
                 }
                 state.progress = 0;
@@ -2486,9 +2421,9 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                     Some((out_id, out_cnt)) => {
                         let same = entity.items[9]
                             .as_ref()
-                            .is_some_and(|s| s.item.as_ref() == out_id && s.count == out_cnt);
+                            .is_some_and(|s| hc::item_id(host, s).as_str() == out_id && s.count() == out_cnt);
                         if !same {
-                            entity.items[9] = Some(ItemStack::new(out_id, out_cnt));
+                            entity.items[9] = hc::make_stack(host, out_id, out_cnt);
                         }
                     }
                     None => {
@@ -2499,19 +2434,19 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             }
         }
         if state.progress == 0 && entity.items[9].is_none() {
-            if let Some((out_id, out_cnt)) = match_terminal_craft(&entity.items[0..9]) {
-                entity.items[9] = Some(ItemStack::new(out_id, out_cnt));
+            if let Some((out_id, out_cnt)) = match_terminal_craft(host, &entity.items[0..9]) {
+                entity.items[9] = hc::make_stack(host, out_id, out_cnt);
                 state.progress = 1;
             }
         }
         let search = get_terminal_search();
-        let (list, silos_n, chests_n) = filtered_silo_network(game, pos, state.auto_io, state.enabled, &search);
+        let (list, silos_n, chests_n) = filtered_silo_network(host, pos, state.auto_io, state.enabled, &search);
         let max_page = (list.len().saturating_sub(1) / 27) as i32;
         if state.quarry_cursor > max_page {
             state.quarry_cursor = max_page;
         }
         let page = state.quarry_cursor.max(0) as usize;
-        update_lit_state(game, pos, silos_n + chests_n > 0);
+        update_lit_state(host, pos, silos_n + chests_n > 0);
         entity.data = vec![
             if silos_n + chests_n > 0 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
             silos_n as i32,
@@ -2531,7 +2466,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     if kind == MachineKind::NuclearReactor {
         if state.burn_left <= 0 {
             if let Some(Some(slot0)) = entity.items.first_mut() {
-                let fuel_ticks = match slot0.item.as_ref() {
+                let fuel_ticks = match hc::item_id(host, &slot0).as_str() {
                     "minecraft:nether_star" => 6_000,
                     rules::ITEM_NETHERITE_SEED_CORE => 2_400,
                     "minecraft:diamond" | "minecraft:emerald" => 600,
@@ -2541,10 +2476,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 if fuel_ticks > 0 {
                     state.burn_left = fuel_ticks;
                     state.burn_max = fuel_ticks;
-                    if slot0.count <= 1 {
+                    if slot0.count() <= 1 {
                         entity.items[0] = None;
                     } else {
-                        slot0.count -= 1;
+                        let _ = slot0.set_count(slot0.count().saturating_sub(1).max(1));
                     }
                 }
             }
@@ -2557,10 +2492,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             net_rate = prod;
         }
         if state.energy > 0 {
-            let sent = distribute_energy(game, pos, state.energy.min(2_000), false);
+            let sent = distribute_energy(host, pos, state.energy.min(2_000), false);
             state.energy -= sent;
         }
-        update_lit_state(game, pos, net_rate > 0);
+        update_lit_state(host, pos, net_rate > 0);
         let pct = if state.burn_max > 0 {
             (state.burn_left * 100 / state.burn_max).clamp(0, 100)
         } else {
@@ -2588,10 +2523,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             net_rate = prod;
         }
         if state.energy > 0 {
-            let sent = distribute_energy(game, pos, state.energy.min(240), false);
+            let sent = distribute_energy(host, pos, state.energy.min(240), false);
             state.energy -= sent;
         }
-        update_lit_state(game, pos, net_rate > 0);
+        update_lit_state(host, pos, net_rate > 0);
         let pct = ((alt_rate * 100) / 120).clamp(0, 100);
         entity.data = vec![
             if net_rate > 0 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
@@ -2611,10 +2546,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         let cost = rules::effective_energy_cost(kind, speed_upgrades);
         let mut status = StepStatus::Idle;
         let out_item = entity.items.first().and_then(|s| s.as_ref()).and_then(|s| {
-            rules::lookup_recipe(MachineKind::HydroponicChamber, s.item.as_ref())
+            rules::lookup_recipe(MachineKind::HydroponicChamber, hc::item_id(host, &s).as_str())
         });
         if state.enabled && out_item.is_some() {
-            let out_full = entity.items.get(rules::SLOT_OUTPUT).and_then(|s| s.as_ref()).is_some_and(|s| s.count >= 64);
+            let out_full = entity.items.get(rules::SLOT_OUTPUT).and_then(|s| s.as_ref()).is_some_and(|s| s.count() >= 64);
             if out_full {
                 status = StepStatus::OutputFull;
             } else if state.energy < cost {
@@ -2626,8 +2561,9 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 if state.progress >= period {
                     state.progress = 0;
                     if let Some(rec) = out_item {
-                        let produced = ItemStack::new(rec.item, rec.count);
-                        store_or_route_output(game, pos, entity, state.auto_io, produced);
+                        if let Some(produced) = hc::make_stack(host, rec.item, rec.count) {
+                            store_or_route_output(host, pos, entity, state.auto_io, produced);
+                        }
                     }
                 }
             }
@@ -2635,9 +2571,9 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             state.progress = 0;
         }
         if state.auto_io && entity.items.get(rules::SLOT_OUTPUT).is_some_and(|s| s.is_some()) {
-            try_auto_eject_output(game, pos, entity, 4);
+            try_auto_eject_output(host, pos, entity, 4);
         }
-        update_lit_state(game, pos, status == StepStatus::Working);
+        update_lit_state(host, pos, status == StepStatus::Working);
         let pct = ((state.progress * 100) / period).clamp(0, 100);
         entity.data = vec![
             status as i32,
@@ -2663,15 +2599,15 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 state.energy -= 40;
                 fired = true;
                 let [cx, cy, cz] = pos;
-                game.native_run_command(&format!(
+                hc::run_command(host, &format!(
                     "execute positioned {cx}.5 {cy}.8 {cz}.5 run damage @e[type=!player,type=!item,type=!experience_orb,type=!armor_stand,distance=..16,limit=1,sort=nearest] 10 minecraft:lightning_bolt"
                 ));
-                game.native_run_command(&format!(
+                hc::run_command(host, &format!(
                     "particle minecraft:electric_spark {cx}.5 {cy}.9 {cz}.5 0.6 0.6 0.6 0.1 8"
                 ));
             }
         }
-        update_lit_state(game, pos, state.enabled && state.energy >= 40);
+        update_lit_state(host, pos, state.enabled && state.energy >= 40);
         let pct = ((state.progress * 100) / period.max(1)).clamp(0, 100);
         entity.data = vec![
             if fired || (state.enabled && state.energy >= 40) { StepStatus::Working as i32 } else { StepStatus::NoPower as i32 },
@@ -2689,33 +2625,57 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     if kind == MachineKind::WirelessCharger {
         let mut charged_any = false;
         let pad_center = [pos[0] as f64 + 0.5, pos[1] as f64 + 0.5, pos[2] as f64 + 0.5];
-        let in_range = game.player.as_ref().is_some_and(|p| {
-            let d2 = (p.position.x - pad_center[0]).powi(2)
-                + (p.position.y - pad_center[1]).powi(2)
-                + (p.position.z - pad_center[2]).powi(2);
-            d2 <= 32.0 * 32.0
-        });
-        if state.enabled && in_range && state.energy >= 20 {
-            for slot in game.armor.iter_mut().chain(game.inventory.iter_mut()).chain(std::iter::once(&mut game.offhand)) {
-                if state.energy < 20 {
-                    break;
+        if state.enabled && state.energy >= 20 {
+            for p in host.players().server_players() {
+                let in_range = p.entity().position(host).is_some_and(|pp| {
+                    let d2 = (pp[0] - pad_center[0]).powi(2)
+                        + (pp[1] - pad_center[1]).powi(2)
+                        + (pp[2] - pad_center[2]).powi(2);
+                    d2 <= 32.0 * 32.0
+                });
+                if !in_range {
+                    continue;
                 }
-                if let Some(st) = slot.as_mut() {
-                    if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
-                        let cur = get_item_energy(st);
-                        if cur < cap {
-                            let add = 250.min(cap - cur).min(state.energy);
-                            if add > 0 {
-                                set_item_energy(st, cur + add);
-                                state.energy -= add;
-                                charged_any = true;
+                let living = LivingRef::new(p.entity());
+                for eq in [EquipmentSlot::Head, EquipmentSlot::Chest, EquipmentSlot::Legs, EquipmentSlot::Feet, EquipmentSlot::OffHand] {
+                    if state.energy < 20 { break; }
+                    if let Some(mut st) = living.equipment(host, eq) {
+                        let iid = hc::item_id(host, &st);
+                        if let Some(cap) = rules::battery_capacity(&iid) {
+                            let cur = get_item_energy(&st);
+                            if cur < cap {
+                                let add = 250.min(cap - cur).min(state.energy);
+                                if add > 0 {
+                                    set_item_energy(&mut st, cur + add);
+                                    let _ = living.set_equipment(host, eq, Some(st));
+                                    state.energy -= add;
+                                    charged_any = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(slots) = p.inventory_slots(host) {
+                    for (slot_idx, mut st) in slots {
+                        if state.energy < 20 { break; }
+                        let iid = hc::item_id(host, &st);
+                        if let Some(cap) = rules::battery_capacity(&iid) {
+                            let cur = get_item_energy(&st);
+                            if cur < cap {
+                                let add = 250.min(cap - cur).min(state.energy);
+                                if add > 0 {
+                                    set_item_energy(&mut st, cur + add);
+                                    let _ = p.set_inventory_slot(host, slot_idx, Some(st));
+                                    state.energy -= add;
+                                    charged_any = true;
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        update_lit_state(game, pos, charged_any);
+        update_lit_state(host, pos, charged_any);
         entity.data = vec![
             if charged_any { StepStatus::Working as i32 } else if state.energy < 20 { StepStatus::NoPower as i32 } else { StepStatus::Idle as i32 },
             state.energy,
@@ -2730,41 +2690,44 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     }
 
     if kind == MachineKind::TeleporterPad {
+        hc::record_server_be(pos, rules::BLOCK_TELEPORTER_PAD);
         if state.progress > 0 {
             state.progress -= 1;
         }
-        let mut peers: Vec<[i32; 3]> = Vec::new();
-        for (&(px, py, pz), be) in &game.world.block_entities {
-            if let BlockEntity::Mod(ent) = be {
-                if ent.id == rules::BLOCK_TELEPORTER_PAD && [px, py, pz] != pos {
-                    peers.push([px, py, pz]);
-                }
-            }
-        }
+        let mut peers: Vec<[i32; 3]> = hc::SERVER_ACTIVE_BE
+            .lock()
+            .map(|m| {
+                m.iter()
+                    .filter(|(p, id)| id.as_str() == rules::BLOCK_TELEPORTER_PAD && **p != pos)
+                    .map(|(p, _)| *p)
+                    .collect()
+            })
+            .unwrap_or_default();
+        peers.retain(|&p| hc::block_id_at(host, p) == rules::BLOCK_TELEPORTER_PAD);
         peers.sort();
         if state.progress == 0 && state.enabled && !peers.is_empty() && state.energy >= 1_000 {
-            let standing_crouching = game.player.as_ref().is_some_and(|p| {
-                p.pose == horizon_client::pose::Pose::Crouching
-                    && (p.position.x - (pos[0] as f64 + 0.5)).abs() <= 0.85
-                    && (p.position.z - (pos[2] as f64 + 0.5)).abs() <= 0.85
-                    && (p.position.y - pos[1] as f64) >= 0.0
-                    && (p.position.y - pos[1] as f64) <= 1.6
+            let crouching_player = host.players().server_players().into_iter().find(|&p| {
+                let ent = p.entity();
+                hc::is_crouching(host, ent)
+                    && ent.position(host).is_some_and(|pp| {
+                        (pp[0] - (pos[0] as f64 + 0.5)).abs() <= 0.85
+                            && (pp[2] - (pos[2] as f64 + 0.5)).abs() <= 0.85
+                            && (pp[1] - pos[1] as f64) >= 0.0
+                            && (pp[1] - pos[1] as f64) <= 1.6
+                    })
             });
-            if standing_crouching {
+            if let Some(who) = crouching_player {
                 let dest = peers[0];
                 state.energy -= 1_000;
                 state.progress = 40;
-                game.native_run_command(&format!("tp @s {}.5 {} {}.5", dest[0], dest[1] + 1, dest[2]));
-                game.native_run_command("playsound minecraft:entity.enderman.teleport player @s ~ ~ ~ 1.0 1.1");
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(
-                        who.uuid,
-                        Text::literal(format!("🌀 [Teletransporte] Destino [{}, {}, {}] (-1,000 FE)", dest[0], dest[1], dest[2])),
-                    );
-                }
+                hc::run_command(host, &format!("tp @s {}.5 {} {}.5", dest[0], dest[1] + 1, dest[2]));
+                hc::run_command(host, "playsound minecraft:entity.enderman.teleport player @s ~ ~ ~ 1.0 1.1");
+                let _ = who.action_bar(host,
+                    Text::literal(format!("🌀 [Teletransporte] Destino [{}, {}, {}] (-1,000 FE)", dest[0], dest[1], dest[2])),
+                );
             }
         }
-        update_lit_state(game, pos, !peers.is_empty() && state.energy >= 1_000);
+        update_lit_state(host, pos, !peers.is_empty() && state.energy >= 1_000);
         entity.data = vec![
             if !peers.is_empty() && state.energy >= 1_000 { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
             state.energy,
@@ -2779,17 +2742,20 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     }
 
     if kind == MachineKind::Tesseract {
+        hc::record_server_be(pos, rules::BLOCK_TESSERACT);
         // 1. Wireless cross-world energy sharing with other Tesseracts
-        let mut peers: Vec<[i32; 3]> = Vec::new();
-        for (&(px, py, pz), be) in &game.world.block_entities {
-            if let BlockEntity::Mod(ent) = be {
-                if ent.id == rules::BLOCK_TESSERACT && [px, py, pz] != pos {
-                    peers.push([px, py, pz]);
-                }
-            }
-        }
+        let mut peers: Vec<[i32; 3]> = hc::SERVER_ACTIVE_BE
+            .lock()
+            .map(|m| {
+                m.iter()
+                    .filter(|(p, id)| id.as_str() == rules::BLOCK_TESSERACT && **p != pos)
+                    .map(|(p, _)| *p)
+                    .collect()
+            })
+            .unwrap_or_default();
+        peers.retain(|&p| hc::block_id_at(host, p) == rules::BLOCK_TESSERACT);
         if state.energy > 0 {
-            let sent = distribute_energy(game, pos, state.energy.min(500), false);
+            let sent = distribute_energy(host, pos, state.energy.min(500), false);
             state.energy -= sent;
         }
         if !peers.is_empty() && state.energy > 100 {
@@ -2797,7 +2763,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             if share > 0 {
                 for peer in &peers {
                     let mut accepted = 0;
-                    game.native_with_mod_block_entity(*peer, |pent| {
+                    hc::with_mod_block_entity(host, *peer, |pent| {
                         if let Some(mut pst) = load_state(pent) {
                             let room = kind.max_energy() - pst.energy;
                             let give = share.min(room);
@@ -2817,7 +2783,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             if let Some(in_stack) = entity.items[rules::SLOT_INPUT].take() {
                 let mut delivered = false;
                 for peer in &peers {
-                    game.native_with_mod_block_entity(*peer, |pent| {
+                    hc::with_mod_block_entity(host, *peer, |pent| {
                         if pent.items[rules::SLOT_OUTPUT].is_none() {
                             pent.items[rules::SLOT_OUTPUT] = Some(in_stack.clone());
                             delivered = true;
@@ -2834,12 +2800,12 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         }
         if entity.items[rules::SLOT_OUTPUT].is_some() {
             if let Some(out) = entity.items[rules::SLOT_OUTPUT].take() {
-                if let Some(rest) = route_item_from(game, pos, out) {
+                if let Some(rest) = route_item_from(host, pos, out) {
                     entity.items[rules::SLOT_OUTPUT] = Some(rest);
                 }
             }
         }
-        update_lit_state(game, pos, !peers.is_empty() && state.energy > 0);
+        update_lit_state(host, pos, !peers.is_empty() && state.energy > 0);
         entity.data = vec![
             if !peers.is_empty() { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
             state.energy,
@@ -2855,10 +2821,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
 
     if kind == MachineKind::EnergyRelay {
         if state.enabled && state.energy > 0 {
-            let sent = distribute_energy(game, pos, state.energy.min(500), false);
+            let sent = distribute_energy(host, pos, state.energy.min(500), false);
             state.energy -= sent;
         }
-        update_lit_state(game, pos, state.enabled && state.energy > 0);
+        update_lit_state(host, pos, state.enabled && state.energy > 0);
         let pct = (state.energy * 100) / kind.max_energy().max(1);
         entity.data = vec![1, state.energy, kind.max_energy(), pct, 0, i32::from(state.enabled), 0, 0, 0, 0];
         store_state(entity, &state);
@@ -2868,49 +2834,58 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     if kind == MachineKind::FluidTank {
         // Process bucket / fluid item in slot 0 inside Tank GUI
         if let Some(Some(slot0)) = entity.items.first_mut() {
-            let item_id = slot0.item.as_ref();
+            let item_id_str = hc::item_id(host, slot0);
+            let item_id = item_id_str.as_str();
             if item_id == "minecraft:water_bucket"
                 && (state.fluid_kind.is_empty() || state.fluid_kind == "water")
                 && state.fluid_amount + 1000 <= rules::FLUID_TANK_MAX_MB
             {
                 state.fluid_kind = "water".to_owned();
                 state.fluid_amount += 1000;
-                *slot0 = ItemStack::new("minecraft:bucket", 1);
+                if let Some(b) = hc::make_stack(host, "minecraft:bucket", 1) {
+                    *slot0 = b;
+                }
             } else if item_id == "minecraft:lava_bucket"
                 && (state.fluid_kind.is_empty() || state.fluid_kind == "lava")
                 && state.fluid_amount + 1000 <= rules::FLUID_TANK_MAX_MB
             {
                 state.fluid_kind = "lava".to_owned();
                 state.fluid_amount += 1000;
-                *slot0 = ItemStack::new("minecraft:bucket", 1);
+                if let Some(b) = hc::make_stack(host, "minecraft:bucket", 1) {
+                    *slot0 = b;
+                }
             } else if item_id == rules::ITEM_RAW_SAP
                 && (state.fluid_kind.is_empty() || state.fluid_kind == "sap")
                 && state.fluid_amount + 250 <= rules::FLUID_TANK_MAX_MB
             {
                 state.fluid_kind = "sap".to_owned();
                 state.fluid_amount += 250;
-                if slot0.count > 1 {
-                    slot0.count -= 1;
+                if slot0.count() > 1 {
+                    let _ = slot0.set_count(slot0.count().saturating_sub(1).max(1));
                 } else {
                     entity.items[0] = None;
                 }
-            } else if item_id == "minecraft:bucket" && slot0.count == 1 && state.fluid_amount >= 1000 {
+            } else if item_id == "minecraft:bucket" && slot0.count() == 1 && state.fluid_amount >= 1000 {
                 if state.fluid_kind == "water" {
                     state.fluid_amount -= 1000;
-                    *slot0 = ItemStack::new("minecraft:water_bucket", 1);
+                    if let Some(b) = hc::make_stack(host, "minecraft:water_bucket", 1) {
+                        *slot0 = b;
+                    }
                     if state.fluid_amount == 0 {
                         state.fluid_kind.clear();
                     }
                 } else if state.fluid_kind == "lava" {
                     state.fluid_amount -= 1000;
-                    *slot0 = ItemStack::new("minecraft:lava_bucket", 1);
+                    if let Some(b) = hc::make_stack(host, "minecraft:lava_bucket", 1) {
+                        *slot0 = b;
+                    }
                     if state.fluid_amount == 0 {
                         state.fluid_kind.clear();
                     }
                 }
             }
         }
-        update_lit_state(game, pos, state.fluid_amount > 0);
+        update_lit_state(host, pos, state.fluid_amount > 0);
         let pct = ((state.fluid_amount * 100) / rules::FLUID_TANK_MAX_MB).clamp(0, 100);
         let fcode = rules::fluid_code(&state.fluid_kind);
         entity.data = vec![
@@ -2936,16 +2911,16 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
 
     let is_gen = matches!(kind, MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SteamBoiler);
     let fuel_ticks = if is_gen {
-        entity.items.first().and_then(|s| s.as_ref()).and_then(fuel_burn_ticks)
+        entity.items.first().and_then(|s| s.as_ref()).and_then(|s| fuel_burn_ticks(host, s))
     } else {
-        entity.items.get(rules::SLOT_FUEL).and_then(|s| s.as_ref()).and_then(fuel_burn_ticks)
+        entity.items.get(rules::SLOT_FUEL).and_then(|s| s.as_ref()).and_then(|s| fuel_burn_ticks(host, s))
     };
 
     if is_gen {
         let max_e = kind.max_energy();
         let outcome = rules::step_machine(&mut state, None, fuel_ticks, None, speed_upgrades);
         if outcome.consume_fuel {
-            consume_one_fuel(entity);
+            consume_one_fuel(host, entity);
         }
         let gen_rate = if outcome.status == StepStatus::Working {
             kind.energy_per_tick() + (speed_upgrades.min(8) as i32) * 10
@@ -2953,10 +2928,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             0
         };
         if state.energy > 0 {
-            let sent = distribute_energy(game, pos, state.energy.min(kind.energy_per_tick() * 4), false);
+            let sent = distribute_energy(host, pos, state.energy.min(kind.energy_per_tick() * 4), false);
             state.energy -= sent;
         }
-        update_lit_state(game, pos, outcome.status == StepStatus::Working);
+        update_lit_state(host, pos, outcome.status == StepStatus::Working);
         let pct = if state.burn_max > 0 {
             ((state.burn_left * 100) / state.burn_max).clamp(0, 100)
         } else {
@@ -2979,22 +2954,22 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     }
 
     if kind == MachineKind::SolarGenerator {
-        let is_array_3x3 = rules::is_solar_array_3x3(pos, |p| game.native_block(p) == rules::BLOCK_SOLAR);
+        let is_array_3x3 = rules::is_solar_array_3x3(pos, |p| hc::block_id_at(host, p) == rules::BLOCK_SOLAR);
         let max_e = if is_array_3x3 { 20_000 } else { 2_000 };
         let mut net_rate = 0;
         let status = if !state.enabled {
             StepStatus::Paused
         } else {
-            let (_block_light, sky_light) = game.native_light([pos[0], pos[1] + 1, pos[2]]);
-            let day_time = game.native_day_time();
-            let (rain, _thunder) = game.native_weather();
-            let solar_gen = rules::solar_generation_rate(day_time, sky_light, rain, speed_upgrades, is_array_3x3);
+            let (_block_light, sky_light) = hc::light_at(host, [pos[0], pos[1] + 1, pos[2]]);
+            let day_time = hc::day_time(host);
+            let (rain, _thunder) = hc::weather(host);
+            let solar_gen = rules::solar_generation_rate(day_time, sky_light as u8, rain, speed_upgrades, is_array_3x3);
             if solar_gen > 0 {
                 state.energy = (state.energy + solar_gen).min(max_e);
                 net_rate = solar_gen;
             }
             if state.energy > 0 {
-                let sent = distribute_energy(game, pos, state.energy.min(if is_array_3x3 { 600 } else { 200 }), false);
+                let sent = distribute_energy(host, pos, state.energy.min(if is_array_3x3 { 600 } else { 200 }), false);
                 state.energy -= sent;
             }
             // Recharging item placed in single centered slot 0 (Battery, Jetpack, Drill, Jet Boots, Mining Laser, Solar Helmet)
@@ -3002,7 +2977,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 let charge_cost = 40;
                 if state.energy >= charge_cost {
                     if matches!(
-                        item_stack.item.as_ref(),
+                        hc::item_id(host, &item_stack).as_str(),
                         rules::ITEM_BATTERY
                             | rules::ITEM_JETPACK
                             | rules::ITEM_JET_BOOTS
@@ -3010,8 +2985,9 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                             | rules::ITEM_MINING_LASER
                             | rules::ITEM_SOLAR_HELMET
                     ) {
-                        if item_stack.damage > 0 {
-                            item_stack.damage = item_stack.damage.saturating_sub(1);
+                        let dmg = item_stack.damage();
+                        if dmg > 0 {
+                            item_stack.set_damage(dmg.saturating_sub(1));
                             state.energy -= charge_cost;
                         }
                     }
@@ -3023,7 +2999,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 StepStatus::Idle
             }
         };
-        update_lit_state(game, pos, status == StepStatus::Working);
+        update_lit_state(host, pos, status == StepStatus::Working);
         let pct = ((state.energy * 100) / max_e.max(1)).clamp(0, 100);
         entity.data = vec![
             status as i32,
@@ -3046,7 +3022,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         if let Some(Some(item_stack)) = entity.items.first_mut() {
             let charge_cost = 50;
             if state.energy >= charge_cost {
-                if let Some(cap) = rules::battery_capacity(item_stack.item.as_ref()) {
+                if let Some(cap) = rules::battery_capacity(hc::item_id(host, &item_stack).as_str()) {
                     let cur = get_item_energy(item_stack);
                     if cur < cap {
                         let add = 500.min(cap - cur).min(state.energy);
@@ -3055,8 +3031,9 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                             state.energy -= add;
                         }
                     }
-                    if item_stack.damage > 0 {
-                        item_stack.damage = item_stack.damage.saturating_sub(2);
+                    let dmg = item_stack.damage();
+                    if dmg > 0 {
+                        item_stack.set_damage(dmg.saturating_sub(2));
                         state.energy = (state.energy - charge_cost).max(0);
                     }
                 }
@@ -3065,85 +3042,76 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         // 2. Standing induction wireless charging for player & entire inventory (armor, hotbar, inventory, offhand):
         let mut player_on_pad = false;
         let pad_center = [pos[0] as f64 + 0.5, pos[1] as f64 + 0.2, pos[2] as f64 + 0.5];
-        if let Some(player) = &game.player {
-            let dx = (player.position.x - pad_center[0]).abs();
-            let dz = (player.position.z - pad_center[2]).abs();
-            let dy = player.position.y - pos[1] as f64;
-            if dx <= 0.9 && dz <= 0.9 && (0.0..=1.6).contains(&dy) {
+        if let Some(player) = host.players().acting_player() {
+            if let Some(ppos) = player.entity().position(host) {
+                let dx = (ppos[0] - pad_center[0]).abs();
+                let dz = (ppos[2] - pad_center[2]).abs();
+                let dy = ppos[1] - pos[1] as f64;
+                if dx <= 0.9 && dz <= 0.9 && (0.0..=1.6).contains(&dy) {
                 player_on_pad = true;
                 if state.energy >= 20 {
                     state.energy -= 20;
-                    if (game.world.game_time + pos[0] as i64) % 4 == 0 {
-                        let phase = ((game.world.game_time % 20) as f64) * 0.09;
-                        game.native_run_command(&format!(
+                    if (hc::game_time(host) + pos[0] as i64) % 4 == 0 {
+                        let phase = ((hc::game_time(host) % 20) as f64) * 0.09;
+                        hc::run_command(host, &format!(
                             "particle minecraft:electric_spark {} {} {} 0.35 0.15 0.35 0.04 10",
                             pad_center[0], pos[1] as f64 + 1.05 + phase, pad_center[2]
                         ));
-                        game.native_run_command(&format!(
+                        hc::run_command(host, &format!(
                             "particle minecraft:end_rod {} {} {} 0.25 0.1 0.25 0.02 3",
                             pad_center[0], pos[1] as f64 + 1.05 + phase, pad_center[2]
                         ));
                     }
-                    if (game.world.game_time + pos[0] as i64) % 25 == 0 {
-                        game.native_run_command("playsound minecraft:block.beacon.ambient player @s ~ ~ ~ 0.35 1.8");
-                        if let Some(who) = game.native_acting_player() {
-                            game.native_action_bar(
-                                who.uuid,
+                    if (hc::game_time(host) + pos[0] as i64) % 25 == 0 {
+                        hc::run_command(host, "playsound minecraft:block.beacon.ambient player @s ~ ~ ~ 0.35 1.8");
+                        if let Some(who) = host.players().acting_player() {
+                            let _ = who.action_bar(host,
                                 Text::literal("⚡ [Cargador Inductivo] Cargando todo tu inventario y armadura..."),
                             );
                         }
                     }
                 }
             }
+            }
         }
         if player_on_pad && state.energy > 0 {
-            // (is_battery, pct, is_armor, idx, cur, cap)
-            let mut candidates: Vec<(bool, u32, bool, usize, i32, i32)> = Vec::new();
-            for (idx, slot) in game.armor.iter().enumerate() {
-                if let Some(st) = slot.as_ref() {
-                    if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
-                        let cur = get_item_energy(st);
-                        if cur < cap {
-                            let pct = ((cur as i64 * 1000) / cap.max(1) as i64) as u32;
-                            candidates.push((false, pct, true, idx, cur, cap));
+            if let Some(who) = host.players().acting_player() {
+                let living = LivingRef::new(who.entity());
+                let mut transferred = 0;
+                for eq in [EquipmentSlot::Head, EquipmentSlot::Chest, EquipmentSlot::Legs, EquipmentSlot::Feet] {
+                    if transferred >= state.energy { break; }
+                    if let Some(mut st) = living.equipment(host, eq) {
+                        let iid = hc::item_id(host, &st);
+                        if let Some(cap) = rules::battery_capacity(&iid) {
+                            let cur = get_item_energy(&st);
+                            let add = 500.min(cap - cur).min(state.energy - transferred);
+                            if add > 0 {
+                                set_item_energy(&mut st, cur + add);
+                                let _ = living.set_equipment(host, eq, Some(st));
+                                transferred += add;
+                            }
                         }
                     }
                 }
-            }
-            for (idx, slot) in game.inventory.iter().enumerate() {
-                if let Some(st) = slot.as_ref() {
-                    if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
-                        let cur = get_item_energy(st);
-                        if cur < cap {
-                            let is_battery = rules::is_battery_item(st.item.as_ref());
-                            let pct = ((cur as i64 * 1000) / cap.max(1) as i64) as u32;
-                            candidates.push((is_battery, pct, false, idx, cur, cap));
+                if let Some(slots) = who.inventory_slots(host) {
+                    for (idx, mut st) in slots {
+                        if transferred >= state.energy { break; }
+                        let iid = hc::item_id(host, &st);
+                        if let Some(cap) = rules::battery_capacity(&iid) {
+                            let cur = get_item_energy(&st);
+                            let add = 500.min(cap - cur).min(state.energy - transferred);
+                            if add > 0 {
+                                set_item_energy(&mut st, cur + add);
+                                let _ = who.set_inventory_slot(host, idx, Some(st));
+                                transferred += add;
+                            }
                         }
                     }
                 }
+                state.energy -= transferred;
             }
-            candidates.sort_by_key(|c| (c.0, c.1));
-            let mut transferred = 0;
-            for (_, _, is_armor, idx, cur, cap) in candidates {
-                if transferred >= state.energy {
-                    break;
-                }
-                let slot_opt = if is_armor {
-                    game.armor.get_mut(idx)
-                } else {
-                    game.inventory.get_mut(idx)
-                };
-                if let Some(Some(st)) = slot_opt {
-                    let add = 500.min(cap - cur).min(state.energy - transferred);
-                    if add > 0 {
-                        set_item_energy(st, cur + add);
-                        transferred += add;
-                    }
-                }
-            }
-            state.energy -= transferred;
         }
-        update_lit_state(game, pos, player_on_pad || entity.items.first().is_some_and(|s| s.is_some()));
+        update_lit_state(host, pos, player_on_pad || entity.items.first().is_some_and(|s| s.is_some()));
         let pct = ((state.energy * 100) / kind.max_energy().max(1)).clamp(0, 100);
         entity.data = vec![
             if player_on_pad { StepStatus::Working as i32 } else { StepStatus::Idle as i32 },
@@ -3162,24 +3130,24 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     }
 
     if kind == MachineKind::EnergyBank {
-        let cluster = rules::find_battery_cluster(pos, |p| game.native_block(p) == rules::BLOCK_ENERGY_BANK);
+        let cluster = rules::find_battery_cluster(pos, |p| hc::block_id_at(host, p) == rules::BLOCK_ENERGY_BANK);
         let cluster_len = cluster.len() as i32;
         let cluster_max = cluster_len * 10_000;
 
         let prev_energy = state.energy;
         let outcome = rules::step_machine(&mut state, None, fuel_ticks, None, speed_upgrades);
         if outcome.consume_fuel {
-            consume_one_fuel(entity);
+            consume_one_fuel(host, entity);
         }
         let mut net_rate = state.energy - prev_energy;
         if state.enabled && state.auto_io && state.energy > 0 {
-            let sent = distribute_energy(game, pos, state.energy.min(400), true);
+            let sent = distribute_energy(host, pos, state.energy.min(400), true);
             state.energy -= sent;
             if sent > 0 {
                 net_rate = -sent;
             }
         }
-        update_lit_state(game, pos, state.enabled && state.energy > 0);
+        update_lit_state(host, pos, state.enabled && state.energy > 0);
         let pct = ((state.energy * 100) / kind.max_energy().max(1)).clamp(0, 100);
         entity.data = vec![
             outcome.status as i32,
@@ -3207,7 +3175,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     ) {
         let (status, rate) = match kind {
             MachineKind::Quarry => tick_quarry(
-                game,
+                host,
                 pos,
                 entity,
                 &mut state,
@@ -3216,7 +3184,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 fortune_upgrades,
             ),
             MachineKind::AutoHarvester => tick_harvester(
-                game,
+                host,
                 pos,
                 entity,
                 &mut state,
@@ -3225,7 +3193,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 fortune_upgrades,
             ),
             MachineKind::BlockBreaker => tick_breaker(
-                game,
+                host,
                 pos,
                 entity,
                 &mut state,
@@ -3234,10 +3202,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
                 fortune_upgrades,
             ),
             MachineKind::BlockPlacer => {
-                tick_placer(game, pos, entity, &mut state, fuel_ticks, speed_upgrades)
+                tick_placer(host, pos, entity, &mut state, fuel_ticks, speed_upgrades)
             }
             MachineKind::SapExtractor => tick_sap_extractor(
-                game,
+                host,
                 pos,
                 entity,
                 &mut state,
@@ -3247,7 +3215,7 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
             ),
             _ => unreachable!(),
         };
-        update_lit_state(game, pos, status == StepStatus::Working);
+        update_lit_state(host, pos, status == StepStatus::Working);
         let needed = rules::effective_work_ticks(kind, speed_upgrades).max(1);
         let pct = ((state.progress * 100) / needed).clamp(0, 100);
         let cur_y = if kind == MachineKind::Quarry {
@@ -3277,10 +3245,10 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
 
     let input_id = entity.items[rules::SLOT_INPUT]
         .as_ref()
-        .map(|s| s.item.to_string());
+        .map(|s| hc::item_id(host, &s));
     let output_info = entity.items[rules::SLOT_OUTPUT].as_ref().map(|s| {
-        let max_stack = game.native_max_stack_size(&s.item).unwrap_or(64);
-        (s.item.to_string(), s.count, max_stack)
+        let max_stack = host.max_stack_size(s.item()).unwrap_or(64);
+        (hc::item_id(host, &s), s.count(), max_stack)
     });
 
     let outcome = rules::step_machine(
@@ -3294,13 +3262,13 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
     );
 
     if outcome.consume_fuel {
-        consume_one_fuel(entity);
+        consume_one_fuel(host, entity);
     }
 
     if outcome.consume_input {
         if let Some(in_stack) = entity.items[rules::SLOT_INPUT].as_mut() {
-            if in_stack.count > 1 {
-                in_stack.count -= 1;
+            if in_stack.count() > 1 {
+                let _ = in_stack.set_count(in_stack.count().saturating_sub(1).max(1));
             } else {
                 entity.items[rules::SLOT_INPUT] = None;
             }
@@ -3315,17 +3283,12 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
         };
         let total_count = prod.count + extra_yield;
         match entity.items[rules::SLOT_OUTPUT].as_mut() {
-            Some(existing) if &*existing.item == prod.item => {
-                let max_s = game.native_max_stack_size(&existing.item).unwrap_or(64);
-                existing.count = (existing.count + total_count).min(max_s);
+            Some(existing) if hc::item_id(host, existing) == prod.item => {
+                let max_s = host.max_stack_size(existing.item()).unwrap_or(64);
+                let _ = existing.set_count((existing.count() + total_count).min(max_s));
             }
             None => {
-                entity.items[rules::SLOT_OUTPUT] = Some(ItemStack {
-                    item: prod.item.into(),
-                    count: total_count,
-                    damage: 0,
-                    extra: None,
-                });
+                entity.items[rules::SLOT_OUTPUT] = hc::make_stack(host, prod.item, total_count);
             }
             _ => {}
         }
@@ -3333,52 +3296,52 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
 
     let is_gen = matches!(kind, MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SteamBoiler);
     if state.auto_io && !is_gen && entity.items[rules::SLOT_OUTPUT].is_some() {
-        try_auto_eject_output(game, pos, entity, 4);
+        try_auto_eject_output(host, pos, entity, 4);
     }
 
     if is_gen && state.energy > 0 {
         let max_send = if kind == MachineKind::SteamBoiler { 600 } else { 280 };
-        let sent = distribute_energy(game, pos, state.energy.min(max_send), false);
+        let sent = distribute_energy(host, pos, state.energy.min(max_send), false);
         state.energy -= sent;
     }
 
 
-    update_lit_state(game, pos, outcome.status == StepStatus::Working);
+    update_lit_state(host, pos, outcome.status == StepStatus::Working);
 
     // Dynamic machine sound & particle effects
-    if outcome.status == StepStatus::Working && ((game.world.game_time + (pos[0] as i64 * 11)) % 15 == 0) {
+    if outcome.status == StepStatus::Working && ((hc::game_time(host) + (pos[0] as i64 * 11)) % 15 == 0) {
         let px = pos[0] as f64 + 0.5;
         let py = pos[1] as f64 + 1.05;
         let pz = pos[2] as f64 + 0.5;
         match kind {
             MachineKind::CoalGenerator | MachineKind::BioGenerator => {
-                game.native_run_command(&format!("particle minecraft:smoke {px} {py} {pz} 0.15 0.1 0.15 0.01 2"));
+                hc::run_command(host, &format!("particle minecraft:smoke {px} {py} {pz} 0.15 0.1 0.15 0.01 2"));
             }
             MachineKind::SteamBoiler => {
-                game.native_run_command(&format!("particle minecraft:cloud {px} {py} {pz} 0.15 0.15 0.15 0.02 2"));
+                hc::run_command(host, &format!("particle minecraft:cloud {px} {py} {pz} 0.15 0.15 0.15 0.02 2"));
             }
             MachineKind::ElectricCrusher | MachineKind::MechanicalPress => {
-                game.native_run_command(&format!("particle minecraft:crit {px} {py} {pz} 0.2 0.1 0.2 0.04 3"));
+                hc::run_command(host, &format!("particle minecraft:crit {px} {py} {pz} 0.2 0.1 0.2 0.04 3"));
             }
             MachineKind::ElectricFurnace | MachineKind::AlloySmelter => {
-                game.native_run_command(&format!("particle minecraft:flame {px} {py} {pz} 0.15 0.08 0.15 0.01 2"));
+                hc::run_command(host, &format!("particle minecraft:flame {px} {py} {pz} 0.15 0.08 0.15 0.01 2"));
             }
             _ => {}
         }
     }
-    if outcome.status == StepStatus::Working && ((game.world.game_time + (pos[0] as i64 * 11)) % 40 == 0) {
+    if outcome.status == StepStatus::Working && ((hc::game_time(host) + (pos[0] as i64 * 11)) % 40 == 0) {
         match kind {
             MachineKind::SteamBoiler => {
-                game.native_run_command(&format!("playsound minecraft:block.fire.extinguish block @a {} {} {} 0.3 1.2", pos[0], pos[1], pos[2]));
+                hc::run_command(host, &format!("playsound minecraft:block.fire.extinguish block @a {} {} {} 0.3 1.2", pos[0], pos[1], pos[2]));
             }
             MachineKind::ElectricCrusher => {
-                game.native_run_command(&format!("playsound minecraft:block.grindstone.use block @a {} {} {} 0.35 0.9", pos[0], pos[1], pos[2]));
+                hc::run_command(host, &format!("playsound minecraft:block.grindstone.use block @a {} {} {} 0.35 0.9", pos[0], pos[1], pos[2]));
             }
             MachineKind::MechanicalPress => {
-                game.native_run_command(&format!("playsound minecraft:block.piston.extend block @a {} {} {} 0.4 0.8", pos[0], pos[1], pos[2]));
+                hc::run_command(host, &format!("playsound minecraft:block.piston.extend block @a {} {} {} 0.4 0.8", pos[0], pos[1], pos[2]));
             }
             MachineKind::AlloySmelter => {
-                game.native_run_command(&format!("playsound minecraft:block.blastfurnace.fire_crackle block @a {} {} {} 0.35 1.1", pos[0], pos[1], pos[2]));
+                hc::run_command(host, &format!("playsound minecraft:block.blastfurnace.fire_crackle block @a {} {} {} 0.35 1.1", pos[0], pos[1], pos[2]));
             }
             _ => {}
         }
@@ -3414,16 +3377,16 @@ pub(in crate::game) fn tick(game: &mut Game<'_>, pos: [i32; 3], entity: &mut Mod
 /// 3D Block Entity Renderer (`native_block_entity_submit`):
 /// Renders items smoothly gliding along Tiered Conveyor Belts (straight, left/right curves, up/down slopes)
 /// AND travelling visibly inside glass Pneumatic Item Pipes!
-pub(in crate::game) fn submit(
-    game: &Game<'_>,
+pub(crate) fn submit(
+    host: &dyn ClientHost,
     pos: [i32; 3],
     block: &str,
-    state: BlockStateId,
+    state: BlockState,
     entity: &ModBlockEntity,
-    draw: &mut BlockEntityDraw,
+    draw: &mut dyn BlockEntityDrawContext,
 ) {
-    if !game.native_on(rules::ID) {
-        return;
+    if let Some(st) = load_state(entity) {
+        hc::record_client_be(pos, block, st);
     }
 
     if block == rules::BLOCK_INDUSTRIAL_SILO {
@@ -3431,9 +3394,8 @@ pub(in crate::game) fn submit(
             return;
         };
         if !st.belt_item.is_empty() && st.belt_count > 0 {
-            let facing = game
-                .native_block_state_property(state, "facing")
-                .unwrap_or("north");
+            let facing_str = hc::block_state_property(host, state, "facing");
+            let facing = facing_str.as_deref().unwrap_or("north");
             let (front_off, _) = rules::conveyor_offsets(facing);
             let yaw = match facing {
                 "north" => 0.0,
@@ -3442,9 +3404,9 @@ pub(in crate::game) fn submit(
                 "west" => 90.0,
                 _ => 0.0,
             };
-            let stack = ItemStack::new(&st.belt_item, 1);
-            let prev_light = draw.light;
-            draw.light = 240 | (240 << 8);
+            let Some(stack) = hc::make_stack(host, &st.belt_item, 1) else { return; };
+            let prev_light = draw.light();
+            draw.set_light(240 | (240 << 8));
             draw.push();
             draw.translate([
                 0.5 + front_off[0] as f32 * 0.535,
@@ -3453,15 +3415,14 @@ pub(in crate::game) fn submit(
             ]);
             draw.rotate_about([0.0, 1.0, 0.0], yaw, [0.0, 0.0, 0.0]);
             draw.scale([0.44, 0.44, 0.08]);
-            let _ = game.native_draw_item(
-                draw,
+            let _ = hc::draw_be_item_stack(draw,
                 &stack,
-                DisplayContext::Fixed,
+                ItemDisplayContext::Fixed,
                 None,
                 pos[0].wrapping_mul(31) ^ pos[2],
             );
             draw.pop();
-            draw.light = prev_light;
+            draw.set_light(prev_light);
         }
         return;
     }
@@ -3470,9 +3431,8 @@ pub(in crate::game) fn submit(
         let Some(st) = load_state(entity) else {
             return;
         };
-        let facing = game
-            .native_block_state_property(state, "facing")
-            .unwrap_or("north");
+        let facing_str = hc::block_state_property(host, state, "facing");
+        let facing = facing_str.as_deref().unwrap_or("north");
         let side_shapes = ["turn_left", "straight", "turn_right"];
         for (i, shape_name) in side_shapes.iter().enumerate() {
             let filter_id = &st.splitter_filters[i];
@@ -3487,7 +3447,7 @@ pub(in crate::game) fn submit(
                 [-1, 0, 0] => 90.0,
                 _ => 0.0,
             };
-            let stack = ItemStack::new(filter_id, 1);
+            let Some(stack) = hc::make_stack(host, filter_id, 1) else { return; };
             draw.push();
             draw.translate([
                 0.5 + off[0] as f32 * 0.46,
@@ -3496,10 +3456,9 @@ pub(in crate::game) fn submit(
             ]);
             draw.rotate_about([0.0, 1.0, 0.0], yaw, [0.0, 0.0, 0.0]);
             draw.scale([0.34, 0.34, 0.34]);
-            let _ = game.native_draw_item(
-                draw,
+            let _ = hc::draw_be_item_stack(draw,
                 &stack,
-                DisplayContext::Fixed,
+                ItemDisplayContext::Fixed,
                 None,
                 pos[0].wrapping_mul(31) ^ pos[2] ^ i as i32,
             );
@@ -3522,31 +3481,29 @@ pub(in crate::game) fn submit(
     if st.belt_filter_attached && !st.splitter_filters[0].is_empty() {
         let first_f = st.splitter_filters[0].split(',').next().unwrap_or("").trim();
         if !first_f.is_empty() {
-            let fstack = ItemStack::new(first_f, 1);
-            draw.push();
-            draw.translate([0.5, 0.72, 0.5]);
-            draw.scale([0.36, 0.36, 0.36]);
-            let _ = game.native_draw_item(
-                draw,
-                &fstack,
-                DisplayContext::Fixed,
-                None,
-                pos[0].wrapping_mul(17) ^ pos[2],
-            );
-            draw.pop();
+            if let Some(fstack) = hc::make_stack(host, first_f, 1) {
+                draw.push();
+                draw.translate([0.5, 0.72, 0.5]);
+                draw.scale([0.36, 0.36, 0.36]);
+                let _ = hc::draw_be_item_stack(draw,
+                    &fstack,
+                    ItemDisplayContext::Fixed,
+                    None,
+                    pos[0].wrapping_mul(17) ^ pos[2],
+                );
+                draw.pop();
+            }
         }
     }
     if st.belt_item.is_empty() {
         return;
     }
-    let facing = game
-        .native_block_state_property(state, "facing")
-        .unwrap_or("north");
-    let shape = game
-        .native_block_state_property(state, "shape")
-        .unwrap_or("straight");
+    let facing_str = hc::block_state_property(host, state, "facing");
+    let facing = facing_str.as_deref().unwrap_or("north");
+    let shape_str = hc::block_state_property(host, state, "shape");
+    let shape = shape_str.as_deref().unwrap_or("straight");
 
-    let t = ((st.progress as f32 + if st.enabled && st.progress < max_ticks { draw.partial } else { 0.0 })
+    let t = ((st.progress as f32 + if st.enabled && st.progress < max_ticks { draw.partial() } else { 0.0 })
         / max_ticks as f32)
         .clamp(0.0, 1.0);
 
@@ -3616,15 +3573,14 @@ pub(in crate::game) fn submit(
         }
     };
 
-    let stack = ItemStack::new(&st.belt_item, 1);
+    let Some(stack) = hc::make_stack(host, &st.belt_item, 1) else { return; };
     draw.push();
     draw.translate([ix, iy, iz]);
     draw.rotate_about([0.0, 1.0, 0.0], yaw, [0.0, 0.0, 0.0]);
     draw.scale([0.46, 0.46, 0.46]);
-    let _ = game.native_draw_item(
-        draw,
+    let _ = hc::draw_be_item_stack(draw,
         &stack,
-        DisplayContext::Fixed,
+        ItemDisplayContext::Fixed,
         None,
         pos[0].wrapping_mul(31) ^ pos[2],
     );
@@ -3634,32 +3590,35 @@ pub(in crate::game) fn submit(
 /// 3D World Primitives (`native_world_primitives`):
 /// Renders the BuildCraft-style 3D Quarry Frame, Moving X/Z Gantry Bridge, Drill Head,
 /// glowing Mining Laser beam, and floating Quarry Telemetry Hologram!
-pub(in crate::game) fn world_primitives(
-    game: &Game<'_>,
-    partial: f32,
-    camera: [f64; 3],
-    primitives: &mut WorldPrimitives,
+pub(crate) fn world_primitives(
+    host: &dyn ClientHost,
+    view: &WorldRenderView,
+    draw: &mut dyn WorldDrawContext,
 ) {
-    if !game.native_on(rules::ID) {
-        return;
-    }
+    let partial = view.partial_tick;
+    let camera = view.camera;
+    let mut prim_buf = hc::WorldPrimitivesCompat::new();
+    let primitives = &mut prim_buf;
 
-    for (&(x, y, z), be) in &game.world.block_entities {
-        let BlockEntity::Mod(entity) = be else {
-            continue;
-        };
+    let cached: Vec<([i32; 3], String, MachineState)> = hc::CLIENT_VISIBLE_BE
+        .lock()
+        .map(|m| m.iter().map(|(&p, (id, st))| (p, id.clone(), st.clone())).collect())
+        .unwrap_or_default();
+
+    for (pos, be_id, st) in cached {
+        let [x, y, z] = pos;
         let dx = x as f64 + 0.5 - camera[0];
         let dy = y as f64 + 0.5 - camera[1];
         let dz = z as f64 + 0.5 - camera[2];
         if dx * dx + dy * dy + dz * dz > 64.0 * 64.0 {
             continue;
         }
+        if hc::block_id_at(host, pos) != be_id {
+            continue;
+        }
 
-    if entity.id == rules::BLOCK_INDUSTRIAL_SILO {
-            let st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::IndustrialSilo));
-            let pos = [x, y, z];
-            let facing = game
-                .native_block_property(pos, "facing")
+    if be_id == rules::BLOCK_INDUSTRIAL_SILO {
+            let facing = hc::block_property_at(host, pos, "facing")
                 .unwrap_or_else(|| "north".to_owned());
             let (front_off, _) = rules::conveyor_offsets(&facing);
             let cap = st.silo_capacity.max(2_048) as f64;
@@ -3683,8 +3642,8 @@ pub(in crate::game) fn world_primitives(
             continue;
         }
 
-        if entity.id == rules::BLOCK_TESSERACT {
-            let pulse = ((game.world.game_time as f64 + partial as f64) * 0.15).sin() * 0.04;
+        if be_id == rules::BLOCK_TESSERACT {
+            let pulse = ((hc::game_time(host) as f64 + partial as f64) * 0.15).sin() * 0.04;
             let r = 0.22 + pulse;
             primitives.filled_box(
                 [x as f64 + 0.5 - r, y as f64 + 0.5 - r, z as f64 + 0.5 - r],
@@ -3695,8 +3654,8 @@ pub(in crate::game) fn world_primitives(
             continue;
         }
 
-        if entity.id == rules::BLOCK_GEOTHERMAL {
-            let st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::GeothermalGenerator));
+        if be_id == rules::BLOCK_GEOTHERMAL {
+            
             if st.fluid_amount > 0 {
                 primitives.filled_box(
                     [x as f64 + 0.24, y as f64 + 0.96, z as f64 + 0.24],
@@ -3707,10 +3666,10 @@ pub(in crate::game) fn world_primitives(
             continue;
         }
 
-        if entity.id == rules::BLOCK_STEAM_TURBINE {
-            let st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::SteamTurbine));
+        if be_id == rules::BLOCK_STEAM_TURBINE {
+            
             if st.fluid_amount > 0 {
-                let spin = ((game.world.game_time / 2) % 2) == 0;
+                let spin = ((hc::game_time(host) / 2) % 2) == 0;
                 let (rx, rz) = if spin { (0.32, 0.08) } else { (0.08, 0.32) };
                 primitives.filled_box(
                     [x as f64 + 0.5 - rx, y as f64 + 0.98, z as f64 + 0.5 - rz],
@@ -3721,8 +3680,8 @@ pub(in crate::game) fn world_primitives(
             continue;
         }
 
-        if rules::is_fluid_pipe(&entity.id) {
-            let st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::FluidPipe));
+        if rules::is_fluid_pipe(&be_id) {
+            
             if st.fluid_amount > 0 && !st.fluid_kind.is_empty() {
                 let col = match st.fluid_kind.as_str() {
                     "lava" => 0xEEFF_5511,
@@ -3739,8 +3698,8 @@ pub(in crate::game) fn world_primitives(
             continue;
         }
 
-        if entity.id == rules::BLOCK_FLUID_TANK {
-            let st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::FluidTank));
+        if be_id == rules::BLOCK_FLUID_TANK {
+            
             if st.fluid_amount > 0 {
                 let ratio = (st.fluid_amount as f64 / rules::FLUID_TANK_MAX_MB as f64).clamp(0.05, 1.0);
                 let top_y = y as f64 + 0.08 + 0.80 * ratio;
@@ -3759,12 +3718,11 @@ pub(in crate::game) fn world_primitives(
             continue;
         }
 
-        if entity.id == rules::BLOCK_HARVESTER {
-            let st = load_state(entity)
+        if be_id == rules::BLOCK_HARVESTER {
+            let st = Some(st.clone())
                 .unwrap_or_else(|| MachineState::new(MachineKind::AutoHarvester));
             let pos = [x, y, z];
-            let facing = game
-                .native_block_property(pos, "facing")
+            let facing = hc::block_property_at(host, pos, "facing")
                 .unwrap_or_else(|| "north".to_owned());
             let (min_x, max_x, min_z, max_z) =
                 rules::quarry_area_bounds(pos, &facing, st.quarry_radius);
@@ -3791,8 +3749,8 @@ pub(in crate::game) fn world_primitives(
             continue;
         }
 
-        if rules::is_conveyor_block(&entity.id) {
-            if let Some(st) = load_state(entity) {
+        if rules::is_conveyor_block(&be_id) {
+            { let st = st.clone();
                 if st.belt_filter_attached {
                     let fx = x as f64;
                     let fy = y as f64;
@@ -3809,16 +3767,15 @@ pub(in crate::game) fn world_primitives(
             continue;
         }
 
-        if !rules::is_quarry_block(&entity.id) {
+        if !rules::is_quarry_block(&be_id) {
             continue;
         }
 
-        let (tier_radius, _, _) = rules::quarry_tier(&entity.id);
-        let st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::Quarry));
+        let (tier_radius, _, _) = rules::quarry_tier(&be_id);
+        let st = Some(st.clone()).unwrap_or_else(|| MachineState::new(MachineKind::Quarry));
         let eff_radius = st.quarry_radius.max(tier_radius);
         let pos = [x, y, z];
-        let facing = game
-            .native_block_property(pos, "facing")
+        let facing = hc::block_property_at(host, pos, "facing")
             .unwrap_or_else(|| "north".to_owned());
         let (min_x, max_x, min_z, max_z) =
             rules::quarry_area_bounds(pos, &facing, eff_radius);
@@ -3829,7 +3786,7 @@ pub(in crate::game) fn world_primitives(
         let z1 = (max_z + 1) as f64;
         let base_y = y as f64;
         let top_y = y as f64 + 3.25;
-        let (beam_col_a, beam_col_b, accent_col) = match entity.id.as_str() {
+        let (beam_col_a, beam_col_b, accent_col) = match be_id.as_str() {
             rules::BLOCK_QUARRY_MK2 => (0xFF4A_76A4, 0xFFB8_8E2C, 0xFF5A_8EC0),
             rules::BLOCK_QUARRY_MK3 => (0xFF3E_8292, 0xFF1C_2026, 0xFF72_669E),
             _ => (0xFFC8_9826, 0xFF20_242B, 0xFFD0_8228),
@@ -3839,7 +3796,7 @@ pub(in crate::game) fn world_primitives(
         let steel_light = 0xFF6E_7888;
 
         // 1. 3D Industrial Construction Scaffolding (non-overlapping segmented beams)
-        let draw_hazard_beam = |prims: &mut WorldPrimitives, a: [f64; 3], b: [f64; 3], r: f64| {
+        let draw_hazard_beam = |prims: &mut hc::WorldPrimitivesCompat, a: [f64; 3], b: [f64; 3], r: f64| {
             let dx = b[0] - a[0];
             let dy = b[1] - a[1];
             let dz = b[2] - a[2];
@@ -3860,7 +3817,7 @@ pub(in crate::game) fn world_primitives(
             }
         };
 
-        let anim_t = game.world.game_time as f64 + partial as f64;
+        let anim_t = hc::game_time(host) as f64 + partial as f64;
         let beacon_col = if st.enabled && ((anim_t * 0.18) as i64).rem_euclid(2) == 0 {
             accent_col
         } else if st.enabled {
@@ -3986,22 +3943,21 @@ pub(in crate::game) fn world_primitives(
     }
 
     // Ghost block + directional arrow preview when holding Conveyor Belt or Item Splitter
-    if let (Some((held_id, _, _)), Some(player)) = (game.native_held(), &game.player) {
+    if let (Some(held_stack), Some(player)) = (hc::local_held(host), host.local_player()) {
+        let held_id = hc::item_id(host, &held_stack);
         let is_belt = rules::is_conveyor_block(&held_id);
         let is_splitter = held_id == rules::BLOCK_ITEM_SPLITTER;
         if is_belt || is_splitter {
-            let yaw_rad = (game.yaw as f64).to_radians();
-            let pitch_rad = (game.pitch as f64).to_radians();
+            let (yaw, pitch) = hc::local_yaw_pitch(host);
+            let yaw_rad = (yaw as f64).to_radians();
+            let pitch_rad = (pitch as f64).to_radians();
             let dir = [
                 -yaw_rad.sin() * pitch_rad.cos(),
                 -pitch_rad.sin(),
                 yaw_rad.cos() * pitch_rad.cos(),
             ];
-            let eye = [
-                player.position.x,
-                player.position.y + f64::from(player.dimensions.eye_height),
-                player.position.z,
-            ];
+            let pos_eye = player.entity().position(host).unwrap_or([0.0, 0.0, 0.0]);
+            let eye = [pos_eye[0], pos_eye[1] + 1.62, pos_eye[2]];
             let mut prev_cell = [
                 eye[0].floor() as i32,
                 eye[1].floor() as i32,
@@ -4015,7 +3971,7 @@ pub(in crate::game) fn world_primitives(
                 let pz = eye[2] + dir[2] * t;
                 let cell = [px.floor() as i32, py.floor() as i32, pz.floor() as i32];
                 if cell != prev_cell {
-                    let blk = game.native_block(cell);
+                    let blk = hc::block_id_at(host, cell);
                     if !matches!(
                         blk.as_str(),
                         "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
@@ -4027,8 +3983,9 @@ pub(in crate::game) fn world_primitives(
                 }
             }
             if let Some(p) = hit_place {
-                let is_crouching = player.pose == horizon_client::pose::Pose::Crouching;
-                let forward_facing = cardinal_facing_from_yaw(game.yaw);
+                let is_crouching = hc::is_crouching(host, player.entity());
+                let (yaw, _) = hc::local_yaw_pitch(host);
+                let forward_facing = cardinal_facing_from_yaw(yaw);
                 let facing = if is_crouching {
                     opposite_facing(forward_facing)
                 } else {
@@ -4065,6 +4022,7 @@ pub(in crate::game) fn world_primitives(
             }
         }
     }
+    prim_buf.flush(draw);
 }
 
 fn cardinal_facing_from_yaw(yaw: f32) -> &'static str {
@@ -4090,24 +4048,23 @@ fn opposite_facing(facing: &str) -> &'static str {
     }
 }
 
-fn compute_belt_shape(game: &Game<'_>, pos: [i32; 3], facing: &str) -> &'static str {
+fn compute_belt_shape(host: &dyn Host, pos: [i32; 3], facing: &str) -> &'static str {
     let (front_off, back_off) = rules::conveyor_offsets(facing);
     let front_up = [pos[0] + front_off[0], pos[1] + 1, pos[2] + front_off[2]];
     let back_up = [pos[0] + back_off[0], pos[1] + 1, pos[2] + back_off[2]];
     let front_pos = [pos[0] + front_off[0], pos[1], pos[2] + front_off[2]];
 
-    if rules::is_conveyor_block(&game.native_block(front_up)) {
+    if rules::is_conveyor_block(&hc::block_id_at(host, front_up)) {
         return "up";
     }
-    if rules::is_conveyor_block(&game.native_block(back_up)) {
+    if rules::is_conveyor_block(&hc::block_id_at(host, back_up)) {
         return "down";
     }
 
     let is_linkable_output = |p: [i32; 3], into_dir: [i32; 3]| -> bool {
-        let b = game.native_block(p);
+        let b = hc::block_id_at(host, p);
         if rules::is_conveyor_block(&b) {
-            let target_facing = game
-                .native_block_property(p, "facing")
+            let target_facing = hc::block_property_at(host, p, "facing")
                 .unwrap_or_else(|| "north".to_owned());
             let (target_front, _) = rules::conveyor_offsets(&target_facing);
             // Do not turn into a belt that is pointing directly into us
@@ -4136,19 +4093,17 @@ fn compute_belt_shape(game: &Game<'_>, pos: [i32; 3], facing: &str) -> &'static 
 }
 
 /// Auto-orients Conveyor Belts & Item Splitters forward (Shift reverses) and auto-curves connected belts!
-pub(in crate::game) fn place_block(game: &mut Game<'_>, pos: [i32; 3]) {
-    if !game.native_on(rules::ID) {
-        return;
-    }
-    let block_id = game.native_block(pos);
+pub(crate) fn place_block(host: &mut dyn ServerHost, pos: [i32; 3]) {
+    
+    let block_id = hc::block_id_at(host, pos);
     if rules::is_quarry_block(&block_id) {
         let (tier_radius, _, _) = rules::quarry_tier(&block_id);
-        game.native_with_mod_block_entity(pos, |entity| {
+        hc::with_mod_block_entity(host, pos, |entity| {
             let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::Quarry));
             st.quarry_radius = tier_radius;
             store_state(entity, &st);
         });
-        game.native_block_entity_sync(pos);
+        host.block_entity_sync(pos);
         return;
     }
     let is_belt = rules::is_conveyor_block(&block_id);
@@ -4157,15 +4112,14 @@ pub(in crate::game) fn place_block(game: &mut Game<'_>, pos: [i32; 3]) {
         return;
     }
 
-    let is_crouching = game
-        .player
-        .as_ref()
-        .is_some_and(|p| p.pose == horizon_client::pose::Pose::Crouching);
+    let is_crouching = host
+        .players()
+        .acting_player()
+        .is_some_and(|p| hc::is_crouching(host, p.entity()));
 
     // `minecraft:furnace` template faces towards the player; flip so normal placement goes FORWARD (away from player),
     // and Shift (crouching) reverses direction!
-    let raw_facing = game
-        .native_block_property(pos, "facing")
+    let raw_facing = hc::block_property_at(host, pos, "facing")
         .unwrap_or_else(|| "north".to_owned());
     let facing = if is_crouching {
         raw_facing.clone()
@@ -4173,16 +4127,16 @@ pub(in crate::game) fn place_block(game: &mut Game<'_>, pos: [i32; 3]) {
         opposite_facing(&raw_facing).to_owned()
     };
     if facing != raw_facing {
-        game.native_set_block_property(pos, "facing", &facing);
+        host.set_block_property(pos, "facing", &facing);
     }
 
     if !is_belt {
         return;
     }
 
-    let desired_shape = compute_belt_shape(game, pos, &facing);
+    let desired_shape = compute_belt_shape(host, pos, &facing);
     if desired_shape != "straight" {
-        game.native_set_block_property(pos, "shape", desired_shape);
+        host.set_block_property(pos, "shape", desired_shape);
     }
 
     // Update adjacent belts that have an open front so they smoothly curve or ramp into this newly placed belt
@@ -4198,33 +4152,29 @@ pub(in crate::game) fn place_block(game: &mut Game<'_>, pos: [i32; 3]) {
     ];
     for off in neighbor_offsets {
         let nb = [pos[0] + off[0], pos[1] + off[1], pos[2] + off[2]];
-        if !rules::is_conveyor_block(&game.native_block(nb)) {
+        if !rules::is_conveyor_block(&hc::block_id_at(host, nb)) {
             continue;
         }
-        let nb_facing = game
-            .native_block_property(nb, "facing")
+        let nb_facing = hc::block_property_at(host, nb, "facing")
             .unwrap_or_else(|| "north".to_owned());
-        let nb_shape = game
-            .native_block_property(nb, "shape")
+        let nb_shape = hc::block_property_at(host, nb, "shape")
             .unwrap_or_else(|| "straight".to_owned());
         if nb_shape == "straight" {
-            let updated = compute_belt_shape(game, nb, &nb_facing);
+            let updated = compute_belt_shape(host, nb, &nb_facing);
             if updated != nb_shape {
-                game.native_set_block_property(nb, "shape", updated);
+                host.set_block_property(nb, "shape", updated);
             }
         }
     }
 }
 
 /// Drops any item currently travelling inside an `item_pipe` or riding on a `conveyor_belt` when broken.
-pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
-    if !game.native_on(rules::ID) {
-        return;
-    }
-    let block_id = game.native_block(pos);
+pub(crate) fn destroy_block(host: &mut dyn ServerHost, pos: [i32; 3]) {
+    
+    let block_id = hc::block_id_at(host, pos);
     if rules::is_item_pipe(&block_id) || rules::is_conveyor_block(&block_id) {
         let mut dropped_item: Option<(String, u32)> = None;
-        game.native_with_mod_block_entity(pos, |entity| {
+        hc::with_mod_block_entity(host, pos, |entity| {
             if let Some(mut st) = load_state(entity) {
                 if !st.belt_item.is_empty() {
                     dropped_item = Some((st.belt_item.clone(), st.belt_count.max(1)));
@@ -4235,7 +4185,7 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
             }
         });
         if let Some((item_id, count)) = dropped_item {
-            game.pop_resource(pos, ItemStack::new(&item_id, count));
+            { let _st = hc::make_stack(host, &item_id, count); hc::pop_resource(host, pos, _st); };
         }
         return;
     }
@@ -4244,30 +4194,31 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     if DRILL_BREAKING.load(std::sync::atomic::Ordering::Relaxed) {
         return;
     }
-    let Some(held) = game.held() else {
+    let Some(held) = hc::acting_held(host) else {
         return;
     };
-    let held_id = held.item.as_ref().to_owned();
+    let held_id = hc::item_id(host, &held).as_str().to_owned();
     let Some((_, rad_half, base_cost)) = rules::drill_tier(&held_id) else {
         return;
     };
-    let eff_mod = has_item_module(held, "eff");
-    let smelt_mod = has_item_module(held, "smelt");
-    let fortune_mod = has_item_module(held, "fortune");
-    let silk_mod = has_item_module(held, "silk");
-    let drill_area = is_drill_3x3(held);
+    let eff_mod = has_item_module(&held, "eff");
+    let smelt_mod = has_item_module(&held, "smelt");
+    let fortune_mod = has_item_module(&held, "fortune");
+    let silk_mod = has_item_module(&held, "silk");
+    let drill_area = is_drill_3x3(&held);
     let cost = if eff_mod { (base_cost / 2).max(5) } else { base_cost };
-    if !game.creative && !consume_player_energy(game, cost) {
+    if !hc::acting_creative(host) && !consume_player_energy(host, cost) {
         return;
     }
     if !drill_area {
         return;
     }
-    let (u_axes, v_axes): ([i32; 3], [i32; 3]) = if let Some(who) = game.native_acting_player() {
-        if who.pitch.abs() > 45.0 {
+    let (u_axes, v_axes): ([i32; 3], [i32; 3]) = if let Some(who) = host.players().acting_player() {
+        let rot = who.entity().rotation(host).unwrap_or([0.0, 0.0]);
+        if rot[1].abs() > 45.0 {
             ([1, 0, 0], [0, 0, 1])
         } else {
-            let yaw = who.yaw.rem_euclid(360.0);
+            let yaw = rot[0].rem_euclid(360.0);
             if !(45.0..135.0).contains(&yaw) && !(225.0..315.0).contains(&yaw) {
                 ([1, 0, 0], [0, 1, 0])
             } else {
@@ -4277,10 +4228,8 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
     } else {
         ([1, 0, 0], [0, 1, 0])
     };
-    let dim = game.native_dimension();
-    let Some(air_state) = game.native_default_state("minecraft:air") else {
-        return;
-    };
+    let dim = host.dimension();
+    
     DRILL_BREAKING.store(true, std::sync::atomic::Ordering::Relaxed);
     let [cx, cy, cz] = pos;
     'outer: for u in -rad_half..=rad_half {
@@ -4293,15 +4242,15 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
                 cy + u_axes[1] * u + v_axes[1] * v,
                 cz + u_axes[2] * u + v_axes[2] * v,
             ];
-            let b = game.native_block(p);
+            let b = hc::block_id_at(host, p);
             if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
-                if !game.creative && !consume_player_energy(game, cost) {
+                if !hc::acting_creative(host) && !consume_player_energy(host, cost) {
                     break 'outer;
                 }
-                game.native_set_block(dim, p, air_state, 3);
-                if !game.creative {
+                hc::set_block_by_id(host, p, "minecraft:air");
+                if !hc::acting_creative(host) {
                     if silk_mod {
-                        game.pop_resource(p, ItemStack::new(&b, 1));
+                        { let _st = hc::make_stack(host, &b, 1); hc::pop_resource(host, p, _st); };
                     } else if let Some((drop_id, base_cnt)) = rules::quarry_drop_for_block(&b) {
                         let final_id = if smelt_mod {
                             match drop_id {
@@ -4315,7 +4264,7 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
                             drop_id
                         };
                         let cnt = if fortune_mod { base_cnt + 1 } else { base_cnt };
-                        game.pop_resource(p, ItemStack::new(final_id, cnt));
+                        { let _st = hc::make_stack(host, final_id, cnt); hc::pop_resource(host, p, _st); };
                     }
                 }
             }
@@ -4325,206 +4274,205 @@ pub(in crate::game) fn destroy_block(game: &mut Game<'_>, pos: [i32; 3]) {
 }
 
 /// Handles right-clicking tools in the air (not targeting a block): Drill mode toggle, Jetpacks, Magnet, Batteries.
-pub(in crate::game) fn use_item(game: &mut Game<'_>, stack: &ItemStack, claimed: &mut bool) {
-    if *claimed || !game.native_on(rules::ID) {
-        return;
-    }
-    let held_id = stack.item.as_ref();
-    let is_crouching = game
-        .player
-        .as_ref()
-        .is_some_and(|p| p.pose == horizon_client::pose::Pose::Crouching);
+pub(crate) fn use_item(host: &mut dyn ServerHost, stack: Option<&ItemStack>, _player_uuid: u128) -> bool {
+    let Some(stack) = stack else {
+        return false;
+    };
+    let held_id_str = hc::item_id(host, stack);
+    let held_id = held_id_str.as_str();
+    let mut claimed = false;
+    let is_crouching = host
+        .players()
+        .acting_player()
+        .is_some_and(|p| hc::is_crouching(host, p.entity()));
 
     if let Some((tier, rad_half, _)) = rules::drill_tier(held_id) {
         if is_crouching {
-            *claimed = true;
+            claimed = true;
             let area_label = if rad_half >= 2 { "5x5" } else { "3x3" };
             let mut mode_now = false;
-            if let Some(held) = game.held_mut() {
-                mode_now = !is_drill_3x3(held);
+            hc::acting_held_mut(host, |slot| if let Some(held) = slot.as_mut() {
+                mode_now = !is_drill_3x3(&held);
                 set_drill_3x3(held, mode_now);
-            }
-            if let Some(who) = game.native_acting_player() {
+            });
+            if let Some(who) = host.players().acting_player() {
                 let msg = if mode_now {
                     format!("⚡ [Taladro MK{tier}] Modo: {area_label} Excavación Amplia")
                 } else {
                     format!("⚡ [Taladro MK{tier}] Modo: 1x1 Precisión")
                 };
-                game.native_action_bar(who.uuid, Text::literal(msg));
+                let _ = who.action_bar(host, Text::literal(msg));
             }
         }
-        return;
+        return claimed;
     }
 
     if held_id == rules::ITEM_JETPACK_MK2 {
-        *claimed = true;
+        claimed = true;
         if is_crouching {
             let mut now_hover = false;
-            if let Some(held) = game.held_mut() {
+            hc::acting_held_mut(host, |slot| if let Some(held) = slot.as_mut() {
                 now_hover = !is_jetpack_hover(held);
                 set_jetpack_hover(held, now_hover);
-            }
-            if let Some(who) = game.native_acting_player() {
+            });
+            if let Some(who) = host.players().acting_player() {
                 let m = if now_hover { "ACTIVADO" } else { "DESACTIVADO" };
-                game.native_action_bar(who.uuid, Text::literal(format!("🚀 [Jetpack MK2] Modo Hover {m}")));
+                let _ = who.action_bar(host, Text::literal(format!("🚀 [Jetpack MK2] Modo Hover {m}")));
             }
         } else {
-            game.native_run_command("playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.4 1.15");
-            game.native_run_command("effect give @s minecraft:levitation 1 16 true");
-            game.native_run_command("effect give @s minecraft:slow_falling 8 0 true");
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(who.uuid, Text::literal("🚀 [Jetpack MK2] Propulsión Avanzada"));
+            hc::run_command(host, "playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.4 1.15");
+            hc::run_command(host, "effect give @s minecraft:levitation 1 16 true");
+            hc::run_command(host, "effect give @s minecraft:slow_falling 8 0 true");
+            if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal("🚀 [Jetpack MK2] Propulsión Avanzada"));
             }
         }
-        return;
+        return claimed;
     }
 
     if held_id == rules::ITEM_JETPACK {
-        *claimed = true;
-        game.native_run_command("playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.5 1.0");
-        game.native_run_command("effect give @s minecraft:levitation 1 15 true");
-        game.native_run_command("effect give @s minecraft:slow_falling 6 0 true");
-        game.native_run_command("particle minecraft:flame ~ ~ ~ 0.4 0.1 0.4 0.08 30");
-        game.native_run_command("particle minecraft:campfire_cosy_smoke ~ ~ ~ 0.3 0.1 0.3 0.03 15");
-        if let Some(who) = game.native_acting_player() {
-            game.native_action_bar(who.uuid, Text::literal("🚀 [Jetpack Industrial] ¡Propulsión Aérea Máxima Activada!"));
+        claimed = true;
+        hc::run_command(host, "playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.5 1.0");
+        hc::run_command(host, "effect give @s minecraft:levitation 1 15 true");
+        hc::run_command(host, "effect give @s minecraft:slow_falling 6 0 true");
+        hc::run_command(host, "particle minecraft:flame ~ ~ ~ 0.4 0.1 0.4 0.08 30");
+        hc::run_command(host, "particle minecraft:campfire_cosy_smoke ~ ~ ~ 0.3 0.1 0.3 0.03 15");
+        if let Some(who) = host.players().acting_player() {
+            let _ = who.action_bar(host, Text::literal("🚀 [Jetpack Industrial] ¡Propulsión Aérea Máxima Activada!"));
         }
-        return;
+        return claimed;
     }
 
     if held_id == rules::ITEM_JET_BOOTS {
-        *claimed = true;
-        game.native_run_command("playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.2 1.1");
-        game.native_run_command("effect give @s minecraft:levitation 1 10 true");
-        game.native_run_command("effect give @s minecraft:slow_falling 5 0 true");
-        game.native_run_command("particle minecraft:flame ~ ~ ~ 0.3 0.1 0.3 0.05 20");
-        game.native_run_command("particle minecraft:smoke ~ ~ ~ 0.2 0.1 0.2 0.02 15");
-        if let Some(who) = game.native_acting_player() {
-            game.native_action_bar(who.uuid, Text::literal("🚀 [Botas Cohete] ¡Propulsión Cohete Activada!"));
+        claimed = true;
+        hc::run_command(host, "playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.2 1.1");
+        hc::run_command(host, "effect give @s minecraft:levitation 1 10 true");
+        hc::run_command(host, "effect give @s minecraft:slow_falling 5 0 true");
+        hc::run_command(host, "particle minecraft:flame ~ ~ ~ 0.3 0.1 0.3 0.05 20");
+        hc::run_command(host, "particle minecraft:smoke ~ ~ ~ 0.2 0.1 0.2 0.02 15");
+        if let Some(who) = host.players().acting_player() {
+            let _ = who.action_bar(host, Text::literal("🚀 [Botas Cohete] ¡Propulsión Cohete Activada!"));
         }
-        return;
+        return claimed;
     }
 
     if let Some((tier, radius, cost)) = rules::magnet_tier(held_id) {
-        *claimed = true;
-        if !game.creative && !consume_player_energy(game, cost) {
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(who.uuid, Text::literal("⚠ [Imán] Sin energía"));
+        claimed = true;
+        if !hc::acting_creative(host) && !consume_player_energy(host, cost) {
+            if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal("⚠ [Imán] Sin energía"));
             }
-            return;
+            return claimed;
         }
-        game.native_run_command("playsound minecraft:entity.item.pickup player @s ~ ~ ~ 1.0 1.5");
-        game.native_run_command(&format!("tp @e[type=item,distance=..{radius}] @s"));
-        game.native_run_command(&format!("tp @e[type=experience_orb,distance=..{radius}] @s"));
-        game.native_run_command("particle minecraft:portal ~ ~1 ~ 0.5 0.5 0.5 0.1 25");
-        if let Some(who) = game.native_acting_player() {
-            game.native_action_bar(
-                who.uuid,
-                Text::literal(format!("🧲 [Imán MK{tier}] ¡Ítems y XP en {radius} blq atraídos!")),
-            );
+        hc::run_command(host, "playsound minecraft:hc::item_id(host, &entity).pickup player @s ~ ~ ~ 1.0 1.5");
+        hc::run_command(host, &format!("tp @e[type=item,distance=..{radius}] @s"));
+        hc::run_command(host, &format!("tp @e[type=experience_orb,distance=..{radius}] @s"));
+        hc::run_command(host, "particle minecraft:portal ~ ~1 ~ 0.5 0.5 0.5 0.1 25");
+        if let Some(who) = host.players().acting_player() {
+            let _ = who.action_bar(host, Text::literal(format!("🧲 [Imán MK{tier}] ¡Ítems y XP en {radius} blq atraídos!")));
         }
-        return;
+        return claimed;
     }
 
     if held_id == rules::ITEM_WIRELESS_SILO_TABLET {
-        *claimed = true;
+        claimed = true;
         let Some(bound) = get_bound_pos(stack) else {
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(who.uuid, Text::literal("📡 [Tablet Silo] Shift + Clic en un Controlador de Silos para vincular."));
+            if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal("📡 [Tablet Silo] Shift + Clic en un Controlador de Silos para vincular."));
             }
-            return;
+            return claimed;
         };
-        if !game.creative && !consume_player_energy(game, 50) {
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(who.uuid, Text::literal("⚠ [Tablet Silo] Sin energía (50 FE)"));
+        if !hc::acting_creative(host) && !consume_player_energy(host, 50) {
+            if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal("⚠ [Tablet Silo] Sin energía (50 FE)"));
             }
-            return;
+            return claimed;
         }
-        if let Some(off_stack) = game.offhand.take() {
-            let sent_name = off_stack.item.split(':').nth(1).unwrap_or(&off_stack.item).to_owned();
-            let sent_cnt = off_stack.count;
-            let rest = insert_into_silo_controller(game, bound, off_stack);
-            game.offhand = rest;
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(who.uuid, Text::literal(format!("📡 [Tablet Silo] Enviado {sent_name} x{sent_cnt} a la red!")));
+        if let Some(off_stack) = hc::acting_offhand(host) {
+            let sent_name = hc::item_id(host, &off_stack).split(':').nth(1).unwrap_or(&hc::item_id(host, &off_stack)).to_owned();
+            let sent_cnt = off_stack.count();
+            let rest = insert_into_silo_controller(host, bound, off_stack);
+            hc::set_acting_offhand(host, rest);
+            if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal(format!("📡 [Tablet Silo] Enviado {sent_name} x{sent_cnt} a la red!")));
             }
-            return;
+            return claimed;
         }
-        let (list, silos_n, _) = sorted_silo_network(game, bound, false, false);
+        let (list, silos_n, _) = sorted_silo_network(host, bound, false, false);
         if is_crouching {
             if let Some((top_id, _, _)) = list.first() {
                 let mut taken = 0u32;
                 for _ in 0..64 {
-                    if pull_one_from_silo_network(game, bound, top_id) {
+                    if pull_one_from_silo_network(host, bound, top_id) {
                         taken += 1;
                     } else {
                         break;
                     }
                 }
                 if taken > 0 {
-                    if let Some(who) = game.native_acting_player() {
-                        let p = [who.position[0].floor() as i32, who.position[1].floor() as i32, who.position[2].floor() as i32];
-                        game.pop_resource(p, ItemStack::new(top_id, taken));
-                        game.native_action_bar(who.uuid, Text::literal(format!("📡 [Tablet Silo] Retirado x{taken} ({top_id})")));
+                    if let Some(who) = host.players().acting_player() {
+                        let p = { let pp = who.entity().position(host).unwrap_or([0.0; 3]); [pp[0].floor() as i32, pp[1].floor() as i32, pp[2].floor() as i32] };
+                        { let _st = hc::make_stack(host, top_id, taken); hc::pop_resource(host, p, _st); };
+                        let _ = who.action_bar(host, Text::literal(format!("📡 [Tablet Silo] Retirado x{taken} ({top_id})")));
                     }
                 }
             }
-        } else if let Some(who) = game.native_acting_player() {
+        } else if let Some(who) = host.players().acting_player() {
             let preview: Vec<String> = list.iter().take(3).map(|(id, c, _)| {
                 let s = id.split(':').nth(1).unwrap_or(id);
                 format!("{s}:{c}")
             }).collect();
             let summary = if preview.is_empty() { "Vacío".to_owned() } else { preview.join(" | ") };
-            game.native_action_bar(who.uuid, Text::literal(format!("📡 [Tablet Silo] ({silos_n} silos): {summary}")));
+            let _ = who.action_bar(host, Text::literal(format!("📡 [Tablet Silo] ({silos_n} silos): {summary}")));
         }
-        return;
+        return claimed;
     }
 
     if held_id == rules::ITEM_QUANTUM_BACKPACK {
-        *claimed = true;
+        claimed = true;
         let mut now_on = true;
-        if let Some(held) = game.held_mut() {
-            now_on = !is_qpack_on(held);
+        hc::acting_held_mut(host, |slot| if let Some(held) = slot.as_mut() {
+                now_on = !is_qpack_on(held);
             set_qpack_on(held, now_on);
-        }
-        if let Some(who) = game.native_acting_player() {
+            });
+        if let Some(who) = host.players().acting_player() {
             let lbl = if now_on { "ACTIVADO" } else { "DESACTIVADO" };
-            game.native_action_bar(who.uuid, Text::literal(format!("🎒 [Mochila Cuántica] Auto-envío a Silos: {lbl}")));
+            let _ = who.action_bar(host, Text::literal(format!("🎒 [Mochila Cuántica] Auto-envío a Silos: {lbl}")));
         }
-        return;
+        return claimed;
     }
 
     if let Some((tier, range, base_cost)) = rules::laser_tier(held_id) {
-        *claimed = true;
+        claimed = true;
         let eff_mod = has_item_module(stack, "eff");
         let smelt_mod = tier >= 3 || has_item_module(stack, "smelt");
         let fortune_mod = has_item_module(stack, "fortune");
         let cost = if eff_mod { (base_cost / 2).max(5) } else { base_cost };
-        if !game.creative && !consume_player_energy(game, cost) {
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(who.uuid, Text::literal("⚠ [Láser] Sin energía"));
+        if !hc::acting_creative(host) && !consume_player_energy(host, cost) {
+            if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal("⚠ [Láser] Sin energía"));
             }
-            return;
+            return claimed;
         }
-        let dim = game.native_dimension();
-        if let Some(air_state) = game.native_default_state("minecraft:air") {
-            if let Some(who) = game.native_acting_player() {
-                let yaw = who.yaw.to_radians() as f64;
-                let pitch = who.pitch.to_radians() as f64;
+        let dim = host.dimension();
+        {
+            if let Some(who) = host.players().acting_player() {
+                let rot = who.entity().rotation(host).unwrap_or([0.0, 0.0]);
+                let yaw = rot[0].to_radians() as f64;
+                let pitch = rot[1].to_radians() as f64;
                 let dx = -yaw.sin() * pitch.cos();
                 let dy = -pitch.sin();
                 let dz = yaw.cos() * pitch.cos();
-                let [px, py, pz] = who.position;
-                let uid = who.uuid;
+                let [px, py, pz] = who.entity().position(host).unwrap_or([0.0; 3]);
                 for step in 1..=range {
                     let bx = (px + dx * step as f64).floor() as i32;
                     let by = (py + 1.5 + dy * step as f64).floor() as i32;
                     let bz = (pz + dz * step as f64).floor() as i32;
                     let p = [bx, by, bz];
-                    let b = game.native_block(p);
+                    let b = hc::block_id_at(host, p);
                     if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
-                        game.native_set_block(dim, p, air_state, 3);
-                        if !game.creative {
+                        hc::set_block_by_id(host, p, "minecraft:air");
+                        if !hc::acting_creative(host) {
                             if let Some((drop_id, base_cnt)) = rules::quarry_drop_for_block(&b) {
                                 let final_id = if smelt_mod {
                                     match drop_id {
@@ -4538,83 +4486,86 @@ pub(in crate::game) fn use_item(game: &mut Game<'_>, stack: &ItemStack, claimed:
                                     drop_id
                                 };
                                 let cnt = if fortune_mod { base_cnt + 1 } else { base_cnt };
-                                game.pop_resource(p, ItemStack::new(final_id, cnt));
+                                { let _st = hc::make_stack(host, final_id, cnt); hc::pop_resource(host, p, _st); };
                             }
                         }
                     }
                 }
-                game.native_run_command("playsound minecraft:entity.guardian.attack player @s ~ ~ ~ 1.2 1.6");
-                game.native_action_bar(
-                    uid,
+                hc::run_command(host, "playsound minecraft:entity.guardian.attack player @s ~ ~ ~ 1.2 1.6");
+                let _ = who.action_bar(
+                    host,
                     Text::literal(format!("⚡ [Láser Minero MK{tier}] Haz de {range} bloques disparado (-{cost} FE)")),
                 );
             }
         }
-        return;
+        return claimed;
     }
 
     if let Some((tier, dmg, cost)) = rules::sword_tier(held_id) {
-        *claimed = true;
-        if !game.creative && !consume_player_energy(game, cost) {
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(who.uuid, Text::literal("⚠ [Sable de Plasma] Sin energía"));
+        claimed = true;
+        if !hc::acting_creative(host) && !consume_player_energy(host, cost) {
+            if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal("⚠ [Sable de Plasma] Sin energía"));
             }
-            return;
+            return claimed;
         }
         if tier >= 3 && is_crouching {
-            if let Some(who) = game.native_acting_player() {
-                let yaw = who.yaw.to_radians() as f64;
-                let pitch = who.pitch.to_radians() as f64;
-                let tx = (who.position[0] - yaw.sin() * pitch.cos() * 7.0).round() as i32;
-                let ty = (who.position[1] - pitch.sin() * 5.0).round() as i32;
-                let tz = (who.position[2] + yaw.cos() * pitch.cos() * 7.0).round() as i32;
-                game.native_run_command(&format!("tp @s {tx} {ty} {tz}"));
-                game.native_run_command("playsound minecraft:entity.enderman.teleport player @s ~ ~ ~ 1.0 1.2");
-                game.native_action_bar(who.uuid, Text::literal("⚡ [Sable Cuántico] ¡Blink Cuántico!"));
+            if let Some(who) = host.players().acting_player() {
+                let rot = who.entity().rotation(host).unwrap_or([0.0, 0.0]);
+                let ppos = who.entity().position(host).unwrap_or([0.0; 3]);
+                let yaw = rot[0].to_radians() as f64;
+                let pitch = rot[1].to_radians() as f64;
+                let tx = (ppos[0] - yaw.sin() * pitch.cos() * 7.0).round() as i32;
+                let ty = (ppos[1] - pitch.sin() * 5.0).round() as i32;
+                let tz = (ppos[2] + yaw.cos() * pitch.cos() * 7.0).round() as i32;
+                hc::run_command(host, &format!("tp @s {tx} {ty} {tz}"));
+                hc::run_command(host, "playsound minecraft:entity.enderman.teleport player @s ~ ~ ~ 1.0 1.2");
+                let _ = who.action_bar(host, Text::literal("⚡ [Sable Cuántico] ¡Blink Cuántico!"));
             }
         } else {
             let rad = if tier >= 2 { 5 } else { 3 };
-            game.native_run_command(&format!("damage @e[type=!player,distance=..{rad}] {dmg} minecraft:lightning_bolt by @s"));
-            game.native_run_command("playsound minecraft:entity.player.attack.sweep player @s ~ ~ ~ 1.2 1.4");
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(who.uuid, Text::literal(format!("⚔ [Sable de Plasma MK{tier}] Descarga de Plasma ({dmg} daño)")));
+            hc::run_command(host, &format!("damage @e[type=!player,distance=..{rad}] {dmg} minecraft:lightning_bolt by @s"));
+            hc::run_command(host, "playsound minecraft:entity.player.attack.sweep player @s ~ ~ ~ 1.2 1.4");
+            if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal(format!("⚔ [Sable de Plasma MK{tier}] Descarga de Plasma ({dmg} daño)")));
             }
         }
-        return;
+        return claimed;
     }
 
     if rules::is_battery_item(held_id) {
-        *claimed = true;
+        claimed = true;
         let cap = rules::battery_capacity(held_id).unwrap_or(50_000);
         let cur = get_item_energy(stack);
-        if let Some(who) = game.native_acting_player() {
-            game.native_action_bar(
-                who.uuid,
-                Text::literal(format!("🔋 [Batería] Carga: {cur} / {cap} FE (recarga tu equipo automáticamente)")),
-            );
+        if let Some(who) = host.players().acting_player() {
+            let _ = who.action_bar(host, Text::literal(format!("🔋 [Batería] Carga: {cur} / {cap} FE (recarga tu equipo automáticamente)")));
         }
     }
+    claimed
 }
 
 /// Inspects networks, harvests sap from Rubber Tree Sap Cavities, grows Rubber Saplings, interacts with Conveyor Belts (no GUI), configures Item Splitter filter frames, rotates/dismantles machines with Wrench, or uses tools.
-pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i32; 3], canceled: &mut bool) {
-    if *canceled {
-        return;
-    }
-    let block_id = game.native_block(pos);
-    let held_info = game.native_held();
-    let is_crouching = game
-        .player
+pub(crate) fn right_click(host: &mut dyn ServerHost, click: &BlockClick<'_>) -> bool {
+    let pos = click.pos;
+    let face = click.hit.face;
+    let mut canceled = false;
+    let block_id = hc::block_id_at(host, pos);
+    let held_stack_opt = hc::acting_held(host);
+    let held_info = held_stack_opt
         .as_ref()
-        .is_some_and(|p| p.pose == horizon_client::pose::Pose::Crouching);
+        .map(|s| (hc::item_id(host, s), s.count(), 0i32));
+    let is_crouching = host
+        .players()
+        .acting_player()
+        .is_some_and(|p| hc::is_crouching(host, p.entity()));
 
     // Portable Energy Scanner: Inspect live telemetry of any Rusty Factory block
     if held_info.as_ref().is_some_and(|(id, _, _)| id == rules::ITEM_ENERGY_SCANNER)
         && block_id.starts_with("rusty_factory:")
     {
-        *canceled = true;
+        canceled = true;
         let mut msg = format!("📡 [{block_id}]");
-        game.native_with_mod_block_entity(pos, |entity| {
+        hc::with_mod_block_entity(host, pos, |entity| {
             if let Some(st) = load_state(entity) {
                 if let Some(kind) = MachineKind::from_block_id(&block_id) {
                     if kind.max_energy() > 0 {
@@ -4636,49 +4587,46 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 }
             }
         });
-        if let Some(who) = game.native_acting_player() {
-            game.native_action_bar(who.uuid, Text::literal(msg));
+        if let Some(who) = host.players().acting_player() {
+            let _ = who.action_bar(host, Text::literal(msg));
         }
-        return;
+        return canceled;
     }
 
     // Industrial Silo: Front screen = deposit / Shift-lock item / withdraw; Side faces = place blocks or open 1-slot GUI
     if block_id == rules::BLOCK_INDUSTRIAL_SILO {
-        let facing = game
-            .native_block_property(pos, "facing")
+        let facing = hc::block_property_at(host, pos, "facing")
             .unwrap_or_else(|| "north".to_owned());
         let (front_off, _) = rules::conveyor_offsets(&facing);
         let is_front = face == front_off;
 
         if let Some((ref held_id, held_count, _)) = held_info {
             if let Some(bonus) = rules::silo_upgrade_bonus(held_id) {
-                *canceled = true;
+                canceled = true;
                 let mut new_cap = 0;
-                game.native_with_mod_block_entity(pos, |entity| {
+                hc::with_mod_block_entity(host, pos, |entity| {
                     let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::IndustrialSilo));
                     st.silo_capacity = st.silo_capacity.max(2_048).saturating_add(bonus);
                     new_cap = st.silo_capacity;
                     store_state(entity, &st);
                 });
-                if !game.creative {
-                    if let Some(held) = game.held_mut() {
-                        if held.count > 1 { held.count -= 1; } else { *game.held_mut() = None; }
-                    }
+                if !hc::acting_creative(host) {
+                    hc::acting_consume_held(host, 1);
                 }
-                game.native_block_entity_sync(pos);
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal(format!("📦 [Silo Industrial] Capacidad mejorada a {new_cap} ítems")));
+                host.block_entity_sync(pos);
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal(format!("📦 [Silo Industrial] Capacidad mejorada a {new_cap} ítems")));
                 }
-                return;
+                return canceled;
             }
             if is_front {
-                *canceled = true;
+                canceled = true;
                 let item_id = held_id.clone();
                 let mut deposited = 0u32;
                 let mut total_now = 0u32;
                 let mut cap_now = 2_048u32;
                 let mut mismatch = false;
-                game.native_with_mod_block_entity(pos, |entity| {
+                hc::with_mod_block_entity(host, pos, |entity| {
                     let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::IndustrialSilo));
                     cap_now = st.silo_capacity.max(2_048);
                     if is_crouching && st.belt_count == 0 {
@@ -4700,57 +4648,53 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                     total_now = st.belt_count;
                 });
                 if deposited > 0 {
-                    if !game.creative {
-                        if let Some(held) = game.held_mut() {
-                            if held.count > deposited { held.count -= deposited; } else { *game.held_mut() = None; }
-                        }
+                    if !hc::acting_creative(host) {
+                        hc::acting_consume_held(host, deposited);
                     }
-                    game.native_block_entity_sync(pos);
+                    host.block_entity_sync(pos);
                 } else if is_crouching {
-                    game.native_block_entity_sync(pos);
+                    host.block_entity_sync(pos);
                 }
-                if let Some(who) = game.native_acting_player() {
+                if let Some(who) = host.players().acting_player() {
                     let msg = if mismatch {
                         format!("⚠ [Silo] Bloqueado a otro ítem ({total_now} / {cap_now})")
                     } else {
                         format!("📦 [Silo] {total_now} / {cap_now} ({item_id})")
                     };
-                    game.native_action_bar(who.uuid, Text::literal(msg));
+                    let _ = who.action_bar(host, Text::literal(msg));
                 }
-                return;
+                return canceled;
             } else if held_id != rules::ITEM_WRENCH {
                 // Side/top/back face with a block in hand: place that block at `pos + face`!
-                if let Some(place_state) = game.native_default_state(held_id) {
-                    *canceled = true;
+                if true {
+                    canceled = true;
                     let target = [pos[0] + face[0], pos[1] + face[1], pos[2] + face[2]];
-                    let target_blk = game.native_block(target);
+                    let target_blk = hc::block_id_at(host, target);
                     if matches!(
                         target_blk.as_str(),
                         "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" | "minecraft:water"
                     ) {
-                        let dim = game.native_dimension();
-                        if game.native_set_block(dim, target, place_state, 3) {
-                            let forward_facing = cardinal_facing_from_yaw(game.yaw);
+                        let dim = host.dimension();
+                        if hc::set_block_by_id(host, target, held_id) {
+                            let forward_facing = cardinal_facing_from_yaw(hc::acting_yaw_pitch(host).0);
                             let raw_facing = opposite_facing(forward_facing);
-                            let _ = game.native_set_block_property(target, "facing", raw_facing);
-                            place_block(game, target);
-                            if !game.creative {
-                                if let Some(held) = game.held_mut() {
-                                    if held.count > 1 { held.count -= 1; } else { *game.held_mut() = None; }
-                                }
+                            let _ = host.set_block_property(target, "facing", raw_facing);
+                            place_block(host, target);
+                            if !hc::acting_creative(host) {
+                                hc::acting_consume_held(host, 1);
                             }
                         }
                     }
-                    return;
+                    return canceled;
                 }
             }
         } else if is_front {
             // Empty hand on front screen: withdraw 1 stack (up to 64)
-            *canceled = true;
+            canceled = true;
             let mut taken: Option<(String, u32)> = None;
             let mut total_now = 0u32;
             let mut cap_now = 2_048u32;
-            game.native_with_mod_block_entity(pos, |entity| {
+            hc::with_mod_block_entity(host, pos, |entity| {
                 if let Some(mut st) = load_state(entity) {
                     cap_now = st.silo_capacity.max(2_048);
                     if !st.belt_item.is_empty() && st.belt_count > 0 {
@@ -4766,20 +4710,20 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 }
             });
             if let Some((iid, amt)) = taken {
-                game.native_give_items(&iid, amt);
-                game.native_block_entity_sync(pos);
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal(format!("📦 [Silo] Retirado x{amt} | Restante: {total_now} / {cap_now}")));
+                hc::give_items(host, &iid, amt);
+                host.block_entity_sync(pos);
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal(format!("📦 [Silo] Retirado x{amt} | Restante: {total_now} / {cap_now}")));
                 }
             }
-            return;
+            return canceled;
         }
         // Empty hand on non-front face falls through so the 1-slot Silo GUI opens!
     }
 
     // Equipment Upgrade Station: load a module_* or install loaded module onto held tech tool/armor
     if block_id == rules::BLOCK_UPGRADE_STATION {
-        *canceled = true;
+        canceled = true;
         if let Some((ref held_id, _, _)) = held_info {
             let mod_code = match held_id.as_str() {
                 rules::ITEM_MODULE_NIGHT_VISION => Some("nv"),
@@ -4792,24 +4736,22 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 _ => None,
             };
             if let Some(code) = mod_code {
-                game.native_with_mod_block_entity(pos, |entity| {
+                hc::with_mod_block_entity(host, pos, |entity| {
                     let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::UpgradeStation));
                     st.belt_item = code.to_owned();
                     store_state(entity, &st);
                 });
-                if !game.creative {
-                    if let Some(held) = game.held_mut() {
-                        if held.count > 1 { held.count -= 1; } else { *game.held_mut() = None; }
-                    }
+                if !hc::acting_creative(host) {
+                    hc::acting_consume_held(host, 1);
                 }
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal(format!("🔧 [Estación de Mejora] Módulo '{code}' cargado. Clic con armadura o taladro para instalar.")));
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal(format!("🔧 [Estación de Mejora] Módulo '{code}' cargado. Clic con armadura o taladro para instalar.")));
                 }
-                return;
+                return canceled;
             }
             if rules::battery_capacity(held_id).is_some() {
                 let mut loaded_mod = String::new();
-                game.native_with_mod_block_entity(pos, |entity| {
+                hc::with_mod_block_entity(host, pos, |entity| {
                     if let Some(mut st) = load_state(entity) {
                         if !st.belt_item.is_empty() {
                             loaded_mod = st.belt_item.clone();
@@ -4819,28 +4761,28 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                     }
                 });
                 if !loaded_mod.is_empty() {
-                    if let Some(held) = game.held_mut() {
-                        add_item_module(held, &loaded_mod);
+                    hc::acting_held_mut(host, |slot| if let Some(held) = slot.as_mut() {
+                add_item_module(held, &loaded_mod);
+            });
+                    if let Some(who) = host.players().acting_player() {
+                        let _ = who.action_bar(host, Text::literal(format!("✅ [Estación de Mejora] Módulo '{loaded_mod}' instalado en tu equipo")));
                     }
-                    if let Some(who) = game.native_acting_player() {
-                        game.native_action_bar(who.uuid, Text::literal(format!("✅ [Estación de Mejora] Módulo '{loaded_mod}' instalado en tu equipo")));
-                    }
-                } else if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal("ℹ [Estación de Mejora] Primero cargá un Módulo haciendo clic con él."));
+                } else if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal("ℹ [Estación de Mejora] Primero cargá un Módulo haciendo clic con él."));
                 }
-                return;
+                return canceled;
             }
         }
-        return;
+        return canceled;
     }
 
     // Geothermal Generator: direct lava_bucket feed
     if block_id == rules::BLOCK_GEOTHERMAL
         && held_info.as_ref().is_some_and(|(id, _, _)| id == "minecraft:lava_bucket")
     {
-        *canceled = true;
+        canceled = true;
         let mut ok = false;
-        game.native_with_mod_block_entity(pos, |entity| {
+        hc::with_mod_block_entity(host, pos, |entity| {
             let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::GeothermalGenerator));
             if st.fluid_amount + 1000 <= rules::FLUID_TANK_MAX_MB {
                 st.fluid_kind = "lava".to_owned();
@@ -4849,25 +4791,23 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 ok = true;
             }
         });
-        if ok && !game.creative {
-            if let Some(held) = game.held_mut() {
-                *held = ItemStack::new("minecraft:bucket", 1);
-            }
-            game.native_block_entity_sync(pos);
+        if ok && !hc::acting_creative(host) {
+            let b = hc::make_stack(host, "minecraft:bucket", 1);
+            hc::acting_held_mut(host, |slot| *slot = b);
+            host.block_entity_sync(pos);
         }
-        return;
+        return canceled;
     }
 
     // Create-style per-face filter configuration on Item Splitter (no GUI!)
     if block_id == rules::BLOCK_ITEM_SPLITTER {
         let is_wrench = held_info.as_ref().is_some_and(|(id, _, _)| id == rules::ITEM_WRENCH);
         if !is_wrench {
-            let facing = game
-                .native_block_property(pos, "facing")
+            let facing = hc::block_property_at(host, pos, "facing")
                 .unwrap_or_else(|| "north".to_owned());
             if let Some(side) = rules::splitter_side_for_face(&facing, face) {
                 if !is_crouching {
-                    *canceled = true;
+                    canceled = true;
                     let side_name = match side {
                         0 => "Izquierda",
                         1 => "Frente",
@@ -4875,33 +4815,27 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                     };
                     if let Some((ref held_id, _, _)) = held_info {
                         let filter_item = held_id.clone();
-                        game.native_with_mod_block_entity(pos, |entity| {
+                        hc::with_mod_block_entity(host, pos, |entity| {
                             let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ItemSplitter));
                             st.splitter_filters[side] = filter_item.clone();
                             store_state(entity, &st);
                         });
-                        game.native_block_entity_sync(pos);
-                        if let Some(who) = game.native_acting_player() {
-                            game.native_action_bar(
-                                who.uuid,
-                                Text::literal(format!("🔍 [Divisor] Filtro {side_name}: {filter_item}")),
-                            );
+                        host.block_entity_sync(pos);
+                        if let Some(who) = host.players().acting_player() {
+                            let _ = who.action_bar(host, Text::literal(format!("🔍 [Divisor] Filtro {side_name}: {filter_item}")));
                         }
                     } else {
-                        game.native_with_mod_block_entity(pos, |entity| {
+                        hc::with_mod_block_entity(host, pos, |entity| {
                             let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ItemSplitter));
                             st.splitter_filters[side].clear();
                             store_state(entity, &st);
                         });
-                        game.native_block_entity_sync(pos);
-                        if let Some(who) = game.native_acting_player() {
-                            game.native_action_bar(
-                                who.uuid,
-                                Text::literal(format!("🧹 [Divisor] Filtro {side_name} limpiado")),
-                            );
+                        host.block_entity_sync(pos);
+                        if let Some(who) = host.players().acting_player() {
+                            let _ = who.action_bar(host, Text::literal(format!("🧹 [Divisor] Filtro {side_name} limpiado")));
                         }
                     }
-                    return;
+                    return canceled;
                 }
             }
         }
@@ -4911,9 +4845,9 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
     if let Some((_, max_batch)) = rules::conveyor_tier(&block_id) {
         if let Some((ref held_id, _, _)) = held_info {
             if held_id == rules::ITEM_BELT_FILTER || held_id == rules::ITEM_BELT_FILTER_ADV {
-                *canceled = true;
+                canceled = true;
                 let is_adv = held_id == rules::ITEM_BELT_FILTER_ADV;
-                let changed = game.native_with_mod_block_entity(pos, |entity| {
+                let changed = hc::with_mod_block_entity(host, pos, |entity| {
                     let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ConveyorBelt));
                     if !st.belt_filter_attached || (is_adv && !st.belt_filter_blacklist) {
                         st.belt_filter_attached = true;
@@ -4927,35 +4861,29 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                     }
                 });
                 if changed == Some(true) {
-                    if !game.creative {
-                        if let Some(held) = game.held_mut() {
-                            if held.count > 1 {
-                                held.count -= 1;
-                            } else {
-                                *game.held_mut() = None;
-                            }
-                        }
+                    if !hc::acting_creative(host) {
+                        hc::acting_consume_held(host, 1);
                     }
-                    game.native_block_entity_sync(pos);
-                    if let Some(who) = game.native_acting_player() {
+                    host.block_entity_sync(pos);
+                    if let Some(who) = host.players().acting_player() {
                         let msg = if is_adv {
                             "🔍 [Cinta] Filtro Avanzado acoplado (Shift+Mano Vacía alterna Lista Blanca/Negra)"
                         } else {
                             "🔍 [Cinta] Filtro acoplado. Clic con un ítem para configurarlo."
                         };
-                        game.native_action_bar(who.uuid, Text::literal(msg));
+                        let _ = who.action_bar(host, Text::literal(msg));
                     }
                 }
-                return;
+                return canceled;
             }
             if held_id == rules::ITEM_WRENCH
             || (block_id.starts_with("rusty_factory:")
                 && matches!(held_id.as_str(), rules::ITEM_OMNI_TOOL_MK2 | rules::ITEM_OMNI_TOOL_MK3))
         {
-                *canceled = true;
+                canceled = true;
                 if is_crouching {
                     let mut had_filter = false;
-                    game.native_with_mod_block_entity(pos, |entity| {
+                    hc::with_mod_block_entity(host, pos, |entity| {
                         if let Some(mut st) = load_state(entity) {
                             if st.belt_filter_attached {
                                 st.belt_filter_attached = false;
@@ -4966,22 +4894,21 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                         }
                     });
                     if had_filter {
-                        game.native_give_items(rules::ITEM_BELT_FILTER, 1);
-                        game.native_block_entity_sync(pos);
-                        if let Some(who) = game.native_acting_player() {
-                            game.native_action_bar(who.uuid, Text::literal("🔧 [Cinta] Filtro retirado"));
+                        hc::give_items(host, rules::ITEM_BELT_FILTER, 1);
+                        host.block_entity_sync(pos);
+                        if let Some(who) = host.players().acting_player() {
+                            let _ = who.action_bar(host, Text::literal("🔧 [Cinta] Filtro retirado"));
                         }
-                        return;
+                        return canceled;
                     }
-                    destroy_block(game, pos);
-                    game.native_give_items(&block_id, 1);
-                    game.native_run_command(&format!(
+                    destroy_block(host, pos);
+                    hc::give_items(host, &block_id, 1);
+                    hc::run_command(host, &format!(
                         "setblock {} {} {} minecraft:air destroy",
                         pos[0], pos[1], pos[2]
                     ));
                 } else {
-                    let current = game
-                        .native_block_property(pos, "shape")
+                    let current = hc::block_property_at(host, pos, "shape")
                         .unwrap_or_else(|| "straight".to_owned());
                     let next = match current.as_str() {
                         "straight" => "turn_left",
@@ -4990,8 +4917,8 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                         "up" => "down",
                         _ => "straight",
                     };
-                    game.native_set_block_property(pos, "shape", next);
-                    if let Some(who) = game.native_acting_player() {
+                    host.set_block_property(pos, "shape", next);
+                    if let Some(who) = host.players().acting_player() {
                         let label = match next {
                             "turn_left" => "Curva Izquierda",
                             "turn_right" => "Curva Derecha",
@@ -4999,13 +4926,10 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                             "down" => "Bajada (Rampa)",
                             _ => "Recta",
                         };
-                        game.native_action_bar(
-                            who.uuid,
-                            Text::literal(format!("🔧 [Cinta] Forma: {label}")),
-                        );
+                        let _ = who.action_bar(host, Text::literal(format!("🔧 [Cinta] Forma: {label}")));
                     }
                 }
-                return;
+                return canceled;
             }
             // Allow placing filters (Item Splitter), other belts, pipes, or extractors directly against belts!
             let is_placeable_logistics = held_id == rules::BLOCK_ITEM_SPLITTER
@@ -5013,30 +4937,23 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 || rules::is_item_pipe(held_id)
                 || held_id == rules::BLOCK_EXTRACTOR;
             if is_placeable_logistics {
-                *canceled = true;
+                canceled = true;
                 let target = [pos[0] + face[0], pos[1] + face[1], pos[2] + face[2]];
-                let target_blk = game.native_block(target);
+                let target_blk = hc::block_id_at(host, target);
                 if matches!(
                     target_blk.as_str(),
                     "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" | "minecraft:water"
                 ) {
-                    if let Some(place_state) = game.native_default_state(held_id) {
-                        let dim = game.native_dimension();
-                        if game.native_set_block(dim, target, place_state, 3) {
-                            let forward_facing = cardinal_facing_from_yaw(game.yaw);
+                    if hc::set_block_by_id(host, target, held_id) {
+        {
+                            let forward_facing = cardinal_facing_from_yaw(hc::acting_yaw_pitch(host).0);
                             let raw_facing = opposite_facing(forward_facing);
-                            let _ = game.native_set_block_property(target, "facing", raw_facing);
-                            place_block(game, target);
-                            if !game.creative {
-                                if let Some(held) = game.held_mut() {
-                                    if held.count > 1 {
-                                        held.count -= 1;
-                                    } else {
-                                        *game.held_mut() = None;
-                                    }
-                                }
+                            let _ = host.set_block_property(target, "facing", raw_facing);
+                            place_block(host, target);
+                            if !hc::acting_creative(host) {
+                                hc::acting_consume_held(host, 1);
                             }
-                            game.native_run_command(&format!(
+                            hc::run_command(host, &format!(
                                 "playsound minecraft:block.metal.place block @a {} {} {} 0.8 1.1",
                                 target[0] as f64 + 0.5,
                                 target[1] as f64 + 0.5,
@@ -5045,12 +4962,12 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                         }
                     }
                 }
-                return;
+                return canceled;
             }
             // If this belt has an inline filter attached and needs configuration (empty filter or crouching with item), set filter!
             let mut filter_set = false;
             let item_to_filter = held_id.clone();
-            let filter_changed = game.native_with_mod_block_entity(pos, |entity| {
+            let filter_changed = hc::with_mod_block_entity(host, pos, |entity| {
                 if let Some(mut st) = load_state(entity) {
                     if st.belt_filter_attached && (st.splitter_filters[0].is_empty() || is_crouching) {
                         st.splitter_filters[0] = item_to_filter.clone();
@@ -5062,22 +4979,19 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 false
             });
             if filter_changed == Some(true) && filter_set {
-                *canceled = true;
-                game.native_block_entity_sync(pos);
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(
-                        who.uuid,
-                        Text::literal(format!("🔍 [Cinta] Filtrando: {item_to_filter}")),
-                    );
+                canceled = true;
+                host.block_entity_sync(pos);
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal(format!("🔍 [Cinta] Filtrando: {item_to_filter}")));
                 }
-                return;
+                return canceled;
             }
             // Place 1 item from player's hand onto the conveyor belt (unless sneaking to place blocks!)
             if !is_crouching {
-                *canceled = true;
+                canceled = true;
                 let item_to_put = held_id.clone();
                 let mut placed = false;
-                let changed = game.native_with_mod_block_entity(pos, |entity| {
+                let changed = hc::with_mod_block_entity(host, pos, |entity| {
                     let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ConveyorBelt));
                     if st.belt_item.is_empty() {
                         st.belt_item = item_to_put.clone();
@@ -5096,24 +5010,18 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                     }
                 });
                 if changed == Some(true) && placed {
-                    if !game.creative {
-                        if let Some(held) = game.held_mut() {
-                            if held.count > 1 {
-                                held.count -= 1;
-                            } else {
-                                *game.held_mut() = None;
-                            }
-                        }
+                    if !hc::acting_creative(host) {
+                        hc::acting_consume_held(host, 1);
                     }
-                    game.native_block_entity_sync(pos);
+                    host.block_entity_sync(pos);
                 }
-                return;
+                return canceled;
             }
         } else {
             // Empty hand right-click: if crouching on a filtered belt, toggle Whitelist/Blacklist!
             if is_crouching {
                 let mut toggled_mode: Option<bool> = None;
-                let toggled = game.native_with_mod_block_entity(pos, |entity| {
+                let toggled = hc::with_mod_block_entity(host, pos, |entity| {
                     if let Some(mut st) = load_state(entity) {
                         if st.belt_filter_attached {
                             st.belt_filter_blacklist = !st.belt_filter_blacklist;
@@ -5125,19 +5033,19 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                     false
                 });
                 if toggled == Some(true) {
-                    *canceled = true;
-                    game.native_block_entity_sync(pos);
-                    if let (Some(who), Some(bl)) = (game.native_acting_player(), toggled_mode) {
+                    canceled = true;
+                    host.block_entity_sync(pos);
+                    if let (Some(who), Some(bl)) = (host.players().acting_player(), toggled_mode) {
                         let label = if bl { "Lista Negra (bloquea filtro)" } else { "Lista Blanca (solo filtro)" };
-                        game.native_action_bar(who.uuid, Text::literal(format!("🔍 [Cinta] Modo: {label}")));
+                        let _ = who.action_bar(host, Text::literal(format!("🔍 [Cinta] Modo: {label}")));
                     }
-                    return;
+                    return canceled;
                 }
             }
             // Empty hand right-click: collect carried item from the conveyor belt!
-            *canceled = true;
+            canceled = true;
             let mut taken: Option<(String, u32)> = None;
-            let changed = game.native_with_mod_block_entity(pos, |entity| {
+            let changed = hc::with_mod_block_entity(host, pos, |entity| {
                 let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::ConveyorBelt));
                 if !st.belt_item.is_empty() {
                     taken = Some((st.belt_item.clone(), st.belt_count.max(1)));
@@ -5152,11 +5060,11 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
             });
             if changed == Some(true) {
                 if let Some((item_id, count)) = taken {
-                    game.native_give_items(&item_id, count);
+                    hc::give_items(host, &item_id, count);
                 }
-                game.native_block_entity_sync(pos);
+                host.block_entity_sync(pos);
             }
-            return;
+            return canceled;
         }
     }
 
@@ -5167,46 +5075,39 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 && matches!(held_id.as_str(), rules::ITEM_OMNI_TOOL_MK2 | rules::ITEM_OMNI_TOOL_MK3))
         {
             if rules::is_item_pipe(&block_id) {
-                *canceled = true;
+                canceled = true;
                 if is_crouching {
-                    destroy_block(game, pos);
-                    game.native_give_items(&block_id, 1);
-                    game.native_run_command(&format!(
+                    destroy_block(host, pos);
+                    hc::give_items(host, &block_id, 1);
+                    hc::run_command(host, &format!(
                         "setblock {} {} {} minecraft:air destroy",
                         pos[0], pos[1], pos[2]
                     ));
                 } else {
                     let targets = rules::find_connected_item_targets(
                         pos,
-                        |p| rules::is_item_pipe(&game.native_block(p)),
-                        |p| is_item_container_block(&game.native_block(p)) || rules::is_conveyor_block(&game.native_block(p)),
+                        |p| rules::is_item_pipe(&hc::block_id_at(host, p)),
+                        |p| is_item_container_block(&hc::block_id_at(host, p)) || rules::is_conveyor_block(&hc::block_id_at(host, p)),
                     );
-                    if let Some(who) = game.native_acting_player() {
-                        game.native_action_bar(
-                            who.uuid,
-                            Text::literal(format!("📦 [Tubería de Ítems] Red: {} destinos conectados", targets.len())),
-                        );
+                    if let Some(who) = host.players().acting_player() {
+                        let _ = who.action_bar(host, Text::literal(format!("📦 [Tubería de Ítems] Red: {} destinos conectados", targets.len())));
                     }
                 }
-                return;
+                return canceled;
             }
             if let Some(kind) = MachineKind::from_block_id(&block_id) {
-                *canceled = true;
+                canceled = true;
                 if is_crouching {
-                    game.native_give_items(&block_id, 1);
-                    game.native_run_command(&format!(
+                    hc::give_items(host, &block_id, 1);
+                    hc::run_command(host, &format!(
                         "setblock {} {} {} minecraft:air destroy",
                         pos[0], pos[1], pos[2]
                     ));
-                    if let Some(who) = game.native_acting_player() {
-                        game.native_action_bar(
-                            who.uuid,
-                            Text::literal(format!("🔧 [Llave Inglesa] {} desmontada", lang::get(kind.title_key()))),
-                        );
+                    if let Some(who) = host.players().acting_player() {
+                        let _ = who.action_bar(host, Text::literal(format!("🔧 [Llave Inglesa] {} desmontada", hc::lang_get(kind.title_key()))));
                     }
                 } else {
-                    let current = game
-                        .native_block_property(pos, "facing")
+                    let current = hc::block_property_at(host, pos, "facing")
                         .unwrap_or_else(|| "north".to_owned());
                     let next = match current.as_str() {
                         "north" => "east",
@@ -5214,24 +5115,21 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                         "south" => "west",
                         _ => "north",
                     };
-                    game.native_set_block_property(pos, "facing", next);
-                    if let Some(who) = game.native_acting_player() {
-                        game.native_action_bar(
-                            who.uuid,
-                            Text::literal(format!("🔧 [Llave Inglesa] Rotada hacia: {next}")),
-                        );
+                    host.set_block_property(pos, "facing", next);
+                    if let Some(who) = host.players().acting_player() {
+                        let _ = who.action_bar(host, Text::literal(format!("🔧 [Llave Inglesa] Rotada hacia: {next}")));
                     }
                 }
-                return;
+                return canceled;
             }
 
             if rules::is_cable(&block_id) {
-                *canceled = true;
+                canceled = true;
                 let limit = rules::cable_transfer_limit(&block_id);
                 let consumers = rules::find_connected_consumers(
                     pos,
-                    |p| rules::is_cable(&game.native_block(p)),
-                    |p| MachineKind::from_block_id(&game.native_block(p)).is_some(),
+                    |p| rules::is_cable(&hc::block_id_at(host, p)),
+                    |p| MachineKind::from_block_id(&hc::block_id_at(host, p)).is_some(),
                 );
                 let cable_name = match block_id.as_str() {
                     rules::BLOCK_CABLE_WHITE => "Cable Blanco [Tier 1]",
@@ -5239,106 +5137,91 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                     rules::BLOCK_CABLE_RED => "Cable Rojo [Tier 4]",
                     _ => "Cable Naranja / Cobre [Tier 2]",
                 };
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(
-                        who.uuid,
-                        Text::literal(format!("⚡ [{cable_name}] Capacidad: {limit} FE/t | {} máquinas conectadas", consumers.len())),
-                    );
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal(format!("⚡ [{cable_name}] Capacidad: {limit} FE/t | {} máquinas conectadas", consumers.len())));
                 }
-                return;
+                return canceled;
             }
 
             if rules::is_item_pipe(&block_id) {
-                *canceled = true;
+                canceled = true;
                 let targets = rules::find_connected_item_targets(
                     pos,
-                    |p| rules::is_item_pipe(&game.native_block(p)),
-                    |p| is_item_container_block(&game.native_block(p)),
+                    |p| rules::is_item_pipe(&hc::block_id_at(host, p)),
+                    |p| is_item_container_block(&hc::block_id_at(host, p)),
                 );
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(
-                        who.uuid,
-                        Text::literal(format!("📦 [Tubería de Ítems] Red: {} inventarios conectados", targets.len())),
-                    );
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal(format!("📦 [Tubería de Ítems] Red: {} inventarios conectados", targets.len())));
                 }
-                return;
+                return canceled;
             }
 
             if rules::is_fluid_pipe(&block_id) {
-                *canceled = true;
+                canceled = true;
                 let targets = rules::find_connected_item_targets(
                     pos,
-                    |p| rules::is_fluid_pipe(&game.native_block(p)),
-                    |p| matches!(game.native_block(p).as_str(), rules::BLOCK_FLUID_TANK | rules::BLOCK_STEAM_BOILER | rules::BLOCK_FLUID_PUMP),
+                    |p| rules::is_fluid_pipe(&hc::block_id_at(host, p)),
+                    |p| matches!(hc::block_id_at(host, p).as_str(), rules::BLOCK_FLUID_TANK | rules::BLOCK_STEAM_BOILER | rules::BLOCK_FLUID_PUMP),
                 );
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(
-                        who.uuid,
-                        Text::literal(format!("🚰 [Tubería de Fluidos] Red hidráulica: {} tanques conectados", targets.len())),
-                    );
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal(format!("🚰 [Tubería de Fluidos] Red hidráulica: {} tanques conectados", targets.len())));
                 }
-                return;
+                return canceled;
             }
         }
 
         // 2. Treetap: Harvest extra sap & saplings from Rubber Sap Log with durability consumption
         if held_id == rules::ITEM_TREETAP && block_id == rules::BLOCK_RUBBER_SAP_LOG {
-            *canceled = true;
-            let has_sap = game.native_block_property(pos, "lit").as_deref() == Some("true");
+            canceled = true;
+            let has_sap = hc::block_property_at(host, pos, "lit").as_deref() == Some("true");
             if has_sap {
-                game.native_set_block_property(pos, "lit", "false");
-                game.native_give_items(rules::ITEM_RAW_SAP, 3);
-                game.native_give_items(rules::BLOCK_RUBBER_SAPLING, 1);
-                game.damage_held(1);
-                game.native_run_command("playsound minecraft:item.honey_bottle.drink player @s ~ ~ ~ 1.0 1.2");
-                game.native_run_command("particle minecraft:dripping_honey ~ ~0.5 ~ 0.2 0.2 0.2 0.05 12");
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(
-                        who.uuid,
-                        Text::literal("💧 [Espita de Madera] ¡Savia recolectada! (-1 durabilidad)"),
-                    );
+                host.set_block_property(pos, "lit", "false");
+                hc::give_items(host, rules::ITEM_RAW_SAP, 3);
+                hc::give_items(host, rules::BLOCK_RUBBER_SAPLING, 1);
+                hc::damage_held(host, 1);
+                hc::run_command(host, "playsound minecraft:item.honey_bottle.drink player @s ~ ~ ~ 1.0 1.2");
+                hc::run_command(host, "particle minecraft:dripping_honey ~ ~0.5 ~ 0.2 0.2 0.2 0.05 12");
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal("💧 [Espita de Madera] ¡Savia recolectada! (-1 durabilidad)"));
                 }
-            } else if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(
-                    who.uuid,
-                    Text::literal("⏳ El hueco de savia se está regenerando..."),
-                );
+            } else if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal("⏳ El hueco de savia se está regenerando..."));
             }
-            return;
+            return canceled;
         }
 
         // 3. Mining Drill (MK1 3x3, MK2 3x3, MK3 5x5): Crouch + Right-Click toggles area/1x1 (Left-Click mines)
         if let Some((tier, rad_half, _)) = rules::drill_tier(held_id) {
             let area_label = if rad_half >= 2 { "5x5" } else { "3x3" };
             if is_crouching {
-                *canceled = true;
+                canceled = true;
                 let mut mode_now = false;
-                if let Some(held) = game.held_mut() {
-                    mode_now = !is_drill_3x3(held);
+                hc::acting_held_mut(host, |slot| if let Some(held) = slot.as_mut() {
+                mode_now = !is_drill_3x3(&held);
                     set_drill_3x3(held, mode_now);
-                }
-                if let Some(who) = game.native_acting_player() {
+            });
+                if let Some(who) = host.players().acting_player() {
                     let msg = if mode_now {
                         format!("⚡ [Taladro MK{tier}] Modo: {area_label} Excavación Amplia")
                     } else {
                         format!("⚡ [Taladro MK{tier}] Modo: 1x1 Precisión")
                     };
-                    game.native_action_bar(who.uuid, Text::literal(msg));
+                    let _ = who.action_bar(host, Text::literal(msg));
                 }
-                return;
+                return canceled;
             }
         }
 
         // 3a. Electric Chainsaw (MK1 64, MK2 128+hojas, MK3 256+hojas) & Omni-Tool on logs
         if let Some((tier, max_logs, cost)) = rules::chainsaw_tier(held_id) {
-            let blk = game.native_block(pos);
+            let blk = hc::block_id_at(host, pos);
             if blk.ends_with("_log") || blk.ends_with("_stem") || blk == rules::BLOCK_RUBBER_LOG || blk == rules::BLOCK_RUBBER_SAP_LOG {
-                *canceled = true;
-                if !game.creative && !consume_player_energy(game, cost) {
-                    if let Some(who) = game.native_acting_player() {
-                        game.native_action_bar(who.uuid, Text::literal(format!("⚠ [Motosierra MK{tier}] Sin energía ({cost} FE)")));
+                canceled = true;
+                if !hc::acting_creative(host) && !consume_player_energy(host, cost) {
+                    if let Some(who) = host.players().acting_player() {
+                        let _ = who.action_bar(host, Text::literal(format!("⚠ [Motosierra MK{tier}] Sin energía ({cost} FE)")));
                     }
-                    return;
+                    return canceled;
                 }
                 let mut visited = std::collections::HashSet::new();
                 let mut q = std::collections::VecDeque::new();
@@ -5349,11 +5232,11 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                     if felled >= max_logs {
                         break;
                     }
-                    let cb = game.native_block(cur);
+                    let cb = hc::block_id_at(host, cur);
                     let is_log = cb.ends_with("_log") || cb.ends_with("_stem") || cb == rules::BLOCK_RUBBER_LOG || cb == rules::BLOCK_RUBBER_SAP_LOG;
                     let is_leaf = tier >= 2 && (cb.ends_with("_leaves") || cb == rules::BLOCK_RUBBER_LEAVES);
                     if is_log || is_leaf {
-                        game.native_run_command(&format!("setblock {} {} {} minecraft:air destroy", cur[0], cur[1], cur[2]));
+                        hc::run_command(host, &format!("setblock {} {} {} minecraft:air destroy", cur[0], cur[1], cur[2]));
                         if is_log {
                             felled += 1;
                         }
@@ -5369,195 +5252,181 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                         }
                     }
                 }
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal(format!("🪓 [Motosierra MK{tier}] Árbol talado ({felled} troncos, -{cost} FE)")));
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal(format!("🪓 [Motosierra MK{tier}] Árbol talado ({felled} troncos, -{cost} FE)")));
                 }
-                return;
+                return canceled;
             }
         }
 
         // 3b. Portable Batteries & Dorsal Battery Pack: Inspect charge in hand
         if rules::is_battery_item(held_id) {
-            *canceled = true;
+            canceled = true;
             let cap = rules::battery_capacity(held_id).unwrap_or(50_000);
-            let cur = game.held().map_or(0, get_item_energy);
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(
-                    who.uuid,
-                    Text::literal(format!("🔋 [Batería] Carga: {cur} / {cap} FE (recarga tu equipo automáticamente)")),
-                );
+            let cur = hc::acting_held(host).map_or(0, |s| get_item_energy(&s));
+            if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal(format!("🔋 [Batería] Carga: {cur} / {cap} FE (recarga tu equipo automáticamente)")));
             }
-            return;
+            return canceled;
         }
 
         // 3b2. Jetpack MK2 (Hover): Shift toggles Hover mode, Click propels
         if held_id == rules::ITEM_JETPACK_MK2 {
-            *canceled = true;
+            canceled = true;
             if is_crouching {
                 let mut now_hover = false;
-                if let Some(held) = game.held_mut() {
-                    now_hover = !is_jetpack_hover(held);
+                hc::acting_held_mut(host, |slot| if let Some(held) = slot.as_mut() {
+                now_hover = !is_jetpack_hover(held);
                     set_jetpack_hover(held, now_hover);
-                }
-                if let Some(who) = game.native_acting_player() {
+            });
+                if let Some(who) = host.players().acting_player() {
                     let m = if now_hover { "ACTIVADO" } else { "DESACTIVADO" };
-                    game.native_action_bar(who.uuid, Text::literal(format!("🚀 [Jetpack MK2] Modo Hover {m}")));
+                    let _ = who.action_bar(host, Text::literal(format!("🚀 [Jetpack MK2] Modo Hover {m}")));
                 }
             } else {
-                game.native_run_command("playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.4 1.15");
-                game.native_run_command("effect give @s minecraft:levitation 1 16 true");
-                game.native_run_command("effect give @s minecraft:slow_falling 8 0 true");
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal("🚀 [Jetpack MK2] Propulsión Avanzada"));
+                hc::run_command(host, "playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.4 1.15");
+                hc::run_command(host, "effect give @s minecraft:levitation 1 16 true");
+                hc::run_command(host, "effect give @s minecraft:slow_falling 8 0 true");
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal("🚀 [Jetpack MK2] Propulsión Avanzada"));
                 }
             }
-            return;
+            return canceled;
         }
 
         // 4. Jet Boots: Rocket propulsion boost with flame & smoke exhaust, slow falling to prevent fall damage!
         if held_id == rules::ITEM_JET_BOOTS {
-            *canceled = true;
-            game.native_run_command("playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.2 1.1");
-            game.native_run_command("effect give @s minecraft:levitation 1 10 true");
-            game.native_run_command("effect give @s minecraft:slow_falling 5 0 true");
-            game.native_run_command("particle minecraft:flame ~ ~ ~ 0.3 0.1 0.3 0.05 20");
-            game.native_run_command("particle minecraft:smoke ~ ~ ~ 0.2 0.1 0.2 0.02 15");
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(
-                    who.uuid,
-                    Text::literal("🚀 [Botas Cohete] ¡Propulsión Cohete Activada!"),
-                );
+            canceled = true;
+            hc::run_command(host, "playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.2 1.1");
+            hc::run_command(host, "effect give @s minecraft:levitation 1 10 true");
+            hc::run_command(host, "effect give @s minecraft:slow_falling 5 0 true");
+            hc::run_command(host, "particle minecraft:flame ~ ~ ~ 0.3 0.1 0.3 0.05 20");
+            hc::run_command(host, "particle minecraft:smoke ~ ~ ~ 0.2 0.1 0.2 0.02 15");
+            if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal("🚀 [Botas Cohete] ¡Propulsión Cohete Activada!"));
             }
-            return;
+            return canceled;
         }
 
         // 5. Jetpack: Sustained High-Altitude Flight
         if held_id == rules::ITEM_JETPACK {
-            *canceled = true;
-            game.native_run_command("playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.5 1.0");
-            game.native_run_command("effect give @s minecraft:levitation 1 15 true");
-            game.native_run_command("effect give @s minecraft:slow_falling 6 0 true");
-            game.native_run_command("particle minecraft:flame ~ ~ ~ 0.4 0.1 0.4 0.08 30");
-            game.native_run_command("particle minecraft:campfire_cosy_smoke ~ ~ ~ 0.3 0.1 0.3 0.03 15");
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(
-                    who.uuid,
-                    Text::literal("🚀 [Jetpack Industrial] ¡Propulsión Aérea Máxima Activada!"),
-                );
+            canceled = true;
+            hc::run_command(host, "playsound minecraft:entity.firework_rocket.launch player @s ~ ~ ~ 1.5 1.0");
+            hc::run_command(host, "effect give @s minecraft:levitation 1 15 true");
+            hc::run_command(host, "effect give @s minecraft:slow_falling 6 0 true");
+            hc::run_command(host, "particle minecraft:flame ~ ~ ~ 0.4 0.1 0.4 0.08 30");
+            hc::run_command(host, "particle minecraft:campfire_cosy_smoke ~ ~ ~ 0.3 0.1 0.3 0.03 15");
+            if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal("🚀 [Jetpack Industrial] ¡Propulsión Aérea Máxima Activada!"));
             }
-            return;
+            return canceled;
         }
 
         // 6. Item Magnet (MK1-MK3): Attracts nearby dropped items and XP
         if let Some((tier, radius, cost)) = rules::magnet_tier(held_id) {
-            *canceled = true;
-            if !game.creative && !consume_player_energy(game, cost) {
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal("⚠ [Imán] Sin energía"));
+            canceled = true;
+            if !hc::acting_creative(host) && !consume_player_energy(host, cost) {
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal("⚠ [Imán] Sin energía"));
                 }
-                return;
+                return canceled;
             }
-            game.native_run_command("playsound minecraft:entity.item.pickup player @s ~ ~ ~ 1.0 1.5");
-            game.native_run_command(&format!("tp @e[type=item,distance=..{radius}] @s"));
-            game.native_run_command(&format!("tp @e[type=experience_orb,distance=..{radius}] @s"));
-            game.native_run_command("particle minecraft:portal ~ ~1 ~ 0.5 0.5 0.5 0.1 25");
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(
-                    who.uuid,
-                    Text::literal(format!("🧲 [Imán MK{tier}] ¡Ítems y XP en {radius} blq atraídos!")),
-                );
+            hc::run_command(host, "playsound minecraft:hc::item_id(host, &entity).pickup player @s ~ ~ ~ 1.0 1.5");
+            hc::run_command(host, &format!("tp @e[type=item,distance=..{radius}] @s"));
+            hc::run_command(host, &format!("tp @e[type=experience_orb,distance=..{radius}] @s"));
+            hc::run_command(host, "particle minecraft:portal ~ ~1 ~ 0.5 0.5 0.5 0.1 25");
+            if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal(format!("🧲 [Imán MK{tier}] ¡Ítems y XP en {radius} blq atraídos!")));
             }
-            return;
+            return canceled;
         }
 
         // 7a. Wireless Silo Tablet & Quantum Backpack: Shift+Click on Silo/Controller binds; Click uses
         if matches!(held_id.as_str(), rules::ITEM_WIRELESS_SILO_TABLET | rules::ITEM_QUANTUM_BACKPACK) {
-            *canceled = true;
+            canceled = true;
             if is_crouching
                 && matches!(
                     block_id.as_str(),
                     rules::BLOCK_SILO_CONTROLLER | rules::BLOCK_SILO_CRAFTING_TERMINAL | rules::BLOCK_INDUSTRIAL_SILO
                 )
             {
-                if let Some(held) = game.held_mut() {
-                    set_bound_pos(held, pos);
+                hc::acting_held_mut(host, |slot| if let Some(held) = slot.as_mut() {
+                set_bound_pos(held, pos);
+            });
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal(format!("🔗 Vinculado a la red de Silos en [{}, {}, {}]", pos[0], pos[1], pos[2])));
                 }
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(
-                        who.uuid,
-                        Text::literal(format!("🔗 Vinculado a la red de Silos en [{}, {}, {}]", pos[0], pos[1], pos[2])),
-                    );
-                }
-                return;
+                return canceled;
             }
             if held_id == rules::ITEM_QUANTUM_BACKPACK {
                 let mut now_on = true;
-                if let Some(held) = game.held_mut() {
-                    now_on = !is_qpack_on(held);
+                hc::acting_held_mut(host, |slot| if let Some(held) = slot.as_mut() {
+                now_on = !is_qpack_on(held);
                     set_qpack_on(held, now_on);
-                }
-                if let Some(who) = game.native_acting_player() {
+            });
+                if let Some(who) = host.players().acting_player() {
                     let lbl = if now_on { "ACTIVADO" } else { "DESACTIVADO" };
-                    game.native_action_bar(who.uuid, Text::literal(format!("🎒 [Mochila Cuántica] Auto-envío a Silos: {lbl}")));
+                    let _ = who.action_bar(host, Text::literal(format!("🎒 [Mochila Cuántica] Auto-envío a Silos: {lbl}")));
                 }
-                return;
+                return canceled;
             }
-            let bound_opt = game.held().and_then(get_bound_pos);
+            let bound_opt = hc::acting_held(host).and_then(|s| get_bound_pos(&s));
             let Some(bound) = bound_opt else {
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal("📡 [Tablet Silo] Shift + Clic en un Controlador de Silos para vincular."));
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal("📡 [Tablet Silo] Shift + Clic en un Controlador de Silos para vincular."));
                 }
-                return;
+                return canceled;
             };
-            if !game.creative && !consume_player_energy(game, 50) {
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal("⚠ [Tablet Silo] Sin energía (50 FE)"));
+            if !hc::acting_creative(host) && !consume_player_energy(host, 50) {
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal("⚠ [Tablet Silo] Sin energía (50 FE)"));
                 }
-                return;
+                return canceled;
             }
-            if let Some(off_stack) = game.offhand.take() {
-                let sent_name = off_stack.item.split(':').nth(1).unwrap_or(&off_stack.item).to_owned();
-                let sent_cnt = off_stack.count;
-                game.offhand = insert_into_silo_controller(game, bound, off_stack);
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal(format!("📡 [Tablet Silo] Enviado {sent_name} x{sent_cnt} a la red!")));
+            if let Some(off_stack) = hc::acting_offhand(host) {
+                let sent_name = hc::item_id(host, &off_stack).split(':').nth(1).unwrap_or(&hc::item_id(host, &off_stack)).to_owned();
+                let sent_cnt = off_stack.count();
+                let rem = insert_into_silo_controller(host, bound, off_stack);
+                hc::set_acting_offhand(host, rem);
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal(format!("📡 [Tablet Silo] Enviado {sent_name} x{sent_cnt} a la red!")));
                 }
-            } else if let Some(who) = game.native_acting_player() {
-                let (list, silos_n, _) = sorted_silo_network(game, bound, false, false);
+            } else if let Some(who) = host.players().acting_player() {
+                let (list, silos_n, _) = sorted_silo_network(host, bound, false, false);
                 let preview: Vec<String> = list.iter().take(3).map(|(id, c, _)| {
                     let s = id.split(':').nth(1).unwrap_or(id);
                     format!("{s}:{c}")
                 }).collect();
                 let summary = if preview.is_empty() { "Vacío".to_owned() } else { preview.join(" | ") };
-                game.native_action_bar(who.uuid, Text::literal(format!("📡 [Tablet Silo] ({silos_n} silos): {summary}")));
+                let _ = who.action_bar(host, Text::literal(format!("📡 [Tablet Silo] ({silos_n} silos): {summary}")));
             }
-            return;
+            return canceled;
         }
 
         // 7. Mining Laser (MK1-MK3): High-energy straight plasma beam mining along look direction
         if let Some((tier, range, base_cost)) = rules::laser_tier(held_id) {
-            *canceled = true;
-            let eff_mod = game.held().is_some_and(|h| has_item_module(h, "eff"));
-            let smelt_mod = tier >= 3 || game.held().is_some_and(|h| has_item_module(h, "smelt"));
-            let fortune_mod = game.held().is_some_and(|h| has_item_module(h, "fortune"));
+            canceled = true;
+            let eff_mod = hc::acting_held(host).is_some_and(|h| has_item_module(&h, "eff"));
+            let smelt_mod = tier >= 3 || hc::acting_held(host).is_some_and(|h| has_item_module(&h, "smelt"));
+            let fortune_mod = hc::acting_held(host).is_some_and(|h| has_item_module(&h, "fortune"));
             let cost = if eff_mod { (base_cost / 2).max(5) } else { base_cost };
-            if !game.creative && !consume_player_energy(game, cost) {
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal("⚠ [Láser] Sin energía"));
+            if !hc::acting_creative(host) && !consume_player_energy(host, cost) {
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal("⚠ [Láser] Sin energía"));
                 }
-                return;
+                return canceled;
             }
-            game.native_run_command("playsound minecraft:entity.guardian.attack player @s ~ ~ ~ 1.2 1.6");
+            hc::run_command(host, "playsound minecraft:entity.guardian.attack player @s ~ ~ ~ 1.2 1.6");
             let [cx, cy, cz] = pos;
             let dir = [-face[0], -face[1], -face[2]];
-            let dim = game.native_dimension();
-            if let Some(air_state) = game.native_default_state("minecraft:air") {
+            let dim = host.dimension();
+            {
                 for dist in 0..range {
                     let p = [cx + dir[0] * dist, cy + dir[1] * dist, cz + dir[2] * dist];
-                    let b = game.native_block(p);
+                    let b = hc::block_id_at(host, p);
                     if !b.is_empty() && b != "minecraft:air" && b != "minecraft:bedrock" && !b.starts_with("minecraft:barrier") {
-                        game.native_set_block(dim, p, air_state, 3);
-                        if !game.creative {
+                        hc::set_block_by_id(host, p, "minecraft:air");
+                        if !hc::acting_creative(host) {
                             if let Some((drop_id, base_cnt)) = rules::quarry_drop_for_block(&b) {
                                 let final_id = if smelt_mod {
                                     match drop_id {
@@ -5571,90 +5440,87 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                                     drop_id
                                 };
                                 let cnt = if fortune_mod { base_cnt + 1 } else { base_cnt };
-                                game.pop_resource(p, ItemStack::new(final_id, cnt));
+                                { let _st = hc::make_stack(host, final_id, cnt); hc::pop_resource(host, p, _st); };
                             }
                         }
                     }
                 }
             }
-            game.native_run_command(&format!("particle minecraft:sonic_boom {} {} {} 0 0 0 0 1", cx, cy, cz));
-            if let Some(who) = game.native_acting_player() {
-                game.native_action_bar(
-                    who.uuid,
-                    Text::literal(format!("⚡ [Láser Minero MK{tier}] Haz de {range} bloques disparado (-{cost} FE)")),
-                );
+            hc::run_command(host, &format!("particle minecraft:sonic_boom {} {} {} 0 0 0 0 1", cx, cy, cz));
+            if let Some(who) = host.players().acting_player() {
+                let _ = who.action_bar(host, Text::literal(format!("⚡ [Láser Minero MK{tier}] Haz de {range} bloques disparado (-{cost} FE)")));
             }
-            return;
+            return canceled;
         }
 
         // 8. Plasma Sword (MK1-MK3)
         if let Some((tier, dmg, cost)) = rules::sword_tier(held_id) {
-            *canceled = true;
-            if !game.creative && !consume_player_energy(game, cost) {
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal("⚠ [Sable de Plasma] Sin energía"));
+            canceled = true;
+            if !hc::acting_creative(host) && !consume_player_energy(host, cost) {
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal("⚠ [Sable de Plasma] Sin energía"));
                 }
-                return;
+                return canceled;
             }
             if tier >= 3 && is_crouching {
                 let [cx, cy, cz] = pos;
-                game.native_run_command(&format!("tp @s {} {} {}", cx, cy + 1, cz));
-                game.native_run_command("playsound minecraft:entity.enderman.teleport player @s ~ ~ ~ 1.0 1.2");
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal("⚡ [Sable Cuántico] ¡Blink Cuántico!"));
+                hc::run_command(host, &format!("tp @s {} {} {}", cx, cy + 1, cz));
+                hc::run_command(host, "playsound minecraft:entity.enderman.teleport player @s ~ ~ ~ 1.0 1.2");
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal("⚡ [Sable Cuántico] ¡Blink Cuántico!"));
                 }
             } else {
                 let rad = if tier >= 2 { 5 } else { 3 };
-                game.native_run_command(&format!("damage @e[type=!player,distance=..{rad}] {dmg} minecraft:lightning_bolt by @s"));
-                game.native_run_command("playsound minecraft:entity.player.attack.sweep player @s ~ ~ ~ 1.2 1.4");
-                if let Some(who) = game.native_acting_player() {
-                    game.native_action_bar(who.uuid, Text::literal(format!("⚔ [Sable de Plasma MK{tier}] Descarga de Plasma ({dmg} daño)")));
+                hc::run_command(host, &format!("damage @e[type=!player,distance=..{rad}] {dmg} minecraft:lightning_bolt by @s"));
+                hc::run_command(host, "playsound minecraft:entity.player.attack.sweep player @s ~ ~ ~ 1.2 1.4");
+                if let Some(who) = host.players().acting_player() {
+                    let _ = who.action_bar(host, Text::literal(format!("⚔ [Sable de Plasma MK{tier}] Descarga de Plasma ({dmg} daño)")));
                 }
             }
-            return;
+            return canceled;
         }
 
     }
 
     if is_crouching {
-        return;
+        return canceled;
     }
 
     if block_id == rules::BLOCK_RUBBER_SAPLING {
         // Require bone meal in hand to accelerate rubber tree growth (50% chance per bone meal)
         if let Some((held_id, _, _)) = held_info {
             if held_id == "minecraft:bone_meal" {
-                *canceled = true;
-                game.native_take_items("minecraft:bone_meal", 1);
-                if (game.world.game_time & 1) == 0 {
-                    grow_rubber_tree(game, pos);
+                canceled = true;
+                hc::take_items(host, "minecraft:bone_meal", 1);
+                if (hc::game_time(host) & 1) == 0 {
+                    grow_rubber_tree(host, pos);
                 }
             }
         }
-        return;
+        return canceled;
     }
 
     if block_id == rules::BLOCK_RUBBER_SAP_LOG {
         if held_info.is_none() {
-            let has_sap = game.native_block_property(pos, "lit").as_deref() == Some("true");
+            let has_sap = hc::block_property_at(host, pos, "lit").as_deref() == Some("true");
             if has_sap {
-                *canceled = true;
-                game.native_set_block_property(pos, "lit", "false");
-                game.native_give_items(rules::ITEM_RAW_SAP, 3);
-                if (game.world.game_time & 3) == 0 {
-                    game.native_give_items(rules::BLOCK_RUBBER_SAPLING, 1);
+                canceled = true;
+                host.set_block_property(pos, "lit", "false");
+                hc::give_items(host, rules::ITEM_RAW_SAP, 3);
+                if (hc::game_time(host) & 3) == 0 {
+                    hc::give_items(host, rules::BLOCK_RUBBER_SAPLING, 1);
                 }
             }
         }
-        return;
+        return canceled;
     }
 
     if block_id == rules::BLOCK_FLUID_TANK {
         if let Some((ref held_id, _, _)) = held_info {
             if held_id == "minecraft:water_bucket" {
-                *canceled = true;
+                canceled = true;
                 let mut msg = None;
-                game.native_with_mod_block_entity(pos, |entity| {
+                hc::with_mod_block_entity(host, pos, |entity| {
                     let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::FluidTank));
                     if (st.fluid_kind.is_empty() || st.fluid_kind == "water")
                         && st.fluid_amount + 1000 <= rules::FLUID_TANK_MAX_MB
@@ -5669,19 +5535,19 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 });
                 if let Some(m) = msg {
                     if m.starts_with('💧') {
-                        game.native_take_items("minecraft:water_bucket", 1);
-                        game.native_give_items("minecraft:bucket", 1);
-                        game.native_set_block_property(pos, "lit", "true");
+                        hc::take_items(host, "minecraft:water_bucket", 1);
+                        hc::give_items(host, "minecraft:bucket", 1);
+                        host.set_block_property(pos, "lit", "true");
                     }
-                    if let Some(who) = game.native_acting_player() {
-                        game.native_action_bar(who.uuid, Text::literal(m));
+                    if let Some(who) = host.players().acting_player() {
+                        let _ = who.action_bar(host, Text::literal(m));
                     }
                 }
-                return;
+                return canceled;
             } else if held_id == "minecraft:lava_bucket" {
-                *canceled = true;
+                canceled = true;
                 let mut msg = None;
-                game.native_with_mod_block_entity(pos, |entity| {
+                hc::with_mod_block_entity(host, pos, |entity| {
                     let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::FluidTank));
                     if (st.fluid_kind.is_empty() || st.fluid_kind == "lava")
                         && st.fluid_amount + 1000 <= rules::FLUID_TANK_MAX_MB
@@ -5696,19 +5562,19 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 });
                 if let Some(m) = msg {
                     if m.starts_with('🔥') {
-                        game.native_take_items("minecraft:lava_bucket", 1);
-                        game.native_give_items("minecraft:bucket", 1);
-                        game.native_set_block_property(pos, "lit", "true");
+                        hc::take_items(host, "minecraft:lava_bucket", 1);
+                        hc::give_items(host, "minecraft:bucket", 1);
+                        host.set_block_property(pos, "lit", "true");
                     }
-                    if let Some(who) = game.native_acting_player() {
-                        game.native_action_bar(who.uuid, Text::literal(m));
+                    if let Some(who) = host.players().acting_player() {
+                        let _ = who.action_bar(host, Text::literal(m));
                     }
                 }
-                return;
+                return canceled;
             } else if held_id == rules::ITEM_RAW_SAP {
-                *canceled = true;
+                canceled = true;
                 let mut msg = None;
-                game.native_with_mod_block_entity(pos, |entity| {
+                hc::with_mod_block_entity(host, pos, |entity| {
                     let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::FluidTank));
                     if (st.fluid_kind.is_empty() || st.fluid_kind == "sap")
                         && st.fluid_amount + 250 <= rules::FLUID_TANK_MAX_MB
@@ -5723,19 +5589,19 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 });
                 if let Some(m) = msg {
                     if m.starts_with('🍯') {
-                        game.native_take_items(rules::ITEM_RAW_SAP, 1);
-                        game.native_set_block_property(pos, "lit", "true");
+                        hc::take_items(host, rules::ITEM_RAW_SAP, 1);
+                        host.set_block_property(pos, "lit", "true");
                     }
-                    if let Some(who) = game.native_acting_player() {
-                        game.native_action_bar(who.uuid, Text::literal(m));
+                    if let Some(who) = host.players().acting_player() {
+                        let _ = who.action_bar(host, Text::literal(m));
                     }
                 }
-                return;
+                return canceled;
             } else if held_id == "minecraft:bucket" {
-                *canceled = true;
+                canceled = true;
                 let mut extracted: Option<&'static str> = None;
                 let mut remain = 0;
-                game.native_with_mod_block_entity(pos, |entity| {
+                hc::with_mod_block_entity(host, pos, |entity| {
                     let mut st = load_state(entity).unwrap_or_else(|| MachineState::new(MachineKind::FluidTank));
                     if st.fluid_amount >= 1000 && matches!(st.fluid_kind.as_str(), "water" | "lava") {
                         extracted = if st.fluid_kind == "lava" {
@@ -5752,101 +5618,92 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                     }
                 });
                 if let Some(bucket_out) = extracted {
-                    game.native_take_items("minecraft:bucket", 1);
-                    game.native_give_items(bucket_out, 1);
+                    hc::take_items(host, "minecraft:bucket", 1);
+                    hc::give_items(host, bucket_out, 1);
                     if remain == 0 {
-                        game.native_set_block_property(pos, "lit", "false");
+                        host.set_block_property(pos, "lit", "false");
                     }
-                    if let Some(who) = game.native_acting_player() {
-                        game.native_action_bar(who.uuid, Text::literal(format!("🪣 [Tanque] Extraído 1,000 mB (Restan: {remain} mB)")));
+                    if let Some(who) = host.players().acting_player() {
+                        let _ = who.action_bar(host, Text::literal(format!("🪣 [Tanque] Extraído 1,000 mB (Restan: {remain} mB)")));
                     }
                 }
-                return;
+                return canceled;
             }
         }
-        return;
+        return canceled;
     }
 
     if block_id == rules::BLOCK_ENERGY_MONITOR {
         if held_info.is_some() {
-            return;
+            return canceled;
         }
-        *canceled = true;
+        canceled = true;
         let consumers = rules::find_connected_consumers(
             pos,
-            |p| rules::is_cable(&game.native_block(p)),
-            |p| MachineKind::from_block_id(&game.native_block(p)).is_some(),
+            |p| rules::is_cable(&hc::block_id_at(host, p)),
+            |p| MachineKind::from_block_id(&hc::block_id_at(host, p)).is_some(),
         );
         let mut total_energy = 0;
         let mut total_capacity = 0;
         for cpos in &consumers {
-            game.native_with_mod_block_entity(*cpos, |entity| {
+            hc::with_mod_block_entity(host, *cpos, |entity| {
                 if let Some(st) = load_state(entity) {
                     total_energy += st.energy;
                     total_capacity += st.kind.max_energy();
                 }
             });
         }
-        if let Some(who) = game.native_acting_player() {
-            game.native_action_bar(
-                who.uuid,
-                Text::literal(format!(
+        if let Some(who) = host.players().acting_player() {
+            let _ = who.action_bar(host, Text::literal(format!(
                     "⚡ [Monitor de Red] Red Eléctrica: {} / {} FE ({} máquinas conectadas)",
                     total_energy, total_capacity, consumers.len()
-                )),
-            );
+                )));
         }
-        return;
+        return canceled;
     }
 
     if block_id == rules::BLOCK_ENERGY_RELAY {
         if held_info.is_some() {
-            return;
+            return false;
         }
-        *canceled = true;
-        let mut total_relays = 0;
-        for (&_p, be) in &game.world.block_entities {
-            if let BlockEntity::Mod(entity) = be {
-                if entity.id == rules::BLOCK_ENERGY_RELAY {
-                    total_relays += 1;
-                }
-            }
-        }
-        if let Some(who) = game.native_acting_player() {
-            game.native_action_bar(
-                who.uuid,
+        let total_relays = hc::SERVER_ACTIVE_BE
+            .lock()
+            .map(|m| m.values().filter(|id| id.as_str() == rules::BLOCK_ENERGY_RELAY).count())
+            .unwrap_or(1)
+            .max(1);
+        if let Some(who) = host.players().acting_player() {
+            let _ = who.action_bar(host,
                 Text::literal(format!(
                     "📡 [Relé Inalámbrico] Red de Energía Inalámbrica: {} relés activos",
                     total_relays
                 )),
             );
         }
-        return;
+        return true;
     }
 
     if rules::is_cable(&block_id) {
-        return;
+        return canceled;
     }
 
     if rules::is_item_pipe(&block_id) {
-        let dim = game.native_dimension();
+        let dim = host.dimension();
         let targets = rules::find_connected_item_targets(
             pos,
-            |p| rules::is_item_pipe(&game.native_block(p)),
-            |p| is_item_container_block(&game.native_block(p)),
+            |p| rules::is_item_pipe(&hc::block_id_at(host, p)),
+            |p| is_item_container_block(&hc::block_id_at(host, p)),
         );
         // Silently pull up to 4 items from adjacent container and route through the pipe network
         for [dx, dy, dz] in rules::NEIGHBORS_6 {
             let adj = [pos[0] + dx, pos[1] + dy, pos[2] + dz];
-            let adj_id = game.native_block(adj);
+            let adj_id = hc::block_id_at(host, adj);
             if matches!(
                 adj_id.as_str(),
                 "minecraft:chest" | "minecraft:trapped_chest" | "minecraft:barrel" | "minecraft:hopper"
             ) {
                 for &dest in &targets {
                     if dest != adj {
-                        game.native_move_items(
-                            dim,
+                        hc::move_items(host,
                             adj,
                             Direction::Down,
                             dest,
@@ -5858,12 +5715,13 @@ pub(in crate::game) fn right_click(game: &mut Game<'_>, pos: [i32; 3], face: [i3
                 }
             }
         }
-        return;
+        return canceled;
     }
+    canceled
 }
 
-pub(in crate::game) fn menu_button(entity: &mut ModBlockEntity, id: i32) {
-    if let Some(kind) = MachineKind::from_block_id(&entity.id) {
+pub(crate) fn menu_button(entity: &mut ModBlockEntityView<'_>, id: i32) {
+    if let Some(kind) = MachineKind::from_block_id(&entity.id()) {
         let mut state = load_state(entity).unwrap_or_else(|| MachineState::new(kind));
         match id {
             BTN_TOGGLE_POWER => {
@@ -5904,14 +5762,14 @@ pub(in crate::game) fn menu_button(entity: &mut ModBlockEntity, id: i32) {
     }
 }
 
-pub(in crate::game) fn menu_button_v2(
-    game: &mut Game<'_>,
+pub(crate) fn menu_button_v2(
+    host: &mut dyn ServerHost,
     pos: [i32; 3],
-    entity: &mut ModBlockEntity,
+    entity: &mut ModBlockEntityView<'_>,
     id: i32,
     carried: &mut Option<ItemStack>,
 ) {
-    let Some(kind) = MachineKind::from_block_id(&entity.id) else {
+    let Some(kind) = MachineKind::from_block_id(&entity.id()) else {
         return;
     };
     if !matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) {
@@ -5928,22 +5786,22 @@ pub(in crate::game) fn menu_button_v2(
     }
     // 1. If holding an item on cursor -> deposit straight into Silo/Chest network!
     if let Some(cursor_stack) = carried.take() {
-        if let Some(rest) = insert_into_silo_controller(game, pos, cursor_stack) {
+        if let Some(rest) = insert_into_silo_controller(host, pos, cursor_stack) {
             *carried = Some(rest);
         }
-        game.native_block_entity_sync(pos);
+        host.block_entity_sync(pos);
         return;
     }
     // 2. If cursor is empty -> withdraw up to 64 of clicked item straight onto cursor!
     let state = load_state(entity).unwrap_or_else(|| MachineState::new(kind));
     let search = get_terminal_search();
-    let (list, _, _) = filtered_silo_network(game, pos, state.auto_io, state.enabled, &search);
+    let (list, _, _) = filtered_silo_network(host, pos, state.auto_io, state.enabled, &search);
     let page = state.quarry_cursor.max(0) as usize;
     let slot_idx = (id - 30) as usize;
     let Some((target_item, _, _)) = list.get(page * 27 + slot_idx) else {
         return;
     };
-    let (silos, chests) = collect_silo_network(game, pos);
+    let (silos, chests) = collect_silo_network(host, pos);
     let mut need = 64u32;
     let mut taken = 0u32;
     for &sp in &silos {
@@ -5951,7 +5809,7 @@ pub(in crate::game) fn menu_button_v2(
             break;
         }
         let mut took = 0u32;
-        game.native_with_mod_block_entity(sp, |sent| {
+        hc::with_mod_block_entity(host, sp, |sent| {
             if let Some(mut sst) = load_state(sent) {
                 if sst.belt_item == *target_item && sst.belt_count > 0 {
                     took = sst.belt_count.min(need);
@@ -5964,7 +5822,7 @@ pub(in crate::game) fn menu_button_v2(
             }
         });
         if took > 0 {
-            game.native_block_entity_sync(sp);
+            host.block_entity_sync(sp);
             need -= took;
             taken += took;
         }
@@ -5974,34 +5832,19 @@ pub(in crate::game) fn menu_button_v2(
             break;
         }
         let mut took = 0u32;
-        if let Some(BlockEntity::Chest(slots)) = game.world.block_entities.get_mut(&(cp[0], cp[1], cp[2])) {
-            for slot in slots.iter_mut() {
-                if need == 0 {
-                    break;
-                }
-                if let Some(st) = slot.as_mut() {
-                    if st.item.as_ref() == target_item.as_str() {
-                        let amt = st.count.min(need);
-                        took += amt;
-                        need -= amt;
-                        if st.count > amt {
-                            st.count -= amt;
-                        } else {
-                            *slot = None;
-                        }
-                    }
-                }
-            }
+        while need > 0 && hc::take_one_matching_from_container(host, cp, &target_item) {
+            took += 1;
+            need -= 1;
         }
         taken += took;
     }
     if taken > 0 {
-        *carried = Some(ItemStack::new(target_item, taken));
-        game.native_block_entity_sync(pos);
+        *carried = hc::make_stack(host, target_item, taken);
+        host.block_entity_sync(pos);
     }
 }
 
-pub(in crate::game) fn screen(block: &str, screen: &mut Option<NativeScreen>) {
+pub(crate) fn screen(block: &str) -> Option<Screen> {
     if let Some(kind) = MachineKind::from_block_id(block) {
         let slots = match kind {
             MachineKind::CoalGenerator
@@ -6067,7 +5910,7 @@ pub(in crate::game) fn screen(block: &str, screen: &mut Option<NativeScreen>) {
         } else {
             (166.0, 84.0)
         };
-        *screen = Some(NativeScreen {
+        return Some(Screen {
             width: 176.0,
             height,
             slots,
@@ -6075,12 +5918,14 @@ pub(in crate::game) fn screen(block: &str, screen: &mut Option<NativeScreen>) {
             inventory_x: 8.0,
             own_labels: true,
             own_background: true,
+            ..Screen::default()
         });
     }
+    None
 }
 
 fn fill_template(key: &str, args: &[String]) -> String {
-    let mut line = lang::get(key);
+    let mut line = hc::lang_get(key);
     for arg in args {
         line = line.replacen("%s", arg, 1);
     }
@@ -6088,8 +5933,8 @@ fn fill_template(key: &str, args: &[String]) -> String {
 }
 
 fn draw_button(
-    game: &Game<'_>,
-    batch: &mut HudBatch,
+    host: &dyn Host,
+    draw: &mut dyn DrawContext,
     origin: [f32; 2],
     rect: [f32; 4],
     label: &str,
@@ -6097,15 +5942,13 @@ fn draw_button(
 ) {
     let [ox, oy] = origin;
     let [bx, by, bw, bh] = rect;
-    game.native_fill(batch, [ox + bx, oy + by, bw, bh], 0xFF22_252A);
-    game.native_fill(
-        batch,
+    draw.fill( [ox + bx, oy + by, bw, bh], 0xFF22_252A);
+    draw.fill(
         [ox + bx + 1.0, oy + by + 1.0, bw - 2.0, bh - 2.0],
         bg_color,
     );
-    let tw = game.native_text_width(label);
-    game.native_text(
-        batch,
+    let tw = draw.text_width(label);
+    draw.text(
         label,
         [ox + bx + (bw - tw) / 2.0, oy + by + 3.0],
         0xFF_FFFF,
@@ -6113,11 +5956,11 @@ fn draw_button(
     );
 }
 
-pub(in crate::game) fn screen_draw(
-    game: &Game<'_>,
+pub(crate) fn screen_draw(
+    host: &dyn ClientHost,
     block: &str,
     data: &[i32],
-    batch: &mut HudBatch,
+    draw: &mut dyn DrawContext,
     origin: [f32; 2],
 ) {
     let Some(kind) = MachineKind::from_block_id(block) else {
@@ -6129,15 +5972,15 @@ pub(in crate::game) fn screen_draw(
     if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) {
         // AE2 / Terminal-style Silo Controller GUI (176 x 222)
         // Outer Minecraft-style light gray panel with bevel
-        game.native_fill(batch, [x, y, 176.0, 222.0], 0xFFC6_C6C6);
-        game.native_fill(batch, [x, y, 176.0, 2.0], 0xFFFF_FFFF);
-        game.native_fill(batch, [x, y, 2.0, 222.0], 0xFFFF_FFFF);
-        game.native_fill(batch, [x, y + 220.0, 176.0, 2.0], 0xFF55_5555);
-        game.native_fill(batch, [x + 174.0, y, 2.0, 222.0], 0xFF55_5555);
+        draw.fill( [x, y, 176.0, 222.0], 0xFFC6_C6C6);
+        draw.fill( [x, y, 176.0, 2.0], 0xFFFF_FFFF);
+        draw.fill( [x, y, 2.0, 222.0], 0xFFFF_FFFF);
+        draw.fill( [x, y + 220.0, 176.0, 2.0], 0xFF55_5555);
+        draw.fill( [x + 174.0, y, 2.0, 222.0], 0xFF55_5555);
 
         // Top 9x3 Dark Storage Grid [7, 7, 162, 54]
-        game.native_fill(batch, [x + 6.0, y + 6.0, 164.0, 56.0], 0xFF1E_1E1E);
-        game.native_fill(batch, [x + 7.0, y + 7.0, 162.0, 54.0], 0xFF37_3737);
+        draw.fill( [x + 6.0, y + 6.0, 164.0, 56.0], 0xFF1E_1E1E);
+        draw.fill( [x + 7.0, y + 7.0, 162.0, 54.0], 0xFF37_3737);
 
         TERMINAL_OPEN.store(true, std::sync::atomic::Ordering::Relaxed);
         let sort_by_name = get(4) != 0;
@@ -6145,7 +5988,7 @@ pub(in crate::game) fn screen_draw(
         let ctrl_pos = [get(7), get(8), get(9)];
         let page = get(6).max(0) as usize;
         let search = get_terminal_search();
-        let (list, _silos_n, _chests_n) = filtered_silo_network(game, ctrl_pos, sort_by_name, ascending, &search);
+        let (list, _silos_n, _chests_n) = filtered_silo_network(host, ctrl_pos, sort_by_name, ascending, &search);
         let total_pages = ((list.len().saturating_sub(1)) / 27) + 1;
         let cur_page = page.min(total_pages - 1);
 
@@ -6155,8 +5998,8 @@ pub(in crate::game) fn screen_draw(
                 let sx = x + 7.0 + col as f32 * 18.0;
                 let sy = y + 7.0 + row as f32 * 18.0;
                 if let Some((item_id, cnt, is_silo)) = list.get(idx) {
-                    game.native_fill(batch, [sx + 0.5, sy + 0.5, 17.0, 17.0], 0xFF42_4242);
-                    game.native_item(batch, item_id, [sx + 1.0, sy + 1.0], 16.0);
+                    draw.fill( [sx + 0.5, sy + 0.5, 17.0, 17.0], 0xFF42_4242);
+                    hc::draw_item_id(host, draw, item_id, [sx + 1.0, sy + 1.0], 16.0);
                     let cnt_str = if *cnt >= 1_000_000 {
                         format!("{}M", cnt / 1_000_000)
                     } else if *cnt >= 1_000 {
@@ -6166,7 +6009,7 @@ pub(in crate::game) fn screen_draw(
                     };
                     let col_txt = if *is_silo { 0xFF88_FFAA } else { 0xFFFF_FFFF };
                     let tw = (cnt_str.len() as f32 * 5.0).min(16.0);
-                    game.native_text(batch, &cnt_str, [sx + 17.0 - tw, sy + 10.0], col_txt, true);
+                    draw.text( &cnt_str, [sx + 17.0 - tw, sy + 10.0], col_txt, true);
                 }
             }
         }
@@ -6174,68 +6017,63 @@ pub(in crate::game) fn screen_draw(
         // Middle Control Bar (y + 64)
         let dir_lbl = if ascending { "↑" } else { "↓" };
         let sort_lbl = if sort_by_name { "A" } else { "#" };
-        draw_button(game, batch, origin, [7.0, 64.0, 13.0, 13.0], dir_lbl, 0xFF5A_5A5A);
-        draw_button(game, batch, origin, [22.0, 64.0, 13.0, 13.0], sort_lbl, 0xFF5A_5A5A);
-        draw_button(game, batch, origin, [37.0, 64.0, 13.0, 13.0], "◀", 0xFF5A_5A5A);
-        draw_button(game, batch, origin, [52.0, 64.0, 13.0, 13.0], "▶", 0xFF5A_5A5A);
+        draw_button(host, draw, origin, [7.0, 64.0, 13.0, 13.0], dir_lbl, 0xFF5A_5A5A);
+        draw_button(host, draw, origin, [22.0, 64.0, 13.0, 13.0], sort_lbl, 0xFF5A_5A5A);
+        draw_button(host, draw, origin, [37.0, 64.0, 13.0, 13.0], "◀", 0xFF5A_5A5A);
+        draw_button(host, draw, origin, [52.0, 64.0, 13.0, 13.0], "▶", 0xFF5A_5A5A);
 
         // Dark search bar [68, 64, 88, 13] + [X] clear button [157, 64, 12, 13]
-        game.native_fill(batch, [x + 68.0, y + 64.0, 88.0, 13.0], 0xFF14_1414);
+        draw.fill( [x + 68.0, y + 64.0, 88.0, 13.0], 0xFF14_1414);
         if search.is_empty() {
-            game.native_text(batch, "Buscar...", [x + 71.0, y + 66.5], 0xFF70_7888, false);
+            draw.text( "Buscar...", [x + 71.0, y + 66.5], 0xFF70_7888, false);
         } else {
-            game.native_text(batch, &format!("{search}_"), [x + 71.0, y + 66.5], 0xFFFF_FFFF, false);
+            draw.text( &format!("{search}_"), [x + 71.0, y + 66.5], 0xFFFF_FFFF, false);
         }
-        draw_button(game, batch, origin, [157.0, 64.0, 12.0, 13.0], "X", 0xFF5A_5A5A);
+        draw_button(host, draw, origin, [157.0, 64.0, 12.0, 13.0], "X", 0xFF5A_5A5A);
 
         // Lower 3x3 Visual Grid + Arrow + Deposit Slot
         for r in 0..3 {
             for c in 0..3 {
                 let gx = x + 18.0 + c as f32 * 18.0;
                 let gy = y + 82.0 + r as f32 * 18.0;
-                game.native_fill(batch, [gx, gy, 17.0, 17.0], 0xFF37_3737);
-                game.native_fill(batch, [gx + 1.0, gy + 1.0, 16.0, 16.0], 0xFF8B_8B8B);
+                draw.fill( [gx, gy, 17.0, 17.0], 0xFF37_3737);
+                draw.fill( [gx + 1.0, gy + 1.0, 16.0, 16.0], 0xFF8B_8B8B);
             }
         }
-        game.native_text(batch, "→", [x + 88.0, y + 104.0], 0xFF55_5555, false);
+        draw.text( "→", [x + 88.0, y + 104.0], 0xFF55_5555, false);
         if kind == MachineKind::SiloCraftingTerminal {
-            game.native_text(batch, "Salida", [x + 126.0, y + 88.0], 0xFF3A_3A3A, false);
-            game.native_fill(batch, [x + 133.0, y + 99.0, 18.0, 18.0], 0xFF37_3737);
-            game.native_fill(batch, [x + 134.0, y + 100.0, 17.0, 17.0], 0xFF8B_8B8B);
+            draw.text( "Salida", [x + 126.0, y + 88.0], 0xFF3A_3A3A, false);
+            draw.fill( [x + 133.0, y + 99.0, 18.0, 18.0], 0xFF37_3737);
+            draw.fill( [x + 134.0, y + 100.0, 17.0, 17.0], 0xFF8B_8B8B);
         } else {
-            game.native_text(batch, "Depositar", [x + 84.0, y + 93.0], 0xFF3A_3A3A, false);
-            game.native_fill(batch, [x + 133.0, y + 87.0, 18.0, 18.0], 0xFF37_3737);
-            game.native_fill(batch, [x + 134.0, y + 88.0, 17.0, 17.0], 0xFF8B_8B8B);
-            game.native_text(batch, "Retirar", [x + 92.0, y + 119.0], 0xFF3A_3A3A, false);
-            game.native_fill(batch, [x + 133.0, y + 113.0, 18.0, 18.0], 0xFF37_3737);
-            game.native_fill(batch, [x + 134.0, y + 114.0, 17.0, 17.0], 0xFF8B_8B8B);
+            draw.text( "Depositar", [x + 84.0, y + 93.0], 0xFF3A_3A3A, false);
+            draw.fill( [x + 133.0, y + 87.0, 18.0, 18.0], 0xFF37_3737);
+            draw.fill( [x + 134.0, y + 88.0, 17.0, 17.0], 0xFF8B_8B8B);
+            draw.text( "Retirar", [x + 92.0, y + 119.0], 0xFF3A_3A3A, false);
+            draw.fill( [x + 133.0, y + 113.0, 18.0, 18.0], 0xFF37_3737);
+            draw.fill( [x + 134.0, y + 114.0, 17.0, 17.0], 0xFF8B_8B8B);
         }
         // Player Inventory 3x9 + 1x9 hotbar slot frames (inventory_x=8, inventory_y=140)
         for row in 0..3 {
             for col in 0..9 {
                 let ix = x + 7.0 + col as f32 * 18.0;
                 let iy = y + 139.0 + row as f32 * 18.0;
-                game.native_fill(batch, [ix, iy, 18.0, 18.0], 0xFF37_3737);
-                game.native_fill(batch, [ix + 1.0, iy + 1.0, 17.0, 17.0], 0xFFFF_FFFF);
-                game.native_fill(batch, [ix + 1.0, iy + 1.0, 16.0, 16.0], 0xFF8B_8B8B);
+                draw.fill( [ix, iy, 18.0, 18.0], 0xFF37_3737);
+                draw.fill( [ix + 1.0, iy + 1.0, 17.0, 17.0], 0xFFFF_FFFF);
+                draw.fill( [ix + 1.0, iy + 1.0, 16.0, 16.0], 0xFF8B_8B8B);
             }
         }
         for col in 0..9 {
             let ix = x + 7.0 + col as f32 * 18.0;
             let iy = y + 197.0;
-            game.native_fill(batch, [ix, iy, 18.0, 18.0], 0xFF37_3737);
-            game.native_fill(batch, [ix + 1.0, iy + 1.0, 17.0, 17.0], 0xFFFF_FFFF);
-            game.native_fill(batch, [ix + 1.0, iy + 1.0, 16.0, 16.0], 0xFF8B_8B8B);
+            draw.fill( [ix, iy, 18.0, 18.0], 0xFF37_3737);
+            draw.fill( [ix + 1.0, iy + 1.0, 17.0, 17.0], 0xFFFF_FFFF);
+            draw.fill( [ix + 1.0, iy + 1.0, 16.0, 16.0], 0xFF8B_8B8B);
         }
         return;
     }
 
-    game.native_sprite(
-        batch,
-        kind.gui_sprite(),
-        [0.0, 0.0, 176.0, 166.0],
-        [x, y, 176.0, 166.0],
-    );
+    draw.sprite(kind.gui_sprite(), [0.0, 0.0, 176.0, 166.0], [x, y, 176.0, 166.0], None);
     let status_code = get(0);
     let energy = get(1);
     let max_energy = get(2).max(1);
@@ -6253,12 +6091,12 @@ pub(in crate::game) fn screen_draw(
         MachineTier::Tier2 => "[Tier 2]",
         MachineTier::Storage => "[Almacén]",
     };
-    let raw_title = lang::get(kind.title_key());
+    let raw_title = hc::lang_get(kind.title_key());
     let title = format!("{raw_title} {tier_tag}");
-    game.native_text(batch, &title, [x + 7.0, y + 5.0], 0xF0_F4F8, true);
+    draw.text( &title, [x + 7.0, y + 5.0], 0xF0_F4F8, true);
 
     // 2. Status line below header
-    let status_text = lang::get(&format!("rusty_factory.status.{status_code}"));
+    let status_text = hc::lang_get(&format!("rusty_factory.status.{status_code}"));
     let status_color = if status_code == StepStatus::Working as i32 {
         0x1B_6E28
     } else if status_code == StepStatus::Paused as i32 {
@@ -6266,7 +6104,7 @@ pub(in crate::game) fn screen_draw(
     } else {
         0x9E_2A2B
     };
-    game.native_text(batch, &status_text, [x + 8.0, y + 20.0], status_color, false);
+    draw.text( &status_text, [x + 8.0, y + 20.0], status_color, false);
 
     // 3. Machine-Specific Center Modules
     if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
@@ -6278,8 +6116,8 @@ pub(in crate::game) fn screen_draw(
         } else {
             format!("#{quarry_mined}")
         };
-        game.native_text(batch, &area_txt, [x + 60.0, y + 30.0], 0x55_FFAA, false);
-        game.native_text(batch, &y_txt, [x + 60.0, y + 42.0], 0x38_F2FF, false);
+        draw.text( &area_txt, [x + 60.0, y + 30.0], 0x55_FFAA, false);
+        draw.text( &y_txt, [x + 60.0, y + 42.0], 0x38_F2FF, false);
     } else if matches!(kind, MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SteamBoiler) {
         let burn_left = get(8).max(0);
         let burn_secs = burn_left / 20;
@@ -6289,46 +6127,46 @@ pub(in crate::game) fn screen_draw(
             _ => (0xFF38_D6FF, 0xFFAA_F0FF),
         };
         // Module A: Lightning Bolt + Tick Duration Bar [74, 28..104, 54]
-        game.native_text(batch, "⚡", [x + 76.0, y + 29.0], bolt_col, false);
+        draw.text( "⚡", [x + 76.0, y + 29.0], bolt_col, false);
         let tick_txt = if burn_left > 0 {
             format!("{burn_left}t")
         } else {
             "0t".to_string()
         };
-        game.native_text(batch, &tick_txt, [x + 85.0, y + 30.0], 0xFF_FFFF, false);
-        game.native_fill(batch, [x + 76.0, y + 41.0, 26.0, 5.0], 0xFF22_262E);
+        draw.text( &tick_txt, [x + 85.0, y + 30.0], 0xFF_FFFF, false);
+        draw.fill( [x + 76.0, y + 41.0, 26.0, 5.0], 0xFF22_262E);
         let bar_w = (26.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 26.0);
         if bar_w > 0.0 {
-            game.native_fill(batch, [x + 76.0, y + 41.0, bar_w, 5.0], accent_col);
+            draw.fill( [x + 76.0, y + 41.0, bar_w, 5.0], accent_col);
         }
         let sec_txt = format!("{burn_secs}s");
-        game.native_text(batch, &sec_txt, [x + 79.0, y + 48.0], 0xAA_B8C8, false);
+        draw.text( &sec_txt, [x + 79.0, y + 48.0], 0xAA_B8C8, false);
 
         // Module B: Stored & Generated Energy Readout [108, 28..168, 54]
-        game.native_text(batch, &format!("Alm:{energy}"), [x + 111.0, y + 31.0], 0x70_E8FF, false);
-        game.native_text(batch, &format!("Gen:+{rate}/t"), [x + 111.0, y + 43.0], bolt_col, false);
+        draw.text( &format!("Alm:{energy}"), [x + 111.0, y + 31.0], 0x70_E8FF, false);
+        draw.text( &format!("Gen:+{rate}/t"), [x + 111.0, y + 43.0], bolt_col, false);
     } else if kind == MachineKind::SolarGenerator {
         let is_3x3 = get(7) != 0;
         let tag = if is_3x3 { "☀ MATRIZ 3x3 (x2)" } else { "☀ PANEL 1x1" };
         let tag_col = if is_3x3 { 0x55_FFAA } else { 0xFF_D166 };
-        game.native_text(batch, tag, [x + 30.0, y + 30.0], tag_col, false);
-        game.native_text(batch, &format!("Gen: +{rate} FE/t"), [x + 30.0, y + 40.0], 0xFF_E066, false);
-        game.native_text(batch, &format!("Alm: {energy}/{max_energy}"), [x + 30.0, y + 49.0], 0x70_E8FF, false);
+        draw.text( tag, [x + 30.0, y + 30.0], tag_col, false);
+        draw.text( &format!("Gen: +{rate} FE/t"), [x + 30.0, y + 40.0], 0xFF_E066, false);
+        draw.text( &format!("Alm: {energy}/{max_energy}"), [x + 30.0, y + 49.0], 0x70_E8FF, false);
     } else if kind == MachineKind::EnergyBank {
         let cells = get(7).max(1);
-        game.native_fill(batch, [x + 30.0, y + 34.0, 84.0, 9.0], 0xFF20_2832);
+        draw.fill( [x + 30.0, y + 34.0, 84.0, 9.0], 0xFF20_2832);
         let bar_w = (84.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 84.0);
         if bar_w > 0.0 {
-            game.native_fill(batch, [x + 30.0, y + 34.0, bar_w, 9.0], 0xFF00_E5FF);
+            draw.fill( [x + 30.0, y + 34.0, bar_w, 9.0], 0xFF00_E5FF);
         }
-        game.native_text(batch, &format!("{progress_pct}% ({cells} cel)"), [x + 32.0, y + 25.0], 0x70_E8FF, false);
-        game.native_text(batch, &format!("{energy}/{max_energy} FE"), [x + 30.0, y + 46.0], 0xFF_FFFF, false);
+        draw.text( &format!("{progress_pct}% ({cells} cel)"), [x + 32.0, y + 25.0], 0x70_E8FF, false);
+        draw.text( &format!("{energy}/{max_energy} FE"), [x + 30.0, y + 46.0], 0xFF_FFFF, false);
     } else if kind == MachineKind::ChargingPad {
-        game.native_text(batch, "⚡", [x + 56.0, y + 39.0], 0xFF00_FFAA, false);
-        game.native_text(batch, "⚡", [x + 112.0, y + 39.0], 0xFF00_FFAA, false);
-        game.native_text(batch, "INDUCCIÓN", [x + 62.0, y + 23.0], 0xFF00_FFAA, false);
+        draw.text( "⚡", [x + 56.0, y + 39.0], 0xFF00_FFAA, false);
+        draw.text( "⚡", [x + 112.0, y + 39.0], 0xFF00_FFAA, false);
+        draw.text( "INDUCCIÓN", [x + 62.0, y + 23.0], 0xFF00_FFAA, false);
     } else if kind == MachineKind::VoidTrashCan {
-        game.native_text(batch, "VACÍO", [x + 74.0, y + 23.0], 0xDD_88FF, false);
+        draw.text( "VACÍO", [x + 74.0, y + 23.0], 0xDD_88FF, false);
     } else if kind == MachineKind::FluidTank {
         let fcode = get(7);
         let famount = get(8);
@@ -6342,28 +6180,28 @@ pub(in crate::game) fn screen_draw(
             _ => 0xFF3A_404A,
         };
         // Tall vertical fluid column at [12, 26, 14, 30]
-        game.native_fill(batch, [x + 12.0, y + 26.0, 14.0, 30.0], 0xFF1A_1E26);
+        draw.fill( [x + 12.0, y + 26.0, 14.0, 30.0], 0xFF1A_1E26);
         let fh = (30.0 * (famount as f32 / fmax as f32)).clamp(0.0, 30.0);
         if fh > 0.0 {
-            game.native_fill(batch, [x + 12.0, y + 26.0 + (30.0 - fh), 14.0, fh], fcol);
+            draw.fill( [x + 12.0, y + 26.0 + (30.0 - fh), 14.0, fh], fcol);
         }
-        game.native_text(batch, &format!("Fluido: {fname}"), [x + 78.0, y + 31.0], fcol, false);
-        game.native_text(batch, &format!("{famount}/{fmax} mB"), [x + 78.0, y + 43.0], 0xFF_FFFF, false);
+        draw.text( &format!("Fluido: {fname}"), [x + 78.0, y + 31.0], fcol, false);
+        draw.text( &format!("{famount}/{fmax} mB"), [x + 78.0, y + 43.0], 0xFF_FFFF, false);
     } else if kind == MachineKind::FluidPump {
         let fcode = get(7);
         let rate_mb = get(8);
         let fname = if fcode == 0 { "Sin fuente" } else { rules::fluid_name_from_code(fcode) };
-        game.native_text(batch, &format!("Fuente: {fname}"), [x + 30.0, y + 31.0], 0x38_D6FF, false);
-        game.native_text(batch, &format!("Bombeo: {rate_mb} mB/t"), [x + 30.0, y + 43.0], 0x55_FFAA, false);
+        draw.text( &format!("Fuente: {fname}"), [x + 30.0, y + 31.0], 0x38_D6FF, false);
+        draw.text( &format!("Bombeo: {rate_mb} mB/t"), [x + 30.0, y + 43.0], 0x55_FFAA, false);
     } else if kind == MachineKind::AlloySmelter {
-        game.native_fill(batch, [x + 76.0, y + 39.0, 30.0, 8.0], 0xFF3A_3F48);
+        draw.fill( [x + 76.0, y + 39.0, 30.0, 8.0], 0xFF3A_3F48);
         let bar_w = (30.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 30.0);
         if bar_w > 0.0 {
-            game.native_fill(batch, [x + 76.0, y + 39.0, bar_w, 8.0], 0xFFFF_7722);
+            draw.fill( [x + 76.0, y + 39.0, bar_w, 8.0], 0xFFFF_7722);
         }
-        game.native_text(batch, "➔", [x + 87.0, y + 37.0], 0xFF_FFFF, false);
+        draw.text( "➔", [x + 87.0, y + 37.0], 0xFF_FFFF, false);
     } else {
-        game.native_fill(batch, [x + 64.0, y + 39.0, 34.0, 8.0], 0xFF3A_3F48);
+        draw.fill( [x + 64.0, y + 39.0, 34.0, 8.0], 0xFF3A_3F48);
         let bar_w = (34.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 34.0);
         if bar_w > 0.0 {
             let bar_col = if matches!(kind, MachineKind::ConveyorBelt | MachineKind::ItemExtractor) {
@@ -6371,7 +6209,7 @@ pub(in crate::game) fn screen_draw(
             } else {
                 0xFF38_D6FF
             };
-            game.native_fill(batch, [x + 64.0, y + 39.0, bar_w, 8.0], bar_col);
+            draw.fill( [x + 64.0, y + 39.0, bar_w, 8.0], bar_col);
         }
     }
 
@@ -6380,12 +6218,11 @@ pub(in crate::game) fn screen_draw(
         kind,
         MachineKind::ConveyorBelt | MachineKind::ItemExtractor | MachineKind::FluidTank | MachineKind::VoidTrashCan
     ) {
-        game.native_fill(batch, [x + 12.0, y + 26.0, 8.0, 30.0], 0xFF20_242A);
+        draw.fill( [x + 12.0, y + 26.0, 8.0, 30.0], 0xFF20_242A);
         let e_ratio = (energy as f32 / max_energy as f32).clamp(0.0, 1.0);
         let e_h = 30.0 * e_ratio;
         if e_h > 0.0 {
-            game.native_fill(
-                batch,
+            draw.fill(
                 [x + 12.0, y + 26.0 + (30.0 - e_h), 8.0, e_h],
                 0xFF00_E5FF,
             );
@@ -6396,31 +6233,31 @@ pub(in crate::game) fn screen_draw(
     if kind == MachineKind::Quarry {
         let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
         let line2 = format!("Minados: {quarry_mined} blq | Prof: Y={quarry_y}");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF_D166, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF_D166, false);
     } else if kind == MachineKind::AutoHarvester {
         let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
         let line2 = format!("Cosechados: {quarry_mined} cultivos/troncos");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x66_FF88, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0x66_FF88, false);
     } else if kind == MachineKind::CoalGenerator {
         let burn_left = get(8).max(0);
         let line1 = format!("Almacenada: {energy}/{max_energy} FE | +{rate} FE/t");
         let line2 = format!("Combustión: {burn_left} ticks ({progress_pct}%)");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF_9E00, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF_9E00, false);
     } else if kind == MachineKind::BioGenerator {
         let burn_left = get(8).max(0);
         let line1 = format!("Almacenada: {energy}/{max_energy} FE | +{rate} FE/t");
         let line2 = format!("Biomasa: {burn_left} ticks ({progress_pct}%)");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x70_E000, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0x70_E000, false);
     } else if kind == MachineKind::SteamBoiler {
         let burn_left = get(8).max(0);
         let line1 = format!("Almacenada: {energy}/{max_energy} FE | +{rate} FE/t");
         let line2 = format!("Presión Vapor: {burn_left} ticks ({progress_pct}%)");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x38_D6FF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0x38_D6FF, false);
     } else if kind == MachineKind::FluidTank {
         let fcode = get(7);
         let famount = get(8);
@@ -6428,21 +6265,21 @@ pub(in crate::game) fn screen_draw(
         let fname = rules::fluid_name_from_code(fcode);
         let line1 = format!("Especificación: {fname} ({progress_pct}%)");
         let line2 = format!("Capacidad: {famount} / {fmax} mB (Usa Balde)");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x38_D6FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xA8_DADC, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x38_D6FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xA8_DADC, false);
     } else if kind == MachineKind::FluidPump {
         let fcode = get(7);
         let rate_mb = get(8);
         let fname = if fcode == 0 { "Sin fluido" } else { rules::fluid_name_from_code(fcode) };
         let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
         let line2 = format!("Bombeando {fname}: {rate_mb} mB/t");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x55_FFAA, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0x55_FFAA, false);
     } else if kind == MachineKind::VoidTrashCan {
         let line1 = "Papelera de Vacío: Incineración Instantánea";
         let line2 = "Coloca cualquier ítem para destruirlo";
-        game.native_text(batch, line1, [x + 10.0, y + 60.0], 0xDD_88FF, false);
-        game.native_text(batch, line2, [x + 10.0, y + 70.0], 0xAA_B8C8, false);
+        draw.text( line1, [x + 10.0, y + 60.0], 0xDD_88FF, false);
+        draw.text( line2, [x + 10.0, y + 70.0], 0xAA_B8C8, false);
     } else if kind == MachineKind::SolarGenerator {
         let is_3x3 = get(7) != 0;
         let line1 = format!("FE: {energy}/{max_energy} | Genera: +{rate} FE/t");
@@ -6454,18 +6291,18 @@ pub(in crate::game) fn screen_draw(
             "Sin radiación solar (Noche o bajo techo)".to_string()
         };
         let col2 = if is_3x3 { 0x55_FFAA } else if rate > 0 { 0xFF_D166 } else { 0xAA_AA_AA };
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], col2, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], col2, false);
     } else if kind == MachineKind::ChargingPad {
         let line1 = format!("FE: {energy}/{max_energy} | -20 FE/t en carga");
         let line2 = "Inducción activa: Carga armaduras y slot".to_string();
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF00_FFAA, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF00_FFAA, false);
     } else if kind == MachineKind::AlloySmelter {
         let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
         let line2 = format!("Fundición de Aleaciones: {progress_pct}%");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFFF_7722, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFFF_7722, false);
     } else if kind == MachineKind::EnergyBank {
         let cells = get(7).max(1);
         let line1 = format!("FE Total: {energy}/{max_energy}");
@@ -6474,8 +6311,8 @@ pub(in crate::game) fn screen_draw(
         } else {
             "Batería Modular (10,000 FE por celda)".to_string()
         };
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x38_D6FF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0x38_D6FF, false);
     } else if kind == MachineKind::ConveyorBelt {
         let line1 = format!("Velocidad Cinta: {}%", 100 + progress_pct / 2);
         let line2 = if auto_io {
@@ -6483,45 +6320,44 @@ pub(in crate::game) fn screen_draw(
         } else {
             "Auto-Extraer (Atrás): MANUAL"
         };
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF_D166, false);
-        game.native_text(batch, line2, [x + 10.0, y + 70.0], 0x90_E0EF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF_D166, false);
+        draw.text( line2, [x + 10.0, y + 70.0], 0x90_E0EF, false);
     } else if kind == MachineKind::ItemExtractor {
         let line1 = format!("Extraídos a Tubería: {quarry_mined} ítems");
         let line2 = "Slot 0 = Filtro (Vacío = Todo)";
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF_D166, false);
-        game.native_text(batch, line2, [x + 10.0, y + 70.0], 0x90_E0EF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF_D166, false);
+        draw.text( line2, [x + 10.0, y + 70.0], 0x90_E0EF, false);
     } else if kind == MachineKind::SapExtractor {
         let line1 = format!("FE: {energy}/{max_energy} | Extracción de Savia");
         let line2 = format!("Progreso extracción: {progress_pct}% (Tronco de caucho)");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF_B820, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF_B820, false);
     } else if kind == MachineKind::Vulcanizer {
         let line1 = format!("FE: {energy}/{max_energy} | Horno Vulcanizador");
         let line2 = format!("Vulcanizando caucho puro: {progress_pct}%");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xEE_82EE, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xEE_82EE, false);
     } else if kind == MachineKind::MechanicalPress {
         let line1 = format!("FE: {energy}/{max_energy} | Prensa Hidráulica");
         let line2 = format!("Estampado de placas y engranajes: {progress_pct}%");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x55_FFAA, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0x55_FFAA, false);
     } else if kind == MachineKind::ElectricCrusher {
         let line1 = format!("FE: {energy}/{max_energy} | Triturador Cinético");
         let line2 = format!("Molienda (x2 polvo mineral): {progress_pct}%");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF_D166, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF_D166, false);
     } else if kind == MachineKind::ElectricFurnace {
         let line1 = format!("FE: {energy}/{max_energy} | Horno Eléctrico");
         let line2 = format!("Fundición de alta temperatura: {progress_pct}%");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF_8844, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF_8844, false);
     } else if kind == MachineKind::SiloController {
         let ctrl_pos = [get(7), get(8), get(9)];
         let page = get(6).max(0) as usize;
-        let (list, silos_n, chests_n) = aggregate_silo_network(game, ctrl_pos);
+        let (list, silos_n, chests_n) = aggregate_silo_network(host, ctrl_pos);
         let total_pages = ((list.len().saturating_sub(1)) / 4) + 1;
-        game.native_text(
-            batch,
+        draw.text(
             &format!("Silos: {silos_n} | Cofres: {chests_n} | Pág {}/{total_pages}", (page + 1).min(total_pages)),
             [x + 8.0, y + 18.0],
             0xFF38_F2FF,
@@ -6529,70 +6365,70 @@ pub(in crate::game) fn screen_draw(
         );
         for row in 0..4 {
             let ry = y + 34.0 + row as f32 * 24.0;
-            game.native_fill(batch, [x + 8.0, ry, 160.0, 21.0], 0xFF1A_202A);
+            draw.fill( [x + 8.0, ry, 160.0, 21.0], 0xFF1A_202A);
             if let Some((item_id, cnt, is_silo)) = list.get(page * 4 + row) {
                 let short = item_id.split(':').nth(1).unwrap_or(item_id);
                 let tag = if *is_silo { "[Silo]" } else { "[Cofre]" };
                 let col = if *is_silo { 0xFF55_FF88 } else { 0xFFFF_C800 };
-                game.native_text(batch, &format!("{short}"), [x + 12.0, ry + 3.0], 0xFFE8_EEF8, false);
-                game.native_text(batch, &format!("x{cnt} {tag} (Clic: -64)"), [x + 12.0, ry + 12.0], col, false);
+                draw.text( &format!("{short}"), [x + 12.0, ry + 3.0], 0xFFE8_EEF8, false);
+                draw.text( &format!("x{cnt} {tag} (Clic: -64)"), [x + 12.0, ry + 12.0], col, false);
             } else {
-                game.native_text(batch, "---", [x + 12.0, ry + 7.0], 0xFF55_6070, false);
+                draw.text( "---", [x + 12.0, ry + 7.0], 0xFF55_6070, false);
             }
         }
-        draw_button(game, batch, [x, y], [8.0, 134.0, 48.0, 14.0], "◀ Ant", 0xFF28_5066);
-        draw_button(game, batch, [x, y], [120.0, 134.0, 48.0, 14.0], "Sig ▶", 0xFF28_5066);
+        draw_button(host, draw, [x, y], [8.0, 134.0, 48.0, 14.0], "◀ Ant", 0xFF28_5066);
+        draw_button(host, draw, [x, y], [120.0, 134.0, 48.0, 14.0], "Sig ▶", 0xFF28_5066);
         return;
     } else if kind == MachineKind::GeothermalGenerator {
         let line1 = format!("FE: {energy}/{max_energy} (+{rate}/t)");
         let line2 = format!("Lava interna: {progress_pct}%");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFFFF_8833, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFFF_B820, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFFFF_8833, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFFF_B820, false);
     } else if kind == MachineKind::SteamTurbine {
         let line1 = format!("FE: {energy}/{max_energy} (+{rate}/t)");
         let line2 = format!("Vapor interno: {progress_pct}%");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF38_F2FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFD0_F4FF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF38_F2FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFD0_F4FF, false);
     } else if kind == MachineKind::NuclearReactor {
         let line1 = format!("FE: {energy}/{max_energy} (+{rate}/t)");
         let line2 = format!("Núcleo Nuclear: {progress_pct}% (Diamante/Nether)");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF4A_DE80, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFBB_F7D0, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF4A_DE80, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFBB_F7D0, false);
     } else if kind == MachineKind::WindTurbine {
         let line1 = format!("FE: {energy}/{max_energy} (+{rate}/t)");
         let line2 = format!("Viento por Altura: {progress_pct}%");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF38_F2FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFE2_E8F0, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF38_F2FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFE2_E8F0, false);
     } else if kind == MachineKind::HydroponicChamber {
         let line1 = format!("FE: {energy}/{max_energy} | Cultivo Hidropónico");
         let line2 = format!("Crecimiento: {progress_pct}% (Slot 0 = Semilla)");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF4A_DE80, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF86_EFAC, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF4A_DE80, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF86_EFAC, false);
     } else if kind == MachineKind::LaserTurret {
         let line1 = format!("FE: {energy}/{max_energy} | Radio: 16 blq");
         let line2 = format!("Torreta Láser: {progress_pct}% (10 daño)");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFFF8_7171, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFFCA5A5, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFFF8_7171, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFFCA5A5, false);
     } else if kind == MachineKind::WirelessCharger {
         let line1 = format!("FE: {energy}/{max_energy} | Radio: 32 blq");
         let line2 = "Carga inalámbrica de inventario y armadura".to_string();
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF38_F2FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFF88_E5FF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF38_F2FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF88_E5FF, false);
     } else if kind == MachineKind::TeleporterPad {
         let line1 = format!("FE: {energy}/{max_energy} | Enlaces: {rate}");
         let line2 = "Agachate encima para teletransportarte (-1,000 FE)".to_string();
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF2D_D4BF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFC0_84FC, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF2D_D4BF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFC0_84FC, false);
     } else if kind == MachineKind::Recycler {
         let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
         let line2 = format!("Reciclaje de Chatarra: {progress_pct}%");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF55_FF88, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0xFFAA_EEAA, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF55_FF88, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFAA_EEAA, false);
     } else if kind == MachineKind::Tesseract {
         let line1 = format!("FE: {energy}/{max_energy} (Inalámbrico)");
         let line2 = "Transmite FE e ítems entre Tesseracts";
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0xFF38_F2FF, false);
-        game.native_text(batch, line2, [x + 10.0, y + 70.0], 0xFFAA_88FF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF38_F2FF, false);
+        draw.text( line2, [x + 10.0, y + 70.0], 0xFFAA_88FF, false);
     } else if kind == MachineKind::IndustrialSilo {
         let bar_col = if progress_pct >= 90 {
             0xFFE6_3232
@@ -6603,45 +6439,45 @@ pub(in crate::game) fn screen_draw(
         };
         let line1 = format!("Almacenado: {energy} / {max_energy} ({progress_pct}%)");
         let line2 = "Slot 0 = Depositar (Frente = Bloquear/Retirar)";
-        game.native_text(batch, &line1, [x + 10.0, y + 58.0], bar_col, false);
-        game.native_text(batch, line2, [x + 10.0, y + 68.0], 0xFFAA_B4C4, false);
-        game.native_fill(batch, [x + 10.0, y + 78.0, 156.0, 5.0], 0xFF22_2834);
+        draw.text( &line1, [x + 10.0, y + 58.0], bar_col, false);
+        draw.text( line2, [x + 10.0, y + 68.0], 0xFFAA_B4C4, false);
+        draw.fill( [x + 10.0, y + 78.0, 156.0, 5.0], 0xFF22_2834);
         let fw = (156.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 156.0);
         if fw > 0.5 {
-            game.native_fill(batch, [x + 10.0, y + 78.0, fw, 5.0], bar_col);
+            draw.fill( [x + 10.0, y + 78.0, fw, 5.0], bar_col);
         }
     } else if kind == MachineKind::IndustrialAssembler {
         let line1 = format!("FE: {energy}/{max_energy} | Ensamblador Robótico");
         let line2 = format!("Ensamblaje automatizado: {progress_pct}%");
-        game.native_text(batch, &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &line2, [x + 10.0, y + 70.0], 0x38_F2FF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0x38_F2FF, false);
     } else {
         let energy_line = fill_template(
             "rusty_factory.screen.energy",
             &[energy.to_string(), max_energy.to_string()],
         );
         let rate_line = fill_template("rusty_factory.screen.rate", &[rate.to_string()]);
-        game.native_text(batch, &energy_line, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        game.native_text(batch, &rate_line, [x + 10.0, y + 70.0], 0xA8_DADC, false);
+        draw.text( &energy_line, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &rate_line, [x + 10.0, y + 70.0], 0xA8_DADC, false);
     }
 
     // 6. Interactive Buttons
     if !matches!(kind, MachineKind::FluidTank | MachineKind::VoidTrashCan) {
-        let pwr_label = lang::get(if enabled {
+        let pwr_label = hc::lang_get(if enabled {
             "rusty_factory.screen.start"
         } else {
             "rusty_factory.screen.stop"
         });
         let pwr_bg = if enabled { 0xFF2B_8A3E } else { 0xFFA6_1E22 };
-        draw_button(game, batch, origin, POWER_BTN_RECT, &pwr_label, pwr_bg);
+        draw_button(host, draw, origin, POWER_BTN_RECT, &pwr_label, pwr_bg);
     }
 
     if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
         let side = quarry_radius * 2 + 1;
         let size_label = format!("{side}x{side}");
-        draw_button(game, batch, origin, MODE_BTN_RECT, &size_label, 0xFF3B_5B92);
+        draw_button(host, draw, origin, MODE_BTN_RECT, &size_label, 0xFF3B_5B92);
         if kind == MachineKind::Quarry {
-            draw_button(game, batch, origin, RESET_BTN_RECT, "TOP", 0xFF6C_584C);
+            draw_button(host, draw, origin, RESET_BTN_RECT, "TOP", 0xFF6C_584C);
         }
     } else if !matches!(
         kind,
@@ -6655,13 +6491,13 @@ pub(in crate::game) fn screen_draw(
             | MachineKind::FluidTank
             | MachineKind::FluidPump
     ) {
-        let auto_label = lang::get(if auto_io {
+        let auto_label = hc::lang_get(if auto_io {
             "rusty_factory.screen.auto_on"
         } else {
             "rusty_factory.screen.auto_off"
         });
         let auto_bg = if auto_io { 0xFF19_71C2 } else { 0xFF5C_677D };
-        draw_button(game, batch, origin, MODE_BTN_RECT, &auto_label, auto_bg);
+        draw_button(host, draw, origin, MODE_BTN_RECT, &auto_label, auto_bg);
     }
 }
 
@@ -6670,18 +6506,19 @@ fn in_rect(at: [f32; 2], rect: [f32; 4]) -> bool {
     (x..x + w).contains(&at[0]) && (y..y + h).contains(&at[1])
 }
 
-pub(in crate::game) fn screen_click(
+pub(crate) fn screen_click(
     block: &str,
     at: [f32; 2],
     right: bool,
-    button: &mut Option<i32>,
-) {
+) -> Option<i32> {
+    let mut out_btn: Option<i32> = None;
+    let button = &mut out_btn;
     let Some(kind) = MachineKind::from_block_id(block) else {
-        return;
+        return None;
     };
     if right {
-        return;
-    };
+        return out_btn;
+    }
     if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) {
         if in_rect(at, [7.0, 64.0, 13.0, 13.0]) {
             *button = Some(22);
@@ -6700,12 +6537,12 @@ pub(in crate::game) fn screen_click(
                     let sy = 7.0 + row as f32 * 18.0;
                     if in_rect(at, [sx, sy, 18.0, 18.0]) {
                         *button = Some(30 + (row * 9 + col) as i32);
-                        return;
+                        return out_btn;
                     }
                 }
             }
         }
-        return;
+        return out_btn;
     }
     if in_rect(at, POWER_BTN_RECT)
         && !matches!(kind, MachineKind::FluidTank | MachineKind::VoidTrashCan)
@@ -6729,9 +6566,10 @@ pub(in crate::game) fn screen_click(
     } else if in_rect(at, RESET_BTN_RECT) && kind == MachineKind::Quarry {
         *button = Some(BTN_QUARRY_RESET);
     }
+    out_btn
 }
 
-pub(in crate::game) fn screen_tooltip(
+pub(crate) fn screen_tooltip(
     block: &str,
     data: &[i32],
     at: [f32; 2],
@@ -6879,15 +6717,18 @@ pub(in crate::game) fn screen_tooltip(
     }
 }
 
-pub(in crate::game) fn commands(commands: &mut Vec<NativeCommand>) {
-    commands.push(NativeCommand::op("rustyfactory kit", 2));
+pub(crate) fn commands(commands: &mut Vec<Command>) {
+    commands.push(Command::op("rustyfactory kit", 2));
 }
 
-pub(in crate::game) fn perform(game: &mut Game<'_>, line: &str, ran: &mut bool) {
-    if *ran || line.trim() != "rustyfactory kit" {
-        return;
+pub(crate) fn perform(
+    host: &mut dyn ServerHost,
+    command: &CommandInvocation,
+    _source: &CommandSource,
+) -> Flow {
+    if command.literals != ["rustyfactory", "kit"] {
+        return Flow::Continue;
     }
-    *ran = true;
     for item in [
         "rusty_factory:wrench 1",
         "rusty_factory:treetap 1",
@@ -6935,21 +6776,22 @@ pub(in crate::game) fn perform(game: &mut Game<'_>, line: &str, ran: &mut bool) 
         "rusty_factory:alloy_smelter 1",
         "rusty_factory:solar_helmet 1",
     ] {
-        game.native_run_command(&format!("give @s {item}"));
+        hc::run_command(host, &format!("give @s {item}"));
     }
-    game.native_feedback(Text::literal(
-        "[Rusty Factory v0.5.0] ¡Kit industrial avanzado entregado (Mega Panel 3x3, Plataforma de Carga Inductiva, Tubería de Fluidos, Fundición de Aleaciones, Casco Solar y más)!",
-    ));
+    hc::acting_feedback(
+        host,
+        "[Rusty Factory v1.0.0] ¡Kit industrial avanzado entregado (Mega Panel 3x3, Plataforma de Carga Inductiva, Tubería de Fluidos, Fundición de Aleaciones, Casco Solar y más)!",
+    );
+    Flow::Cancel
 }
 
 pub fn get_item_energy(stack: &ItemStack) -> i32 {
-    let key = horizon_world::nbt::JavaString::from("rf_energy");
-    stack
-        .custom_data()
+    let key = "rf_energy".into();
+    hc::get_custom_data(stack)
         .and_then(|c| c.get(&key))
         .and_then(|t| match t {
-            horizon_world::nbt::Tag::Int(v) => Some(*v),
-            horizon_world::nbt::Tag::Long(v) => Some(*v as i32),
+            Tag::Int(v) => Some(*v),
+            Tag::Long(v) => Some(*v as i32),
             _ => None,
         })
         .unwrap_or(0)
@@ -6957,64 +6799,64 @@ pub fn get_item_energy(stack: &ItemStack) -> i32 {
 }
 
 pub fn set_item_energy(stack: &mut ItemStack, energy: i32) {
-    let cap = rules::battery_capacity(stack.item.as_ref()).unwrap_or(50_000);
+    let cap = 10_000_000;
     let clamped = energy.clamp(0, cap);
-    let mut map = stack.custom_data().cloned().unwrap_or_default();
+    let mut map = hc::get_custom_data(stack).cloned().unwrap_or_default();
     map.insert(
-        horizon_world::nbt::JavaString::from("rf_energy"),
-        horizon_world::nbt::Tag::Int(clamped),
+        "rf_energy".into(),
+        Tag::Int(clamped),
     );
-    stack
-        .data_mut()
-        .set_other("minecraft:custom_data", Some(horizon_world::nbt::Tag::Compound(map)));
+    hc::set_custom_data(stack, map);
 }
 
 pub fn is_drill_3x3(stack: &ItemStack) -> bool {
-    let key = horizon_world::nbt::JavaString::from("drill_3x3");
-    stack
-        .custom_data()
+    let key = "drill_3x3".into();
+    hc::get_custom_data(stack)
         .and_then(|c| c.get(&key))
         .and_then(|t| match t {
-            horizon_world::nbt::Tag::Byte(v) => Some(*v != 0),
+            Tag::Byte(v) => Some(*v != 0),
             _ => None,
         })
         .unwrap_or(true)
 }
 
 pub fn set_drill_3x3(stack: &mut ItemStack, enabled: bool) {
-    let mut map = stack.custom_data().cloned().unwrap_or_default();
+    let mut map = hc::get_custom_data(stack).cloned().unwrap_or_default();
     map.insert(
-        horizon_world::nbt::JavaString::from("drill_3x3"),
-        horizon_world::nbt::Tag::Byte(if enabled { 1 } else { 0 }),
+        "drill_3x3".into(),
+        Tag::Byte(if enabled { 1 } else { 0 }),
     );
-    stack
-        .data_mut()
-        .set_other("minecraft:custom_data", Some(horizon_world::nbt::Tag::Compound(map)));
+    hc::set_custom_data(stack, map);
 }
 
-pub fn consume_player_energy(game: &mut Game<'_>, cost: i32) -> bool {
+pub fn consume_player_energy(host: &mut dyn ServerHost, cost: i32) -> bool {
     let mut needed = cost;
-    if let Some(held) = game.held_mut() {
-        let cur = get_item_energy(held);
-        if cur > 0 {
-            let take = cur.min(needed);
-            set_item_energy(held, cur - take);
-            needed -= take;
+    hc::acting_held_mut(host, |slot| {
+        if let Some(held) = slot.as_mut() {
+            let cur = get_item_energy(held);
+            if cur > 0 {
+                let take = cur.min(needed);
+                set_item_energy(held, cur - take);
+                needed -= take;
+            }
         }
-    }
+    });
     if needed > 0 {
-        for slot in game.inventory.iter_mut() {
-            let Some(st) = slot.as_mut() else {
-                continue;
-            };
-            if rules::is_battery_item(st.item.as_ref()) {
-                let cur = get_item_energy(st);
-                if cur > 0 {
-                    let take = cur.min(needed);
-                    set_item_energy(st, cur - take);
-                    needed -= take;
-                    if needed == 0 {
-                        break;
+        if let Some(p) = host.players().acting_player() {
+            if let Some(slots) = p.inventory_slots(host) {
+                for (idx, mut st) in slots {
+                    let iid = hc::item_id(host, &st);
+                    if rules::is_battery_item(&iid) {
+                        let cur = get_item_energy(&st);
+                        if cur > 0 {
+                            let take = cur.min(needed);
+                            set_item_energy(&mut st, cur - take);
+                            let _ = p.set_inventory_slot(host, idx, Some(st));
+                            needed -= take;
+                            if needed == 0 {
+                                break;
+                            }
+                        }
                     }
                 }
             }
@@ -7023,84 +6865,117 @@ pub fn consume_player_energy(game: &mut Game<'_>, cost: i32) -> bool {
     needed == 0
 }
 
-fn tick_player_equipment(game: &mut Game<'_>) {
+fn tick_player_equipment(host: &mut dyn ServerHost) {
     static LAST_EQUIP_TICK: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
-    let now = game.world.game_time;
+    let now = hc::game_time(host);
     let prev = LAST_EQUIP_TICK.load(std::sync::atomic::Ordering::Relaxed);
     if now == prev || now % 10 != 0 {
         return;
     }
     LAST_EQUIP_TICK.store(now, std::sync::atomic::Ordering::Relaxed);
 
+    let Some(player) = host.players().acting_player() else {
+        return;
+    };
+    let living = LivingRef::new(player.entity());
+    let eq_slots = [EquipmentSlot::Head, EquipmentSlot::Chest, EquipmentSlot::Legs, EquipmentSlot::Feet];
+
     // 1. Solar / Quantum Helmet passive daytime charge into worn armor, batteries & tools
-    let has_solar_helmet = game.armor[0].as_ref().is_some_and(|st| {
-        st.item.as_ref() == rules::ITEM_SOLAR_HELMET || st.item.as_ref() == rules::ITEM_QUANTUM_HELMET
+    let has_solar_helmet = living.equipment(host, EquipmentSlot::Head).is_some_and(|st| {
+        let id = hc::item_id(host, &st);
+        id == rules::ITEM_SOLAR_HELMET || id == rules::ITEM_QUANTUM_HELMET
     });
-    let is_day = (game.native_day_time().rem_euclid(24_000)) < 12_000;
+    let is_day = (hc::day_time(host).rem_euclid(24_000)) < 12_000;
     if has_solar_helmet && is_day {
         let mut charged = false;
-        for slot in game.armor.iter_mut().chain(game.inventory.iter_mut()) {
-            if let Some(st) = slot.as_mut() {
-                if let Some(cap) = rules::battery_capacity(st.item.as_ref()) {
-                    let cur = get_item_energy(st);
+        for eq in eq_slots {
+            if let Some(mut st) = living.equipment(host, eq) {
+                let id = hc::item_id(host, &st);
+                if let Some(cap) = rules::battery_capacity(&id) {
+                    let cur = get_item_energy(&st);
                     if cur < cap {
-                        set_item_energy(st, cur + 50);
+                        set_item_energy(&mut st, cur + 50);
+                        let _ = living.set_equipment(host, eq, Some(st));
                         charged = true;
                         break;
                     }
                 }
             }
         }
-        let _ = charged;
+        if !charged {
+            if let Some(slots) = player.inventory_slots(host) {
+                for (idx, mut st) in slots {
+                    let id = hc::item_id(host, &st);
+                    if let Some(cap) = rules::battery_capacity(&id) {
+                        let cur = get_item_energy(&st);
+                        if cur < cap {
+                            set_item_energy(&mut st, cur + 50);
+                            let _ = player.set_inventory_slot(host, idx, Some(st));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // 2. Portable Batteries in inventory automatically recharge worn armor & tools
+    let inv_slots = player.inventory_slots(host).unwrap_or_default();
     let mut available = 0;
-    for slot in game.inventory.iter() {
-        if let Some(st) = slot.as_ref() {
-            if rules::is_battery_item(st.item.as_ref()) {
-                available += get_item_energy(st);
-            }
+    for (_, st) in &inv_slots {
+        let id = hc::item_id(host, st);
+        if rules::is_battery_item(&id) {
+            available += get_item_energy(st);
         }
     }
     if available > 0 {
         let mut used = 0;
         let budget = available.min(400);
-        for slot in game.armor.iter_mut().chain(game.inventory.iter_mut()) {
-            if let Some(st) = slot.as_mut() {
-                let id = st.item.as_ref();
-                if !rules::is_battery_item(id) {
-                    if let Some(cap) = rules::battery_capacity(id) {
-                        let cur = get_item_energy(st);
-                        if cur < cap {
-                            let add = (budget - used).min(cap - cur);
-                            if add > 0 {
-                                set_item_energy(st, cur + add);
-                                used += add;
-                            }
+        for eq in eq_slots {
+            if used >= budget { break; }
+            if let Some(mut st) = living.equipment(host, eq) {
+                let id = hc::item_id(host, &st);
+                if !rules::is_battery_item(&id) {
+                    if let Some(cap) = rules::battery_capacity(&id) {
+                        let cur = get_item_energy(&st);
+                        let add = (budget - used).min(cap - cur);
+                        if add > 0 {
+                            set_item_energy(&mut st, cur + add);
+                            let _ = living.set_equipment(host, eq, Some(st));
+                            used += add;
                         }
                     }
                 }
             }
-            if used >= budget {
-                break;
+        }
+        for (idx, mut st) in inv_slots.clone() {
+            if used >= budget { break; }
+            let id = hc::item_id(host, &st);
+            if !rules::is_battery_item(&id) {
+                if let Some(cap) = rules::battery_capacity(&id) {
+                    let cur = get_item_energy(&st);
+                    let add = (budget - used).min(cap - cur);
+                    if add > 0 {
+                        set_item_energy(&mut st, cur + add);
+                        let _ = player.set_inventory_slot(host, idx, Some(st));
+                        used += add;
+                    }
+                }
             }
         }
         if used > 0 {
             let mut left = used;
-            for slot in game.inventory.iter_mut() {
-                if let Some(st) = slot.as_mut() {
-                    if rules::is_battery_item(st.item.as_ref()) {
-                        let cur = get_item_energy(st);
-                        let take = cur.min(left);
-                        if take > 0 {
-                            set_item_energy(st, cur - take);
-                            left -= take;
-                        }
+            for (idx, mut st) in inv_slots.clone() {
+                if left == 0 { break; }
+                let id = hc::item_id(host, &st);
+                if rules::is_battery_item(&id) {
+                    let cur = get_item_energy(&st);
+                    let take = cur.min(left);
+                    if take > 0 {
+                        set_item_energy(&mut st, cur - take);
+                        let _ = player.set_inventory_slot(host, idx, Some(st));
+                        left -= take;
                     }
-                }
-                if left == 0 {
-                    break;
                 }
             }
         }
@@ -7114,9 +6989,10 @@ fn tick_player_equipment(game: &mut Game<'_>) {
     let mut has_mag = false;
     let mut has_hover = false;
     let mut has_fire_res = false;
-    for slot in game.armor.iter() {
-        if let Some(st) = slot.as_ref() {
-            match st.item.as_ref() {
+    for eq in eq_slots {
+        if let Some(st) = living.equipment(host, eq) {
+            let id = hc::item_id(host, &st);
+            match id.as_str() {
                 rules::ITEM_INDUSTRIAL_BOOTS => jump_lvl = jump_lvl.max(0),
                 rules::ITEM_INDUSTRIAL_LEGGINGS => speed_lvl = speed_lvl.max(0),
                 rules::ITEM_INDUSTRIAL_CHESTPLATE => res_lvl = res_lvl.max(0),
@@ -7131,74 +7007,72 @@ fn tick_player_equipment(game: &mut Game<'_>) {
                     has_fire_res = true;
                 }
                 rules::ITEM_QUANTUM_HELMET => has_nv = true,
-                rules::ITEM_JETPACK_MK2 if is_jetpack_hover(st) => has_hover = true,
+                rules::ITEM_JETPACK_MK2 if is_jetpack_hover(&st) => has_hover = true,
                 _ => {}
             }
-            if has_item_module(st, "nv") {
+            if has_item_module(&st, "nv") {
                 has_nv = true;
             }
-            if has_item_module(st, "mag") {
+            if has_item_module(&st, "mag") {
                 has_mag = true;
             }
-            if has_item_module(st, "speed") {
+            if has_item_module(&st, "speed") {
                 speed_lvl = (speed_lvl + 1).max(0);
             }
         }
     }
-    let has_haste = game.held().is_some_and(|h| has_item_module(h, "speed"));
+    let has_haste = hc::acting_held(host).is_some_and(|h| has_item_module(&h, "speed"));
     let mut inv_mag_radius = 0i32;
-    for slot in game.inventory.iter() {
-        if let Some(st) = slot.as_ref() {
-            if matches!(st.item.as_ref(), rules::ITEM_ITEM_MAGNET_MK2 | rules::ITEM_ITEM_MAGNET_MK3)
-                && (game.creative || get_item_energy(st) > 0)
-            {
-                let r = if st.item.as_ref() == rules::ITEM_ITEM_MAGNET_MK3 { 28 } else { 16 };
-                inv_mag_radius = inv_mag_radius.max(r);
-            }
+    let inv_slots = player.inventory_slots(host).unwrap_or_default();
+    for (_, st) in &inv_slots {
+        let id = hc::item_id(host, st);
+        if matches!(id.as_str(), rules::ITEM_ITEM_MAGNET_MK2 | rules::ITEM_ITEM_MAGNET_MK3)
+            && (hc::acting_creative(host) || get_item_energy(st) > 0)
+        {
+            let r = if id == rules::ITEM_ITEM_MAGNET_MK3 { 28 } else { 16 };
+            inv_mag_radius = inv_mag_radius.max(r);
         }
     }
     if has_hover {
-        game.native_run_command("effect give @s minecraft:slow_falling 2 0 true");
+        hc::run_command(host, "effect give @s minecraft:slow_falling 2 0 true");
     }
     if now % 10 == 0 && inv_mag_radius > 0 {
-        game.native_run_command(&format!("tp @e[type=item,distance=..{inv_mag_radius}] @s"));
-        game.native_run_command(&format!("tp @e[type=experience_orb,distance=..{inv_mag_radius}] @s"));
+        hc::run_command(host, &format!("tp @e[type=item,distance=..{inv_mag_radius}] @s"));
+        hc::run_command(host, &format!("tp @e[type=experience_orb,distance=..{inv_mag_radius}] @s"));
     }
     if now % 20 == 0 {
         let mut qpack_bound: Option<[i32; 3]> = None;
-        for slot in game.inventory.iter() {
-            if let Some(st) = slot.as_ref() {
-                if st.item.as_ref() == rules::ITEM_QUANTUM_BACKPACK
-                    && is_qpack_on(st)
-                    && (game.creative || get_item_energy(st) >= 10)
-                {
-                    if let Some(b) = get_bound_pos(st) {
-                        qpack_bound = Some(b);
-                        break;
-                    }
+        for (_, st) in &inv_slots {
+            let id = hc::item_id(host, st);
+            if id == rules::ITEM_QUANTUM_BACKPACK
+                && is_qpack_on(st)
+                && (hc::acting_creative(host) || get_item_energy(st) >= 10)
+            {
+                if let Some(b) = get_bound_pos(st) {
+                    qpack_bound = Some(b);
+                    break;
                 }
             }
         }
         if let Some(bound) = qpack_bound {
-            for idx in 9..game.inventory.len() {
-                let is_bulk = game.inventory[idx].as_ref().is_some_and(|st| {
-                    st.count >= 64
-                        && matches!(
-                            st.item.as_ref(),
-                            "minecraft:cobblestone"
-                                | "minecraft:cobbled_deepslate"
-                                | "minecraft:dirt"
-                                | "minecraft:gravel"
-                                | "minecraft:netherrack"
-                                | "minecraft:andesite"
-                                | "minecraft:diorite"
-                                | "minecraft:granite"
-                        )
-                });
+            for (idx, st) in inv_slots {
+                if idx < 9 { continue; }
+                let id = hc::item_id(host, &st);
+                let is_bulk = st.count() >= 64
+                    && matches!(
+                        id.as_str(),
+                        "minecraft:cobblestone"
+                            | "minecraft:cobbled_deepslate"
+                            | "minecraft:dirt"
+                            | "minecraft:gravel"
+                            | "minecraft:netherrack"
+                            | "minecraft:andesite"
+                            | "minecraft:diorite"
+                            | "minecraft:granite"
+                    );
                 if is_bulk {
-                    if let Some(st) = game.inventory[idx].take() {
-                        game.inventory[idx] = insert_into_silo_controller(game, bound, st);
-                    }
+                    let rem = insert_into_silo_controller(host, bound, st);
+                    let _ = player.set_inventory_slot(host, idx, rem);
                     break;
                 }
             }
@@ -7206,35 +7080,36 @@ fn tick_player_equipment(game: &mut Game<'_>) {
     }
     if now % 40 == 0 {
         if jump_lvl >= 0 {
-            game.native_run_command(&format!("effect give @s minecraft:jump_boost 3 {jump_lvl} true"));
+            hc::run_command(host, &format!("effect give @s minecraft:jump_boost 3 {jump_lvl} true"));
         }
         if speed_lvl >= 0 {
-            game.native_run_command(&format!("effect give @s minecraft:speed 3 {speed_lvl} true"));
+            hc::run_command(host, &format!("effect give @s minecraft:speed 3 {speed_lvl} true"));
         }
         if has_haste {
-            game.native_run_command("effect give @s minecraft:haste 3 1 true");
+            hc::run_command(host, "effect give @s minecraft:haste 3 1 true");
         }
         if res_lvl >= 0 {
-            game.native_run_command(&format!("effect give @s minecraft:resistance 3 {res_lvl} true"));
+            hc::run_command(host, &format!("effect give @s minecraft:resistance 3 {res_lvl} true"));
         }
         if has_fire_res {
-            game.native_run_command("effect give @s minecraft:fire_resistance 3 0 true");
+            hc::run_command(host, "effect give @s minecraft:fire_resistance 3 0 true");
         }
         if has_nv {
-            game.native_run_command("effect give @s minecraft:night_vision 12 0 true");
+            hc::run_command(host, "effect give @s minecraft:night_vision 12 0 true");
         }
         if has_mag {
-            game.native_run_command("tp @e[type=item,distance=..8] @s");
+            hc::run_command(host, "tp @e[type=item,distance=..8] @s");
         }
     }
 }
 
-pub(in crate::game) fn tooltip(
-    _game: &Game<'_>,
+pub(crate) fn tooltip(
+    host: &dyn ClientHost,
     stack: &ItemStack,
     lines: &mut Vec<(Text, u32)>,
 ) {
-    let id = stack.item.as_ref();
+    let id_str = hc::item_id(host, stack);
+    let id = id_str.as_str();
     if !id.starts_with("rusty_factory:") {
         return;
     }
@@ -7378,51 +7253,51 @@ pub(in crate::game) fn tooltip(
     };
 
     for line in desc {
-        lines.push((Text::legacy(line), 0xFFAA_B4C4));
+        lines.push((Text::literal(*line), 0xFFAA_B4C4));
     }
 
     if let Some(cap) = rules::battery_capacity(id) {
         let cur = get_item_energy(stack);
         let pct = ((cur as f32 / cap.max(1) as f32) * 100.0).round() as i32;
         lines.push((
-            Text::legacy(&format!("§b⚡ Energía: §f{cur} / {cap} FE ({pct}%)")),
+            Text::literal(format!("§b⚡ Energía: §f{cur} / {cap} FE ({pct}%)")),
             0xFF38_F2FF,
         ));
     }
     if matches!(id, rules::ITEM_MINING_DRILL | rules::ITEM_MINING_DRILL_MK2 | rules::ITEM_OMNI_TOOL_MK2) {
         let mode = if is_drill_3x3(stack) { "3x3" } else { "1x1" };
         lines.push((
-            Text::legacy(&format!("§e⛏ Modo actual: §f{mode}")),
+            Text::literal(format!("§e⛏ Modo actual: §f{mode}")),
             0xFFFF_D038,
         ));
     } else if matches!(id, rules::ITEM_MINING_DRILL_MK3 | rules::ITEM_OMNI_TOOL_MK3) {
         let mode = if is_drill_3x3(stack) { "5x5" } else { "1x1" };
         lines.push((
-            Text::legacy(&format!("§e⛏ Modo actual: §f{mode}")),
+            Text::literal(format!("§e⛏ Modo actual: §f{mode}")),
             0xFFFF_D038,
         ));
     } else if id == rules::ITEM_JETPACK_MK2 {
         let hover = if is_jetpack_hover(stack) { "§aON" } else { "§7OFF" };
         lines.push((
-            Text::legacy(&format!("§b🚀 Modo Hover: {hover}")),
+            Text::literal(format!("§b🚀 Modo Hover: {hover}")),
             0xFF38_F2FF,
         ));
     } else if matches!(id, rules::ITEM_WIRELESS_SILO_TABLET | rules::ITEM_QUANTUM_BACKPACK) {
         if let Some(b) = get_bound_pos(stack) {
             lines.push((
-                Text::legacy(&format!("§a🔗 Vinculado a: §f[{}, {}, {}]", b[0], b[1], b[2])),
+                Text::literal(format!("§a🔗 Vinculado a: §f[{}, {}, {}]", b[0], b[1], b[2])),
                 0xFF4A_DE80,
             ));
         } else {
             lines.push((
-                Text::legacy("§7Sin vincular (Shift + Clic en Silo/Controlador)"),
+                Text::literal("§7Sin vincular (Shift + Clic en Silo/Controlador)"),
                 0xFFAA_B4C4,
             ));
         }
         if id == rules::ITEM_QUANTUM_BACKPACK {
             let st_txt = if is_qpack_on(stack) { "§aON" } else { "§7OFF" };
             lines.push((
-                Text::legacy(&format!("§d🎒 Auto-Envío: {st_txt}")),
+                Text::literal(format!("§d🎒 Auto-Envío: {st_txt}")),
                 0xFFD0_88FF,
             ));
         }
@@ -7451,20 +7326,18 @@ pub(in crate::game) fn tooltip(
     }
     if !mods.is_empty() {
         lines.push((
-            Text::legacy(&format!("§a✦ Módulos: §f{}", mods.join(", "))),
+            Text::literal(format!("§a✦ Módulos: §f{}", mods.join(", "))),
             0xFF4A_DE80,
         ));
     }
 }
 
-pub(in crate::game) fn hud(
-    game: &mut Game<'_>,
-    batch: &mut HudBatch,
-    corners: &mut horizon_client::extras_hud::Corners,
+pub(crate) fn hud(
+    host: &dyn ClientHost,
+    draw: &mut dyn DrawContext,
+    corners: &mut Corners,
 ) {
-    if !game.native_on(rules::ID) {
-        return;
-    }
+    
 
     let battery_color = |pct: f32| -> u32 {
         if pct > 50.0 {
@@ -7479,20 +7352,21 @@ pub(in crate::game) fn hud(
     };
 
     // 1. Collect held tech item (tool or portable battery)
-    let held_entry: Option<(String, i32, i32)> = game.held().and_then(|st| {
-        let cap = rules::battery_capacity(st.item.as_ref())?;
-        let cur = get_item_energy(st);
-        let label = match st.item.as_ref() {
+    let held_entry: Option<(String, i32, i32)> = hc::local_held(host).and_then(|st| {
+        let iid = hc::item_id(host, &st);
+        let cap = rules::battery_capacity(&iid)?;
+        let cur = get_item_energy(&st);
+        let label = match iid.as_str() {
             rules::ITEM_MINING_DRILL => {
-                let m = if is_drill_3x3(st) { "3x3" } else { "1x1" };
+                let m = if is_drill_3x3(&st) { "3x3" } else { "1x1" };
                 format!("Taladro ({m})")
             }
             rules::ITEM_MINING_DRILL_MK2 => {
-                let m = if is_drill_3x3(st) { "3x3" } else { "1x1" };
+                let m = if is_drill_3x3(&st) { "3x3" } else { "1x1" };
                 format!("Taladro MK2 ({m})")
             }
             rules::ITEM_MINING_DRILL_MK3 => {
-                let m = if is_drill_3x3(st) { "5x5" } else { "1x1" };
+                let m = if is_drill_3x3(&st) { "5x5" } else { "1x1" };
                 format!("Taladro MK3 ({m})")
             }
             rules::ITEM_CHAINSAW => "Motosierra".to_owned(),
@@ -7505,11 +7379,11 @@ pub(in crate::game) fn hud(
             rules::ITEM_PLASMA_SWORD_MK2 => "Sable MK2".to_owned(),
             rules::ITEM_PLASMA_SWORD_MK3 => "Sable MK3".to_owned(),
             rules::ITEM_OMNI_TOOL_MK2 => {
-                let m = if is_drill_3x3(st) { "3x3" } else { "1x1" };
+                let m = if is_drill_3x3(&st) { "3x3" } else { "1x1" };
                 format!("Omni MK2 ({m})")
             }
             rules::ITEM_OMNI_TOOL_MK3 => {
-                let m = if is_drill_3x3(st) { "5x5" } else { "1x1" };
+                let m = if is_drill_3x3(&st) { "5x5" } else { "1x1" };
                 format!("Omni MK3 ({m})")
             }
             rules::ITEM_ITEM_MAGNET_MK2 => "Imán MK2".to_owned(),
@@ -7541,12 +7415,13 @@ pub(in crate::game) fn hud(
         Some((label, cur, cap))
     });
 
-    // 2. Collect per-piece equipped tech armor from `game.armor` (0=Head, 1=Chest, 2=Legs, 3=Feet)
+    // 2. Collect per-piece equipped tech armor from `local_armor_slot` (0=Head, 1=Chest, 2=Legs, 3=Feet)
     let read_armor_slot = |slot_idx: usize| -> Option<(&'static str, i32, i32)> {
-        let st = game.armor.get(slot_idx)?.as_ref()?;
-        let cap = rules::battery_capacity(st.item.as_ref())?;
-        let cur = get_item_energy(st);
-        let short_name = match st.item.as_ref() {
+        let st = hc::local_armor_slot(host, slot_idx)?;
+        let iid = hc::item_id(host, &st);
+        let cap = rules::battery_capacity(&iid)?;
+        let cur = get_item_energy(&st);
+        let short_name = match iid.as_str() {
             rules::ITEM_SOLAR_HELMET => "Solar",
             rules::ITEM_STEEL_HELMET => "Acero",
             rules::ITEM_INDUSTRIAL_HELMET => "Casco",
@@ -7577,29 +7452,26 @@ pub(in crate::game) fn hud(
     // 3. Collect reserve portable batteries in inventory
     let mut bat_cur: i32 = 0;
     let mut bat_cap: i32 = 0;
-    for slot in game.inventory.iter().take(36) {
-        if let Some(st) = slot.as_ref() {
-            if rules::is_battery_item(st.item.as_ref()) {
-                bat_cur += get_item_energy(st);
-                bat_cap += rules::battery_capacity(st.item.as_ref()).unwrap_or(50_000);
-            }
+    for st in hc::local_inventory(host).into_iter().take(36) {
+        let iid = hc::item_id(host, &st);
+        if rules::is_battery_item(&iid) {
+            bat_cur += get_item_energy(&st);
+            bat_cap += rules::battery_capacity(&iid).unwrap_or(50_000);
         }
     }
 
     // 0. Look-At Block Info Card (Silo capacity bar Green/Yellow/Red, Geothermal/Turbine/Tesseract/UpgradeStation info)
-    if let Some(player) = &game.player {
-        let yaw_rad = (game.yaw as f64).to_radians();
-        let pitch_rad = (game.pitch as f64).to_radians();
+    if let Some(player) = host.local_player() {
+        let (yaw, pitch) = hc::local_yaw_pitch(host);
+        let yaw_rad = (yaw as f64).to_radians();
+        let pitch_rad = (pitch as f64).to_radians();
         let dir = [
             -yaw_rad.sin() * pitch_rad.cos(),
             -pitch_rad.sin(),
             yaw_rad.cos() * pitch_rad.cos(),
         ];
-        let eye = [
-            player.position.x,
-            player.position.y + f64::from(player.dimensions.eye_height),
-            player.position.z,
-        ];
+        let ppos = player.entity().position(host).unwrap_or([0.0, 0.0, 0.0]);
+        let eye = [ppos[0], ppos[1] + 1.62, ppos[2]];
         let mut hit_pos: Option<[i32; 3]> = None;
         for step in 1..=100 {
             let t = step as f64 * 0.05;
@@ -7608,7 +7480,7 @@ pub(in crate::game) fn hud(
                 (eye[1] + dir[1] * t).floor() as i32,
                 (eye[2] + dir[2] * t).floor() as i32,
             ];
-            let blk = game.native_block(cell);
+            let blk = hc::block_id_at(host, cell);
             if !matches!(blk.as_str(), "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air") {
                 if blk.starts_with("rusty_factory:") {
                     hit_pos = Some(cell);
@@ -7617,13 +7489,13 @@ pub(in crate::game) fn hud(
             }
         }
         if let Some(hp) = hit_pos {
-            let hblk = game.native_block(hp);
+            let hblk = hc::block_id_at(host, hp);
             let mut info_title = String::new();
             let mut info_sub = String::new();
             let mut bar_ratio: Option<(f32, u32)> = None;
 
-            if let Some(BlockEntity::Mod(ent)) = game.world.block_entities.get(&(hp[0], hp[1], hp[2])) {
-                if let Some(st) = load_state(ent) {
+            if let Some(st) = hc::read_machine_state(host, hp) {
+                {
                     if hblk == rules::BLOCK_INDUSTRIAL_SILO {
                         let cap = st.silo_capacity.max(2_048);
                         let fmt_k = |n: u32| if n >= 1000 { format!("{:.1}K", n as f32 / 1000.0).replace(".0K", "K") } else { format!("{n}") };
@@ -7664,20 +7536,20 @@ pub(in crate::game) fn hud(
             if !info_title.is_empty() {
                 let iw = 152.0_f32;
                 let ih = if bar_ratio.is_some() { 38.0 } else { 30.0 };
-                let (ix, iy) = corners.place(horizon_client::extras::Corner::BottomRight, iw, ih);
+                let (ix, iy) = corners.place(Corner::BottomRight, iw, ih);
                 let border_c = bar_ratio.map_or(0xFF38_F2FF, |(_, c)| c);
-                game.native_fill(batch, [ix, iy, iw, ih], 0xBE10_141C);
-                game.native_fill(batch, [ix, iy, iw, 1.5], border_c);
-                game.native_fill(batch, [ix, iy + ih - 1.5, iw, 1.5], 0xFF28_5066);
-                game.native_fill(batch, [ix, iy, 1.5, ih], border_c);
-                game.native_fill(batch, [ix + iw - 1.5, iy, 1.5, ih], 0xFF28_5066);
-                game.native_text(batch, &info_title, [ix + 6.0, iy + 5.0], 0xFFE8_EEF8, true);
-                game.native_text(batch, &info_sub, [ix + 6.0, iy + 17.0], border_c, true);
+                draw.fill( [ix, iy, iw, ih], 0xBE10_141C);
+                draw.fill( [ix, iy, iw, 1.5], border_c);
+                draw.fill( [ix, iy + ih - 1.5, iw, 1.5], 0xFF28_5066);
+                draw.fill( [ix, iy, 1.5, ih], border_c);
+                draw.fill( [ix + iw - 1.5, iy, 1.5, ih], 0xFF28_5066);
+                draw.text( &info_title, [ix + 6.0, iy + 5.0], 0xFFE8_EEF8, true);
+                draw.text( &info_sub, [ix + 6.0, iy + 17.0], border_c, true);
                 if let Some((r, bcol)) = bar_ratio {
-                    game.native_fill(batch, [ix + 6.0, iy + 29.0, iw - 12.0, 4.0], 0xFF22_2834);
+                    draw.fill( [ix + 6.0, iy + 29.0, iw - 12.0, 4.0], 0xFF22_2834);
                     let fw = ((iw - 12.0) * r).clamp(0.0, iw - 12.0);
                     if fw > 0.5 {
-                        game.native_fill(batch, [ix + 6.0, iy + 29.0, fw, 4.0], bcol);
+                        draw.fill( [ix + 6.0, iy + 29.0, fw, 4.0], bcol);
                     }
                 }
             }
@@ -7699,16 +7571,16 @@ pub(in crate::game) fn hud(
     let armor_block_h = if has_any_armor { 58.0 } else { 0.0 };
     let w = 152.0_f32;
     let h = 22.0 + armor_block_h + extra_rows as f32 * 18.0;
-    let (x, y) = corners.place(horizon_client::extras::Corner::BottomRight, w, h);
+    let (x, y) = corners.place(Corner::BottomRight, w, h);
 
     // Dark industrial background + cyan border
-    game.native_fill(batch, [x, y, w, h], 0xBE10_141C);
-    game.native_fill(batch, [x, y, w, 1.5], 0xFF38_F2FF);
-    game.native_fill(batch, [x, y + h - 1.5, w, 1.5], 0xFF28_5066);
-    game.native_fill(batch, [x, y, 1.5, h], 0xFF38_F2FF);
-    game.native_fill(batch, [x + w - 1.5, y, 1.5, h], 0xFF28_5066);
+    draw.fill( [x, y, w, h], 0xBE10_141C);
+    draw.fill( [x, y, w, 1.5], 0xFF38_F2FF);
+    draw.fill( [x, y + h - 1.5, w, 1.5], 0xFF28_5066);
+    draw.fill( [x, y, 1.5, h], 0xFF38_F2FF);
+    draw.fill( [x + w - 1.5, y, 1.5, h], 0xFF28_5066);
 
-    game.native_text(batch, "⚡ ESTADO TECH", [x + 6.0, y + 5.0], 0xFF38_F2FF, true);
+    draw.text( "⚡ ESTADO TECH", [x + 6.0, y + 5.0], 0xFF38_F2FF, true);
 
     let mut ry = y + 19.0;
 
@@ -7735,63 +7607,62 @@ pub(in crate::game) fn hud(
         let (feet_col, feet_txt) = piece_style(feet);
 
         // Thick black outer silhouette backing (like reference figure)
-        game.native_fill(batch, [fx + 7.0, fy, 16.0, 12.0], sil_black);       // Head silhouette
-        game.native_fill(batch, [fx, fy + 11.0, 30.0, 18.0], sil_black);     // Torso + Arms silhouette
-        game.native_fill(batch, [fx + 6.0, fy + 29.0, 18.0, 23.0], sil_black); // Legs + Boots silhouette
+        draw.fill( [fx + 7.0, fy, 16.0, 12.0], sil_black);       // Head silhouette
+        draw.fill( [fx, fy + 11.0, 30.0, 18.0], sil_black);     // Torso + Arms silhouette
+        draw.fill( [fx + 6.0, fy + 29.0, 18.0, 23.0], sil_black); // Legs + Boots silhouette
 
-        let draw_seg = |g: &Game<'_>, b: &mut HudBatch, px: f32, py: f32, pw: f32, ph: f32, col: u32, lit: bool| {
-            g.native_fill(b, [px, py, pw, ph], col);
+        let draw_seg = |b: &mut dyn DrawContext, px: f32, py: f32, pw: f32, ph: f32, col: u32, lit: bool| {
+            b.fill( [px, py, pw, ph], col);
             if lit {
-                g.native_fill(b, [px, py, pw, 1.0], 0x44FF_FFFF);
+                b.fill( [px, py, pw, 1.0], 0x44FF_FFFF);
             }
         };
 
         // Head
-        draw_seg(game, batch, fx + 9.0, fy + 2.0, 12.0, 9.0, head_col, head.is_some());
-        game.native_text(batch, &head_txt, [tx, fy + 2.0], if head.is_some() { head_col } else { 0xFF55_6070 }, true);
+        draw_seg(draw, fx + 9.0, fy + 2.0, 12.0, 9.0, head_col, head.is_some());
+        draw.text( &head_txt, [tx, fy + 2.0], if head.is_some() { head_col } else { 0xFF55_6070 }, true);
 
         // Chest + Arms
-        draw_seg(game, batch, fx + 2.0, fy + 13.0, 4.0, 14.0, chest_col, chest.is_some());
-        draw_seg(game, batch, fx + 8.0, fy + 13.0, 14.0, 14.0, chest_col, chest.is_some());
-        draw_seg(game, batch, fx + 24.0, fy + 13.0, 4.0, 14.0, chest_col, chest.is_some());
-        game.native_text(batch, &chest_txt, [tx, fy + 16.0], if chest.is_some() { chest_col } else { 0xFF55_6070 }, true);
+        draw_seg(draw, fx + 2.0, fy + 13.0, 4.0, 14.0, chest_col, chest.is_some());
+        draw_seg(draw, fx + 8.0, fy + 13.0, 14.0, 14.0, chest_col, chest.is_some());
+        draw_seg(draw, fx + 24.0, fy + 13.0, 4.0, 14.0, chest_col, chest.is_some());
+        draw.text( &chest_txt, [tx, fy + 16.0], if chest.is_some() { chest_col } else { 0xFF55_6070 }, true);
 
         // Legs
-        draw_seg(game, batch, fx + 8.0, fy + 29.0, 6.0, 13.0, legs_col, legs.is_some());
-        draw_seg(game, batch, fx + 16.0, fy + 29.0, 6.0, 13.0, legs_col, legs.is_some());
-        game.native_text(batch, &legs_txt, [tx, fy + 31.0], if legs.is_some() { legs_col } else { 0xFF55_6070 }, true);
+        draw_seg(draw, fx + 8.0, fy + 29.0, 6.0, 13.0, legs_col, legs.is_some());
+        draw_seg(draw, fx + 16.0, fy + 29.0, 6.0, 13.0, legs_col, legs.is_some());
+        draw.text( &legs_txt, [tx, fy + 31.0], if legs.is_some() { legs_col } else { 0xFF55_6070 }, true);
 
         // Boots
-        draw_seg(game, batch, fx + 8.0, fy + 44.0, 6.0, 6.0, feet_col, feet.is_some());
-        draw_seg(game, batch, fx + 16.0, fy + 44.0, 6.0, 6.0, feet_col, feet.is_some());
-        game.native_text(batch, &feet_txt, [tx, fy + 43.0], if feet.is_some() { feet_col } else { 0xFF55_6070 }, true);
+        draw_seg(draw, fx + 8.0, fy + 44.0, 6.0, 6.0, feet_col, feet.is_some());
+        draw_seg(draw, fx + 16.0, fy + 44.0, 6.0, 6.0, feet_col, feet.is_some());
+        draw.text( &feet_txt, [tx, fy + 43.0], if feet.is_some() { feet_col } else { 0xFF55_6070 }, true);
 
         ry += armor_block_h;
     }
 
-    let draw_bar = |g: &Game<'_>, b: &mut HudBatch, label: &str, cur: i32, cap: i32, row_y: f32| {
+    let draw_bar = |b: &mut dyn DrawContext, label: &str, cur: i32, cap: i32, row_y: f32| {
         let pct = ((cur as f32 / cap.max(1) as f32) * 100.0).clamp(0.0, 100.0);
         let col = battery_color(pct);
-        g.native_text(
-            b,
+        b.text(
             &format!("{label}: {}%", pct as i32),
             [x + 6.0, row_y],
             col,
             true,
         );
-        g.native_fill(b, [x + 6.0, row_y + 10.0, w - 12.0, 4.0], 0xFF22_2834);
+        b.fill( [x + 6.0, row_y + 10.0, w - 12.0, 4.0], 0xFF22_2834);
         let fill_w = ((w - 12.0) * (pct / 100.0)).clamp(0.0, w - 12.0);
         if fill_w > 0.5 {
-            g.native_fill(b, [x + 6.0, row_y + 10.0, fill_w, 4.0], col);
+            b.fill( [x + 6.0, row_y + 10.0, fill_w, 4.0], col);
         }
     };
 
     if let Some((ref label, cur, cap)) = held_entry {
-        draw_bar(game, batch, label, cur, cap, ry);
+        draw_bar(draw, label, cur, cap, ry);
         ry += 18.0;
     }
     if bat_cap > 0 {
-        draw_bar(game, batch, "Baterías", bat_cur, bat_cap, ry);
+        draw_bar(draw, "Baterías", bat_cur, bat_cap, ry);
     }
 }
 
@@ -7807,24 +7678,23 @@ fn belt_filter_matches(filter: &str, item: &str, blacklist: bool) -> bool {
 }
 
 fn has_item_module(stack: &ItemStack, code: &str) -> bool {
-    let key = horizon_world::nbt::JavaString::from("rf_modules");
-    stack
-        .custom_data()
+    let key = "rf_modules".into();
+    hc::get_custom_data(stack)
         .and_then(|c| c.get(&key))
         .and_then(|t| match t {
-            horizon_world::nbt::Tag::String(s) => s.to_string().ok(),
+            Tag::String(s) => s.to_string().ok(),
             _ => None,
         })
         .is_some_and(|s| s.split(',').any(|m| m == code))
 }
 
 fn add_item_module(stack: &mut ItemStack, code: &str) {
-    let key = horizon_world::nbt::JavaString::from("rf_modules");
-    let mut map = stack.custom_data().cloned().unwrap_or_default();
+    let key = "rf_modules".into();
+    let mut map = hc::get_custom_data(stack).cloned().unwrap_or_default();
     let existing = map
         .get(&key)
         .and_then(|t| match t {
-            horizon_world::nbt::Tag::String(s) => s.to_string().ok(),
+            Tag::String(s) => s.to_string().ok(),
             _ => None,
         })
         .unwrap_or_default();
@@ -7836,75 +7706,65 @@ fn add_item_module(stack: &mut ItemStack, code: &str) {
         };
         map.insert(
             key,
-            horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(next.as_str())),
+            Tag::String(next.as_str().into()),
         );
-        stack
-            .data_mut()
-            .set_other("minecraft:custom_data", Some(horizon_world::nbt::Tag::Compound(map)));
+        hc::set_custom_data(stack, map);
     }
 }
 
 fn is_jetpack_hover(stack: &ItemStack) -> bool {
-    let key = horizon_world::nbt::JavaString::from("hover");
-    stack
-        .custom_data()
+    let key = "hover".into();
+    hc::get_custom_data(stack)
         .and_then(|c| c.get(&key))
         .and_then(|t| match t {
-            horizon_world::nbt::Tag::Byte(v) => Some(*v != 0),
+            Tag::Byte(v) => Some(*v != 0),
             _ => None,
         })
         .unwrap_or(false)
 }
 
 fn set_jetpack_hover(stack: &mut ItemStack, hover: bool) {
-    let mut map = stack.custom_data().cloned().unwrap_or_default();
+    let mut map = hc::get_custom_data(stack).cloned().unwrap_or_default();
     map.insert(
-        horizon_world::nbt::JavaString::from("hover"),
-        horizon_world::nbt::Tag::Byte(if hover { 1 } else { 0 }),
+        "hover".into(),
+        Tag::Byte(if hover { 1 } else { 0 }),
     );
-    stack
-        .data_mut()
-        .set_other("minecraft:custom_data", Some(horizon_world::nbt::Tag::Compound(map)));
+    hc::set_custom_data(stack, map);
 }
 
 fn get_bound_pos(stack: &ItemStack) -> Option<[i32; 3]> {
-    let c = stack.custom_data()?;
-    let read_i = |k: &str| match c.get(&horizon_world::nbt::JavaString::from(k)) {
-        Some(horizon_world::nbt::Tag::Int(v)) => Some(*v),
+    let c = hc::get_custom_data(stack)?;
+    let read_i = |k: &str| match c.get(&k.into()) {
+        Some(Tag::Int(v)) => Some(*v),
         _ => None,
     };
     Some([read_i("bind_x")?, read_i("bind_y")?, read_i("bind_z")?])
 }
 
 fn set_bound_pos(stack: &mut ItemStack, pos: [i32; 3]) {
-    let mut map = stack.custom_data().cloned().unwrap_or_default();
-    map.insert(horizon_world::nbt::JavaString::from("bind_x"), horizon_world::nbt::Tag::Int(pos[0]));
-    map.insert(horizon_world::nbt::JavaString::from("bind_y"), horizon_world::nbt::Tag::Int(pos[1]));
-    map.insert(horizon_world::nbt::JavaString::from("bind_z"), horizon_world::nbt::Tag::Int(pos[2]));
-    stack
-        .data_mut()
-        .set_other("minecraft:custom_data", Some(horizon_world::nbt::Tag::Compound(map)));
+    let mut map = hc::get_custom_data(stack).cloned().unwrap_or_default();
+    map.insert("bind_x".into(), Tag::Int(pos[0]));
+    map.insert("bind_y".into(), Tag::Int(pos[1]));
+    map.insert("bind_z".into(), Tag::Int(pos[2]));
+    hc::set_custom_data(stack, map);
 }
 
 fn is_qpack_on(stack: &ItemStack) -> bool {
-    let key = horizon_world::nbt::JavaString::from("qpack_on");
-    stack
-        .custom_data()
+    let key = "qpack_on".into();
+    hc::get_custom_data(stack)
         .and_then(|c| c.get(&key))
         .and_then(|t| match t {
-            horizon_world::nbt::Tag::Byte(v) => Some(*v != 0),
+            Tag::Byte(v) => Some(*v != 0),
             _ => None,
         })
         .unwrap_or(true)
 }
 
 fn set_qpack_on(stack: &mut ItemStack, on: bool) {
-    let mut map = stack.custom_data().cloned().unwrap_or_default();
+    let mut map = hc::get_custom_data(stack).cloned().unwrap_or_default();
     map.insert(
-        horizon_world::nbt::JavaString::from("qpack_on"),
-        horizon_world::nbt::Tag::Byte(if on { 1 } else { 0 }),
+        "qpack_on".into(),
+        Tag::Byte(if on { 1 } else { 0 }),
     );
-    stack
-        .data_mut()
-        .set_other("minecraft:custom_data", Some(horizon_world::nbt::Tag::Compound(map)));
+    hc::set_custom_data(stack, map);
 }

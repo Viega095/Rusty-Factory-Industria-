@@ -3,7 +3,12 @@ name = "Rusty Factory"
 version = "1.0.0"
 description = "Full industrial & rubber-tree automation mod for Horizon: Rubber Trees with Sap Cavities, Treetap, Sap Extractor, Vulcanizer, Bio-Generator, 3D Quarry, 3D Auto Harvester, Solar Panels, 100k FE Energy Bank, Item Pipes & 3D Conveyor Belts."
 authors = ["Chinis"]
+license = "MIT"
 api = "0.2"
 side = "both"
 capabilities = ["registries"]
-namespaces = []
+
+[native]
+game = "26.3"
+horizon = "0b14f8acfd97fa2c750e42795249dcc981178ca4"
+mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"

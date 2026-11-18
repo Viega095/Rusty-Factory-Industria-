@@ -1,5 +1,7 @@
 /target
 /dist
+/.horizon
+*.hmod
 __pycache__/
 *.py
 *.pyc
