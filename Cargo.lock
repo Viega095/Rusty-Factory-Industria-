@@ -242,8 +242,6 @@ name = "rusty_factory"
 version = "1.0.0"
 dependencies = [
  "horizon-mod-api",
- "serde",
- "serde_json",
 ]
 
 [[package]]

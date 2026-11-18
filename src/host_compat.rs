@@ -144,6 +144,90 @@ pub fn extract_item_slot(
     .ok()
 }
 
+pub fn machine_state_to_tag(s: &MachineState) -> Tag {
+    let mut c = Compound::new();
+    c.insert("kind".into(), Tag::Byte(s.kind.to_u8() as i8));
+    c.insert("energy".into(), Tag::Int(s.energy));
+    c.insert("progress".into(), Tag::Int(s.progress));
+    c.insert("burn_left".into(), Tag::Int(s.burn_left));
+    c.insert("burn_max".into(), Tag::Int(s.burn_max));
+    c.insert("enabled".into(), Tag::Byte(i8::from(s.enabled)));
+    c.insert("auto_io".into(), Tag::Byte(i8::from(s.auto_io)));
+    c.insert("q_rad".into(), Tag::Int(s.quarry_radius));
+    c.insert("q_cur".into(), Tag::Int(s.quarry_cursor));
+    c.insert("q_y".into(), Tag::Int(s.quarry_y_offset));
+    c.insert("q_mined".into(), Tag::Int(s.quarry_mined));
+    c.insert("last_t".into(), Tag::IntArray(s.last_target.to_vec()));
+    c.insert("b_item".into(), Tag::String(s.belt_item.as_str().into()));
+    c.insert("b_cnt".into(), Tag::Int(s.belt_count as i32));
+    c.insert("p_from".into(), Tag::Byte(s.pipe_from as i8));
+    c.insert("p_to".into(), Tag::Byte(s.pipe_to as i8));
+    c.insert("p_tgt".into(), Tag::IntArray(s.pipe_target.to_vec()));
+    c.insert("p_has".into(), Tag::Byte(i8::from(s.pipe_has_target)));
+    c.insert("sf0".into(), Tag::String(s.splitter_filters[0].as_str().into()));
+    c.insert("sf1".into(), Tag::String(s.splitter_filters[1].as_str().into()));
+    c.insert("sf2".into(), Tag::String(s.splitter_filters[2].as_str().into()));
+    c.insert("bf_att".into(), Tag::Byte(i8::from(s.belt_filter_attached)));
+    c.insert("bf_blk".into(), Tag::Byte(i8::from(s.belt_filter_blacklist)));
+    c.insert("s_cap".into(), Tag::Int(s.silo_capacity as i32));
+    c.insert("f_kind".into(), Tag::String(s.fluid_kind.as_str().into()));
+    c.insert("f_amt".into(), Tag::Int(s.fluid_amount));
+    Tag::Compound(c)
+}
+
+pub fn machine_state_from_tag(tag: &Tag) -> Option<MachineState> {
+    let Tag::Compound(c) = tag else {
+        return None;
+    };
+    let get_i = |k: &str, def: i32| match c.get(&k.into()) {
+        Some(Tag::Int(v)) => *v,
+        _ => def,
+    };
+    let get_b = |k: &str, def: bool| match c.get(&k.into()) {
+        Some(Tag::Byte(v)) => *v != 0,
+        _ => def,
+    };
+    let get_u8 = |k: &str, def: u8| match c.get(&k.into()) {
+        Some(Tag::Byte(v)) => *v as u8,
+        _ => def,
+    };
+    let get_s = |k: &str| match c.get(&k.into()) {
+        Some(Tag::String(s)) => s.to_string().unwrap_or_default(),
+        _ => String::new(),
+    };
+    let get_pos = |k: &str| match c.get(&k.into()) {
+        Some(Tag::IntArray(a)) if a.len() == 3 => [a[0], a[1], a[2]],
+        _ => [0, 0, 0],
+    };
+    let kind = crate::runtime::MachineKind::from_u8(get_u8("kind", 255))?;
+    Some(MachineState {
+        kind,
+        energy: get_i("energy", 0),
+        progress: get_i("progress", 0),
+        burn_left: get_i("burn_left", 0),
+        burn_max: get_i("burn_max", 0),
+        enabled: get_b("enabled", true),
+        auto_io: get_b("auto_io", true),
+        quarry_radius: get_i("q_rad", 2),
+        quarry_cursor: get_i("q_cur", 0),
+        quarry_y_offset: get_i("q_y", 0),
+        quarry_mined: get_i("q_mined", 0),
+        last_target: get_pos("last_t"),
+        belt_item: get_s("b_item"),
+        belt_count: get_i("b_cnt", 0).max(0) as u32,
+        pipe_from: get_u8("p_from", 6),
+        pipe_to: get_u8("p_to", 6),
+        pipe_target: get_pos("p_tgt"),
+        pipe_has_target: get_b("p_has", false),
+        splitter_filters: [get_s("sf0"), get_s("sf1"), get_s("sf2")],
+        belt_filter_attached: get_b("bf_att", false),
+        belt_filter_blacklist: get_b("bf_blk", false),
+        silo_capacity: get_i("s_cap", 0).max(0) as u32,
+        fluid_kind: get_s("f_kind"),
+        fluid_amount: get_i("f_amt", 0),
+    })
+}
+
 /// Reads and mutates a `MachineState` stored in a loaded block entity at `pos`, persisting via `replace_data`.
 pub fn with_machine_state<R>(
     host: &mut dyn ServerHost,
@@ -154,15 +238,10 @@ pub fn with_machine_state<R>(
     let level = host.level(dim)?;
     let be = host.block_entity(level, pos)?;
     let mut nbt = be.data(host)?;
-    let mut state: MachineState = match nbt.get(&STATE_TAG.into()) {
-        Some(Tag::ByteArray(bytes)) => serde_json::from_slice(bytes).ok()?,
-        _ => return None,
-    };
+    let mut state = machine_state_from_tag(nbt.get(&STATE_TAG.into())?)?;
     let out = f(&mut state);
-    if let Ok(bytes) = serde_json::to_vec(&state) {
-        nbt.insert(STATE_TAG.into(), Tag::ByteArray(bytes));
-        let _ = be.replace_data(host, nbt);
-    }
+    nbt.insert(STATE_TAG.into(), machine_state_to_tag(&state));
+    let _ = be.replace_data(host, nbt);
     Some(out)
 }
 
@@ -172,10 +251,7 @@ pub fn read_machine_state(host: &dyn Host, pos: [i32; 3]) -> Option<MachineState
     let level = host.level(dim)?;
     let be = host.block_entity(level, pos)?;
     let nbt = be.data(host)?;
-    match nbt.get(&STATE_TAG.into()) {
-        Some(Tag::ByteArray(bytes)) => serde_json::from_slice(bytes).ok(),
-        _ => None,
-    }
+    machine_state_from_tag(nbt.get(&STATE_TAG.into())?)
 }
 
 /// Runs a server command line.

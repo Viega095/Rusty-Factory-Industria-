@@ -1,7 +1,6 @@
 // Pure Rust logic for the "Rusty Factory" (rusty_factory) Horizon native mod.
 // No engine imports here so `cargo test` runs standalone in milliseconds.
 
-use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
 pub const ID: &str = "rusty_factory";
@@ -332,14 +331,14 @@ pub const SLOT_FUEL: usize = 1;
 pub const SLOT_OUTPUT: usize = 2;
 pub const SLOT_UPGRADE: usize = 3;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MachineTier {
     Tier1,    // Basic machinery / Early game
     Tier2,    // Advanced industrial machinery
     Storage,  // Energy storage modular banks
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MachineKind {
     CoalGenerator,
     BioGenerator,
@@ -385,6 +384,57 @@ pub enum MachineKind {
 }
 
 impl MachineKind {
+    pub const fn to_u8(self) -> u8 {
+        self as u8
+    }
+
+    pub const fn from_u8(v: u8) -> Option<Self> {
+        match v {
+            0 => Some(Self::CoalGenerator),
+            1 => Some(Self::BioGenerator),
+            2 => Some(Self::SolarGenerator),
+            3 => Some(Self::EnergyBank),
+            4 => Some(Self::ItemExtractor),
+            5 => Some(Self::ElectricCrusher),
+            6 => Some(Self::ElectricFurnace),
+            7 => Some(Self::MechanicalPress),
+            8 => Some(Self::IndustrialAssembler),
+            9 => Some(Self::Vulcanizer),
+            10 => Some(Self::SapExtractor),
+            11 => Some(Self::Quarry),
+            12 => Some(Self::AutoHarvester),
+            13 => Some(Self::BlockBreaker),
+            14 => Some(Self::BlockPlacer),
+            15 => Some(Self::ConveyorBelt),
+            16 => Some(Self::ItemPipe),
+            17 => Some(Self::FluidPipe),
+            18 => Some(Self::ItemSplitter),
+            19 => Some(Self::EnergyMonitor),
+            20 => Some(Self::FluidTank),
+            21 => Some(Self::SteamBoiler),
+            22 => Some(Self::FluidPump),
+            23 => Some(Self::VoidTrashCan),
+            24 => Some(Self::EnergyRelay),
+            25 => Some(Self::ChargingPad),
+            26 => Some(Self::AlloySmelter),
+            27 => Some(Self::UpgradeStation),
+            28 => Some(Self::GeothermalGenerator),
+            29 => Some(Self::SteamTurbine),
+            30 => Some(Self::Tesseract),
+            31 => Some(Self::IndustrialSilo),
+            32 => Some(Self::SiloController),
+            33 => Some(Self::SiloCraftingTerminal),
+            34 => Some(Self::NuclearReactor),
+            35 => Some(Self::WindTurbine),
+            36 => Some(Self::HydroponicChamber),
+            37 => Some(Self::LaserTurret),
+            38 => Some(Self::WirelessCharger),
+            39 => Some(Self::TeleporterPad),
+            40 => Some(Self::Recycler),
+            _ => None,
+        }
+    }
+
     pub fn from_block_id(block: &str) -> Option<Self> {
         match block {
             BLOCK_GENERATOR => Some(Self::CoalGenerator),
@@ -734,7 +784,7 @@ pub fn fluid_name_from_code(code: i32) -> &'static str {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MachineState {
     pub kind: MachineKind,
     pub energy: i32,
@@ -742,41 +792,23 @@ pub struct MachineState {
     pub burn_left: i32,
     pub burn_max: i32,
     pub enabled: bool,
-    #[serde(default = "default_true")]
     pub auto_io: bool,
-    #[serde(default = "default_quarry_radius")]
     pub quarry_radius: i32,
-    #[serde(default)]
     pub quarry_cursor: i32,
-    #[serde(default)]
     pub quarry_y_offset: i32,
-    #[serde(default)]
     pub quarry_mined: i32,
-    #[serde(default)]
     pub last_target: [i32; 3],
-    #[serde(default)]
     pub belt_item: String,
-    #[serde(default)]
     pub belt_count: u32,
-    #[serde(default)]
     pub pipe_from: u8,
-    #[serde(default)]
     pub pipe_to: u8,
-    #[serde(default)]
     pub pipe_target: [i32; 3],
-    #[serde(default)]
     pub pipe_has_target: bool,
-    #[serde(default)]
     pub splitter_filters: [String; 3],
-    #[serde(default)]
     pub belt_filter_attached: bool,
-    #[serde(default)]
     pub belt_filter_blacklist: bool,
-    #[serde(default)]
     pub silo_capacity: u32,
-    #[serde(default)]
     pub fluid_kind: String,
-    #[serde(default)]
     pub fluid_amount: i32,
 }
 

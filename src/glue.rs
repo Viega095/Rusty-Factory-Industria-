@@ -21,16 +21,13 @@ fn state_key() -> String {
 }
 
 pub(crate) fn load_state(entity: &impl hc::HasNbt) -> Option<MachineState> {
-    match entity.nbt().get(&STATE_TAG.into()) {
-        Some(Tag::ByteArray(bytes)) => serde_json::from_slice(bytes).ok(),
-        _ => None,
-    }
+    hc::machine_state_from_tag(entity.nbt().get(&STATE_TAG.into())?)
 }
 
 pub(crate) fn store_state(entity: &mut impl hc::HasNbt, state: &MachineState) {
-    if let Ok(bytes) = serde_json::to_vec(state) {
-        entity.nbt_mut().insert(STATE_TAG.into(), Tag::ByteArray(bytes));
-    }
+    entity
+        .nbt_mut()
+        .insert(STATE_TAG.into(), hc::machine_state_to_tag(state));
 }
 
 pub(crate) fn all_block_entity_blocks() -> &'static [&'static str] {
@@ -98,9 +95,10 @@ pub(crate) fn block_entity(block: &str) -> Option<Compound> {
     if MachineKind::from_block_id(block).is_some() || is_tree_tick_block {
         let mut nbt = Compound::default();
         if let Some(kind) = MachineKind::from_block_id(block) {
-            if let Ok(bytes) = serde_json::to_vec(&MachineState::new(kind)) {
-                nbt.insert(STATE_TAG.into(), Tag::ByteArray(bytes));
-            }
+            nbt.insert(
+                STATE_TAG.into(),
+                hc::machine_state_to_tag(&MachineState::new(kind)),
+            );
         }
         Some(nbt)
     } else {
