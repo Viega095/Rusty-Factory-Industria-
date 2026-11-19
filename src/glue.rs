@@ -6007,7 +6007,7 @@ fn draw_button(
     draw.text(
         label,
         [ox + bx + (bw - tw) / 2.0, oy + by + 3.0],
-        0xFF_FFFF,
+        0xFFFF_FFFF,
         false,
     );
 }
@@ -6149,16 +6149,16 @@ pub(crate) fn screen_draw(
     };
     let raw_title = hc::lang_get(kind.title_key());
     let title = format!("{raw_title} {tier_tag}");
-    draw.text( &title, [x + 7.0, y + 5.0], 0xF0_F4F8, true);
+    draw.text( &title, [x + 7.0, y + 5.0], 0xFFF0_F4F8, true);
 
     // 2. Status line below header
     let status_text = hc::lang_get(&format!("rusty_factory.status.{status_code}"));
     let status_color = if status_code == StepStatus::Working as i32 {
-        0x1B_6E28
+        0xFF1B_6E28
     } else if status_code == StepStatus::Paused as i32 {
-        0x66_6666
+        0xFF66_6666
     } else {
-        0x9E_2A2B
+        0xFF9E_2A2B
     };
     draw.text( &status_text, [x + 8.0, y + 20.0], status_color, false);
 
@@ -6172,8 +6172,8 @@ pub(crate) fn screen_draw(
         } else {
             format!("#{quarry_mined}")
         };
-        draw.text( &area_txt, [x + 60.0, y + 30.0], 0x55_FFAA, false);
-        draw.text( &y_txt, [x + 60.0, y + 42.0], 0x38_F2FF, false);
+        draw.text( &area_txt, [x + 60.0, y + 30.0], 0xFF55_FFAA, false);
+        draw.text( &y_txt, [x + 60.0, y + 42.0], 0xFF38_F2FF, false);
     } else if matches!(kind, MachineKind::CoalGenerator | MachineKind::BioGenerator | MachineKind::SteamBoiler) {
         let burn_left = get(8).max(0);
         let burn_secs = burn_left / 20;
@@ -6189,25 +6189,25 @@ pub(crate) fn screen_draw(
         } else {
             "0t".to_string()
         };
-        draw.text( &tick_txt, [x + 85.0, y + 30.0], 0xFF_FFFF, false);
+        draw.text( &tick_txt, [x + 85.0, y + 30.0], 0xFFFF_FFFF, false);
         draw.fill( [x + 76.0, y + 41.0, 26.0, 5.0], 0xFF22_262E);
         let bar_w = (26.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 26.0);
         if bar_w > 0.0 {
             draw.fill( [x + 76.0, y + 41.0, bar_w, 5.0], accent_col);
         }
         let sec_txt = format!("{burn_secs}s");
-        draw.text( &sec_txt, [x + 79.0, y + 48.0], 0xAA_B8C8, false);
+        draw.text( &sec_txt, [x + 79.0, y + 48.0], 0xFFAA_B8C8, false);
 
         // Module B: Stored & Generated Energy Readout [108, 28..168, 54]
-        draw.text( &format!("Alm:{energy}"), [x + 111.0, y + 31.0], 0x70_E8FF, false);
+        draw.text( &format!("Alm:{energy}"), [x + 111.0, y + 31.0], 0xFF70_E8FF, false);
         draw.text( &format!("Gen:+{rate}/t"), [x + 111.0, y + 43.0], bolt_col, false);
     } else if kind == MachineKind::SolarGenerator {
         let is_3x3 = get(7) != 0;
         let tag = if is_3x3 { "☀ MATRIZ 3x3 (x2)" } else { "☀ PANEL 1x1" };
-        let tag_col = if is_3x3 { 0x55_FFAA } else { 0xFF_D166 };
+        let tag_col = if is_3x3 { 0xFF55_FFAA } else { 0xFFFF_D166 };
         draw.text( tag, [x + 30.0, y + 30.0], tag_col, false);
-        draw.text( &format!("Gen: +{rate} FE/t"), [x + 30.0, y + 40.0], 0xFF_E066, false);
-        draw.text( &format!("Alm: {energy}/{max_energy}"), [x + 30.0, y + 49.0], 0x70_E8FF, false);
+        draw.text( &format!("Gen: +{rate} FE/t"), [x + 30.0, y + 40.0], 0xFFFF_E066, false);
+        draw.text( &format!("Alm: {energy}/{max_energy}"), [x + 30.0, y + 49.0], 0xFF70_E8FF, false);
     } else if kind == MachineKind::EnergyBank {
         let cells = get(7).max(1);
         draw.fill( [x + 30.0, y + 34.0, 84.0, 9.0], 0xFF20_2832);
@@ -6215,14 +6215,14 @@ pub(crate) fn screen_draw(
         if bar_w > 0.0 {
             draw.fill( [x + 30.0, y + 34.0, bar_w, 9.0], 0xFF00_E5FF);
         }
-        draw.text( &format!("{progress_pct}% ({cells} cel)"), [x + 32.0, y + 25.0], 0x70_E8FF, false);
-        draw.text( &format!("{energy}/{max_energy} FE"), [x + 30.0, y + 46.0], 0xFF_FFFF, false);
+        draw.text( &format!("{progress_pct}% ({cells} cel)"), [x + 32.0, y + 25.0], 0xFF70_E8FF, false);
+        draw.text( &format!("{energy}/{max_energy} FE"), [x + 30.0, y + 46.0], 0xFFFF_FFFF, false);
     } else if kind == MachineKind::ChargingPad {
         draw.text( "⚡", [x + 56.0, y + 39.0], 0xFF00_FFAA, false);
         draw.text( "⚡", [x + 112.0, y + 39.0], 0xFF00_FFAA, false);
         draw.text( "INDUCCIÓN", [x + 62.0, y + 23.0], 0xFF00_FFAA, false);
     } else if kind == MachineKind::VoidTrashCan {
-        draw.text( "VACÍO", [x + 74.0, y + 23.0], 0xDD_88FF, false);
+        draw.text( "VACÍO", [x + 74.0, y + 23.0], 0xFFDD_88FF, false);
     } else if kind == MachineKind::FluidTank {
         let fcode = get(7);
         let famount = get(8);
@@ -6242,20 +6242,20 @@ pub(crate) fn screen_draw(
             draw.fill( [x + 12.0, y + 26.0 + (30.0 - fh), 14.0, fh], fcol);
         }
         draw.text( &format!("Fluido: {fname}"), [x + 78.0, y + 31.0], fcol, false);
-        draw.text( &format!("{famount}/{fmax} mB"), [x + 78.0, y + 43.0], 0xFF_FFFF, false);
+        draw.text( &format!("{famount}/{fmax} mB"), [x + 78.0, y + 43.0], 0xFFFF_FFFF, false);
     } else if kind == MachineKind::FluidPump {
         let fcode = get(7);
         let rate_mb = get(8);
         let fname = if fcode == 0 { "Sin fuente" } else { rules::fluid_name_from_code(fcode) };
-        draw.text( &format!("Fuente: {fname}"), [x + 30.0, y + 31.0], 0x38_D6FF, false);
-        draw.text( &format!("Bombeo: {rate_mb} mB/t"), [x + 30.0, y + 43.0], 0x55_FFAA, false);
+        draw.text( &format!("Fuente: {fname}"), [x + 30.0, y + 31.0], 0xFF38_D6FF, false);
+        draw.text( &format!("Bombeo: {rate_mb} mB/t"), [x + 30.0, y + 43.0], 0xFF55_FFAA, false);
     } else if kind == MachineKind::AlloySmelter {
         draw.fill( [x + 76.0, y + 39.0, 30.0, 8.0], 0xFF3A_3F48);
         let bar_w = (30.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 30.0);
         if bar_w > 0.0 {
             draw.fill( [x + 76.0, y + 39.0, bar_w, 8.0], 0xFFFF_7722);
         }
-        draw.text( "➔", [x + 87.0, y + 37.0], 0xFF_FFFF, false);
+        draw.text( "➔", [x + 87.0, y + 37.0], 0xFFFF_FFFF, false);
     } else {
         draw.fill( [x + 64.0, y + 39.0, 34.0, 8.0], 0xFF3A_3F48);
         let bar_w = (34.0 * (progress_pct as f32 / 100.0)).clamp(0.0, 34.0);
@@ -6289,31 +6289,31 @@ pub(crate) fn screen_draw(
     if kind == MachineKind::Quarry {
         let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
         let line2 = format!("Minados: {quarry_mined} blq | Prof: Y={quarry_y}");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF_D166, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFFF_D166, false);
     } else if kind == MachineKind::AutoHarvester {
         let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
         let line2 = format!("Cosechados: {quarry_mined} cultivos/troncos");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0x66_FF88, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF66_FF88, false);
     } else if kind == MachineKind::CoalGenerator {
         let burn_left = get(8).max(0);
         let line1 = format!("Almacenada: {energy}/{max_energy} FE | +{rate} FE/t");
         let line2 = format!("Combustión: {burn_left} ticks ({progress_pct}%)");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF_9E00, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFFF_9E00, false);
     } else if kind == MachineKind::BioGenerator {
         let burn_left = get(8).max(0);
         let line1 = format!("Almacenada: {energy}/{max_energy} FE | +{rate} FE/t");
         let line2 = format!("Biomasa: {burn_left} ticks ({progress_pct}%)");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0x70_E000, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF70_E000, false);
     } else if kind == MachineKind::SteamBoiler {
         let burn_left = get(8).max(0);
         let line1 = format!("Almacenada: {energy}/{max_energy} FE | +{rate} FE/t");
         let line2 = format!("Presión Vapor: {burn_left} ticks ({progress_pct}%)");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0x38_D6FF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF38_D6FF, false);
     } else if kind == MachineKind::FluidTank {
         let fcode = get(7);
         let famount = get(8);
@@ -6321,21 +6321,21 @@ pub(crate) fn screen_draw(
         let fname = rules::fluid_name_from_code(fcode);
         let line1 = format!("Especificación: {fname} ({progress_pct}%)");
         let line2 = format!("Capacidad: {famount} / {fmax} mB (Usa Balde)");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x38_D6FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0xA8_DADC, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF38_D6FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFA8_DADC, false);
     } else if kind == MachineKind::FluidPump {
         let fcode = get(7);
         let rate_mb = get(8);
         let fname = if fcode == 0 { "Sin fluido" } else { rules::fluid_name_from_code(fcode) };
         let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
         let line2 = format!("Bombeando {fname}: {rate_mb} mB/t");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0x55_FFAA, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF55_FFAA, false);
     } else if kind == MachineKind::VoidTrashCan {
         let line1 = "Papelera de Vacío: Incineración Instantánea";
         let line2 = "Coloca cualquier ítem para destruirlo";
-        draw.text( line1, [x + 10.0, y + 60.0], 0xDD_88FF, false);
-        draw.text( line2, [x + 10.0, y + 70.0], 0xAA_B8C8, false);
+        draw.text( line1, [x + 10.0, y + 60.0], 0xFFDD_88FF, false);
+        draw.text( line2, [x + 10.0, y + 70.0], 0xFFAA_B8C8, false);
     } else if kind == MachineKind::SolarGenerator {
         let is_3x3 = get(7) != 0;
         let line1 = format!("FE: {energy}/{max_energy} | Genera: +{rate} FE/t");
@@ -6346,18 +6346,18 @@ pub(crate) fn screen_draw(
         } else {
             "Sin radiación solar (Noche o bajo techo)".to_string()
         };
-        let col2 = if is_3x3 { 0x55_FFAA } else if rate > 0 { 0xFF_D166 } else { 0xAA_AA_AA };
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        let col2 = if is_3x3 { 0xFF55_FFAA } else if rate > 0 { 0xFFFF_D166 } else { 0xFFAA_AAAA };
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
         draw.text( &line2, [x + 10.0, y + 70.0], col2, false);
     } else if kind == MachineKind::ChargingPad {
         let line1 = format!("FE: {energy}/{max_energy} | -20 FE/t en carga");
         let line2 = "Inducción activa: Carga armaduras y slot".to_string();
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
         draw.text( &line2, [x + 10.0, y + 70.0], 0xFF00_FFAA, false);
     } else if kind == MachineKind::AlloySmelter {
         let line1 = format!("FE: {energy}/{max_energy} ({rate}/t)");
         let line2 = format!("Fundición de Aleaciones: {progress_pct}%");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
         draw.text( &line2, [x + 10.0, y + 70.0], 0xFFFF_7722, false);
     } else if kind == MachineKind::EnergyBank {
         let cells = get(7).max(1);
@@ -6367,8 +6367,8 @@ pub(crate) fn screen_draw(
         } else {
             "Batería Modular (10,000 FE por celda)".to_string()
         };
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0x38_D6FF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF38_D6FF, false);
     } else if kind == MachineKind::ConveyorBelt {
         let line1 = format!("Velocidad Cinta: {}%", 100 + progress_pct / 2);
         let line2 = if auto_io {
@@ -6376,38 +6376,38 @@ pub(crate) fn screen_draw(
         } else {
             "Auto-Extraer (Atrás): MANUAL"
         };
-        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF_D166, false);
-        draw.text( line2, [x + 10.0, y + 70.0], 0x90_E0EF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFFFF_D166, false);
+        draw.text( line2, [x + 10.0, y + 70.0], 0xFF90_E0EF, false);
     } else if kind == MachineKind::ItemExtractor {
         let line1 = format!("Extraídos a Tubería: {quarry_mined} ítems");
         let line2 = "Slot 0 = Filtro (Vacío = Todo)";
-        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF_D166, false);
-        draw.text( line2, [x + 10.0, y + 70.0], 0x90_E0EF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFFFF_D166, false);
+        draw.text( line2, [x + 10.0, y + 70.0], 0xFF90_E0EF, false);
     } else if kind == MachineKind::SapExtractor {
         let line1 = format!("FE: {energy}/{max_energy} | Extracción de Savia");
         let line2 = format!("Progreso extracción: {progress_pct}% (Tronco de caucho)");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF_B820, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFFF_B820, false);
     } else if kind == MachineKind::Vulcanizer {
         let line1 = format!("FE: {energy}/{max_energy} | Horno Vulcanizador");
         let line2 = format!("Vulcanizando caucho puro: {progress_pct}%");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0xEE_82EE, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFEE_82EE, false);
     } else if kind == MachineKind::MechanicalPress {
         let line1 = format!("FE: {energy}/{max_energy} | Prensa Hidráulica");
         let line2 = format!("Estampado de placas y engranajes: {progress_pct}%");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0x55_FFAA, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF55_FFAA, false);
     } else if kind == MachineKind::ElectricCrusher {
         let line1 = format!("FE: {energy}/{max_energy} | Triturador Cinético");
         let line2 = format!("Molienda (x2 polvo mineral): {progress_pct}%");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF_D166, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFFF_D166, false);
     } else if kind == MachineKind::ElectricFurnace {
         let line1 = format!("FE: {energy}/{max_energy} | Horno Eléctrico");
         let line2 = format!("Fundición de alta temperatura: {progress_pct}%");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF_8844, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFFFF_8844, false);
     } else if kind == MachineKind::SiloController {
         let ctrl_pos = [get(7), get(8), get(9)];
         let page = get(6).max(0) as usize;
@@ -6505,16 +6505,16 @@ pub(crate) fn screen_draw(
     } else if kind == MachineKind::IndustrialAssembler {
         let line1 = format!("FE: {energy}/{max_energy} | Ensamblador Robótico");
         let line2 = format!("Ensamblaje automatizado: {progress_pct}%");
-        draw.text( &line1, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &line2, [x + 10.0, y + 70.0], 0x38_F2FF, false);
+        draw.text( &line1, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &line2, [x + 10.0, y + 70.0], 0xFF38_F2FF, false);
     } else {
         let energy_line = fill_template(
             "rusty_factory.screen.energy",
             &[energy.to_string(), max_energy.to_string()],
         );
         let rate_line = fill_template("rusty_factory.screen.rate", &[rate.to_string()]);
-        draw.text( &energy_line, [x + 10.0, y + 60.0], 0x70_E8FF, false);
-        draw.text( &rate_line, [x + 10.0, y + 70.0], 0xA8_DADC, false);
+        draw.text( &energy_line, [x + 10.0, y + 60.0], 0xFF70_E8FF, false);
+        draw.text( &rate_line, [x + 10.0, y + 70.0], 0xFFA8_DADC, false);
     }
 
     // 6. Interactive Buttons
