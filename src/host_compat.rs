@@ -830,11 +830,15 @@ impl WorldPrimitivesCompat {
     }
 
     pub fn flush(&self, draw: &mut dyn WorldDrawContext) {
-        if !self.quads.is_empty() {
-            let _ = draw.quads(&self.quads);
+        for chunk in self.quads.chunks(256) {
+            if draw.quads(chunk).is_err() {
+                break;
+            }
         }
-        if !self.lines.is_empty() {
-            let _ = draw.lines(&self.lines);
+        for chunk in self.lines.chunks(256) {
+            if draw.lines(chunk).is_err() {
+                break;
+            }
         }
     }
 }

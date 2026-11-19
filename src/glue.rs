@@ -3472,6 +3472,52 @@ pub(crate) fn submit(
     }
 
     if rules::is_item_pipe(block) {
+        let Some(st) = load_state(entity) else {
+            return;
+        };
+        if st.belt_item.is_empty() {
+            return;
+        }
+        let max_ticks = rules::item_pipe_ticks(block);
+        let t = ((st.progress as f32 + if st.progress < max_ticks { draw.partial() } else { 0.0 })
+            / max_ticks as f32)
+            .clamp(0.0, 1.0);
+        let from_off = rules::offset_from_dir_index(st.pipe_from);
+        let to_off = rules::offset_from_dir_index(st.pipe_to);
+        let (ix, iy, iz) = if t < 0.5 {
+            let u = t * 2.0;
+            (
+                0.5 + from_off[0] as f32 * 0.5 * (1.0 - u),
+                0.5 + from_off[1] as f32 * 0.5 * (1.0 - u),
+                0.5 + from_off[2] as f32 * 0.5 * (1.0 - u),
+            )
+        } else {
+            let u = (t - 0.5) * 2.0;
+            (
+                0.5 + to_off[0] as f32 * 0.5 * u,
+                0.5 + to_off[1] as f32 * 0.5 * u,
+                0.5 + to_off[2] as f32 * 0.5 * u,
+            )
+        };
+        let Some(stack) = hc::make_stack(host, &st.belt_item, 1) else {
+            return;
+        };
+        draw.push();
+        draw.translate([ix, iy, iz]);
+        draw.rotate_about(
+            [0.0, 1.0, 0.0],
+            (draw.game_time() as f32 + draw.partial()) * 4.0,
+            [0.0, 0.0, 0.0],
+        );
+        draw.scale([0.30, 0.30, 0.30]);
+        let _ = hc::draw_be_item_stack(
+            draw,
+            &stack,
+            ItemDisplayContext::Fixed,
+            None,
+            pos[0].wrapping_mul(31) ^ pos[2],
+        );
+        draw.pop();
         return;
     }
 
@@ -3805,7 +3851,7 @@ pub(crate) fn world_primitives(
             let dy = b[1] - a[1];
             let dz = b[2] - a[2];
             let len = (dx * dx + dy * dy + dz * dz).sqrt().max(0.01);
-            let segs = (len / 0.5).ceil().max(1.0) as usize;
+            let segs = len.ceil().max(1.0) as usize;
             let rx = if dx.abs() > 0.001 { 0.0 } else { r };
             let ry = if dy.abs() > 0.001 { 0.0 } else { r };
             let rz = if dz.abs() > 0.001 { 0.0 } else { r };
