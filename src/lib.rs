@@ -10,7 +10,26 @@ pub struct RustyFactory;
 pub struct RustyMachinePart;
 
 #[mod_api::horizon_part]
-impl BlockPart for RustyMachinePart {}
+impl BlockPart for RustyMachinePart {
+    fn use_without_item(
+        &self,
+        host: &mut dyn ServerHost,
+        event: &mut UseWithoutItemEvent<'_>,
+    ) -> Option<InteractionResult> {
+        let click = event.click;
+        let dim = host.dimension();
+        let level = host.level(dim)?;
+        let block_id = level.block(host, click.pos)?.id(host);
+        if glue::container(&block_id).is_some() {
+            let player = host.player(click.player)?;
+            let be = host.block_entity(level, click.pos)?;
+            if player.open_menu(host, be).unwrap_or(false) {
+                return Some(InteractionResult::Success);
+            }
+        }
+        None
+    }
+}
 
 #[mod_api::horizon_part]
 impl BlockEntityPart for RustyMachinePart {

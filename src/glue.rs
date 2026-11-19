@@ -112,7 +112,10 @@ pub(crate) fn block_entity_ticks(block: &str) -> bool {
 }
 
 pub(crate) fn update_tag(_pos: [i32; 3], entity: &ModBlockEntity) -> Option<Compound> {
-    if MachineKind::from_block_id(entity.id()).is_some() {
+    if entity.nbt.contains_key(&STATE_TAG.into())
+        || entity.id() == "rusty_factory:machine"
+        || MachineKind::from_block_id(entity.id()).is_some()
+    {
         Some(entity.nbt.clone())
     } else {
         None
@@ -1000,7 +1003,8 @@ fn tick_item_pipe(
     if state.belt_item.is_empty() {
         return;
     }
-    let pipe_ticks = rules::item_pipe_ticks(&entity.id());
+    let block_id = hc::block_id_at(host, pos);
+    let pipe_ticks = rules::item_pipe_ticks(&block_id);
     if state.progress < pipe_ticks {
         state.progress += 1;
         store_state(entity, state);
@@ -1163,7 +1167,8 @@ fn tick_conveyor(
     state: &mut MachineState,
 ) {
     let dim = host.dimension();
-    let (max_ticks, max_batch) = rules::conveyor_tier(&entity.id()).unwrap_or((20, 1));
+    let block_id = hc::block_id_at(host, pos);
+    let (max_ticks, max_batch) = rules::conveyor_tier(&block_id).unwrap_or((20, 1));
     let facing = hc::block_property_at(host, pos, "facing")
         .unwrap_or_else(|| "north".to_owned());
     let shape = hc::block_property_at(host, pos, "shape")
@@ -1386,7 +1391,8 @@ fn tick_quarry(
         return (outcome.status, 0);
     }
 
-    let (tier_radius, tier_speed, tier_fortune) = rules::quarry_tier(&entity.id());
+    let block_id = hc::block_id_at(host, pos);
+    let (tier_radius, tier_speed, tier_fortune) = rules::quarry_tier(&block_id);
     if state.quarry_radius < tier_radius {
         state.quarry_radius = tier_radius;
     }
@@ -1933,7 +1939,7 @@ pub(crate) fn tick(host: &mut dyn ServerHost, pos: [i32; 3], entity: &mut ModBlo
     }
 
     // 2. Rubber Sap Log Cavity natural sap regeneration tick (refills golden resin after ~10 seconds)
-    if entity.id() == rules::BLOCK_RUBBER_SAP_LOG {
+    if block_id == rules::BLOCK_RUBBER_SAP_LOG {
         let is_full = hc::block_property_at(host, pos, "lit").as_deref() == Some("true");
         if !is_full {
             let t = entity.data.first().copied().unwrap_or(0) + 1;
@@ -1947,7 +1953,7 @@ pub(crate) fn tick(host: &mut dyn ServerHost, pos: [i32; 3], entity: &mut ModBlo
         return;
     }
 
-    let Some(kind) = MachineKind::from_block_id(&entity.id()) else {
+    let Some(kind) = MachineKind::from_block_id(&block_id) else {
         return;
     };
     let min_slots = match kind {
@@ -5718,45 +5724,49 @@ pub(crate) fn right_click(host: &mut dyn ServerHost, click: &BlockClick<'_>) -> 
     canceled
 }
 
-pub(crate) fn menu_button(entity: &mut ModBlockEntityView<'_>, id: i32) {
-    if let Some(kind) = MachineKind::from_block_id(&entity.id()) {
-        let mut state = load_state(entity).unwrap_or_else(|| MachineState::new(kind));
-        match id {
-            BTN_TOGGLE_POWER => {
-                state.enabled = !state.enabled;
-            }
-            BTN_MODE_OR_SIZE => {
-                if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
-                    // Cycle Quarry/Harvester area: 5x5 (2) -> 7x7 (3) -> 9x9 (4) -> 5x5 (2)
-                    state.quarry_radius = match state.quarry_radius {
-                        2 => 3,
-                        3 => 4,
-                        _ => 2,
-                    };
-                    state.quarry_cursor = 0;
-                } else {
-                    state.auto_io = !state.auto_io;
-                }
-            }
-            BTN_QUARRY_RESET if kind == MachineKind::Quarry => {
-                state.quarry_y_offset = 0;
+fn menu_button_for_kind(kind: MachineKind, entity: &mut ModBlockEntityView<'_>, id: i32) {
+    let mut state = load_state(entity).unwrap_or_else(|| MachineState::new(kind));
+    match id {
+        BTN_TOGGLE_POWER => {
+            state.enabled = !state.enabled;
+        }
+        BTN_MODE_OR_SIZE => {
+            if matches!(kind, MachineKind::Quarry | MachineKind::AutoHarvester) {
+                // Cycle Quarry/Harvester area: 5x5 (2) -> 7x7 (3) -> 9x9 (4) -> 5x5 (2)
+                state.quarry_radius = match state.quarry_radius {
+                    2 => 3,
+                    3 => 4,
+                    _ => 2,
+                };
                 state.quarry_cursor = 0;
-            }
-            20 if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) => {
-                state.quarry_cursor = (state.quarry_cursor - 1).max(0);
-            }
-            21 if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) => {
-                state.quarry_cursor += 1;
-            }
-            22 if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) => {
-                state.enabled = !state.enabled;
-            }
-            23 if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) => {
+            } else {
                 state.auto_io = !state.auto_io;
             }
-            _ => {}
         }
-        store_state(entity, &state);
+        BTN_QUARRY_RESET if kind == MachineKind::Quarry => {
+            state.quarry_y_offset = 0;
+            state.quarry_cursor = 0;
+        }
+        20 if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) => {
+            state.quarry_cursor = (state.quarry_cursor - 1).max(0);
+        }
+        21 if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) => {
+            state.quarry_cursor += 1;
+        }
+        22 if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) => {
+            state.enabled = !state.enabled;
+        }
+        23 if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) => {
+            state.auto_io = !state.auto_io;
+        }
+        _ => {}
+    }
+    store_state(entity, &state);
+}
+
+pub(crate) fn menu_button(entity: &mut ModBlockEntityView<'_>, id: i32) {
+    if let Some(kind) = MachineKind::from_block_id(&entity.id()) {
+        menu_button_for_kind(kind, entity, id);
     }
 }
 
@@ -5767,9 +5777,11 @@ pub(crate) fn menu_button_v2(
     id: i32,
     carried: &mut Option<ItemStack>,
 ) {
-    let Some(kind) = MachineKind::from_block_id(&entity.id()) else {
+    let block_id = hc::block_id_at(host, pos);
+    let Some(kind) = MachineKind::from_block_id(&block_id) else {
         return;
     };
+    menu_button_for_kind(kind, entity, id);
     if !matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) {
         return;
     }
