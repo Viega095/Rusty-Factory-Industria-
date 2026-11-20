@@ -97,6 +97,12 @@ const fn sbf(x: i32, y: i32, z: i32, block: &'static str, facing: &'static str) 
     }
 }
 
+#[derive(Clone, Copy)]
+struct RecipeGrid {
+    grid: [&'static str; 9],
+    out: (&'static str, u32),
+}
+
 struct GuideEntry {
     category: Category,
     icon: &'static str,
@@ -108,6 +114,7 @@ struct GuideEntry {
     scene_title: &'static str,
     scene: &'static [ScenePart],
     legend: &'static [&'static str],
+    recipe: RecipeGrid,
 }
 
 // ── 3D Example Scenes ────────────────────────────────────────────────────────
@@ -321,6 +328,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:item_pipe",
             "minecraft:chest",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "", "minecraft:oak_planks", "",
+                "minecraft:oak_planks", "minecraft:oak_planks", "minecraft:oak_planks",
+                "minecraft:oak_planks", "", "",
+            ],
+            out: ("rusty_factory:treetap", 1),
+        },
     },
     GuideEntry {
         category: Category::Rubber,
@@ -350,6 +365,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:vulcanizer",
             "rusty_factory:conveyor_belt",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "rusty_factory:rubber_bar", "minecraft:furnace", "rusty_factory:rubber_bar",
+                "minecraft:piston", "rusty_factory:machine_casing", "minecraft:piston",
+                "rusty_factory:copper_cable", "rusty_factory:electronic_circuit", "rusty_factory:copper_cable",
+            ],
+            out: ("rusty_factory:vulcanizer", 1),
+        },
     },
     // ── 2. ENERGÍA ───────────────────────────────────────────────────────────
     GuideEntry {
@@ -381,6 +404,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:energy_bank",
             "rusty_factory:electric_furnace",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "minecraft:iron_ingot", "minecraft:iron_ingot", "minecraft:iron_ingot",
+                "minecraft:iron_ingot", "minecraft:furnace", "minecraft:iron_ingot",
+                "rusty_factory:copper_cable", "rusty_factory:machine_casing", "rusty_factory:copper_cable",
+            ],
+            out: ("rusty_factory:coal_generator", 1),
+        },
     },
     GuideEntry {
         category: Category::Energy,
@@ -410,6 +441,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:energy_bank",
             "rusty_factory:energy_monitor",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "rusty_factory:solar_cell", "rusty_factory:solar_cell", "rusty_factory:solar_cell",
+                "rusty_factory:copper_cable", "rusty_factory:electronic_circuit", "rusty_factory:copper_cable",
+                "rusty_factory:iron_plate", "rusty_factory:machine_casing", "rusty_factory:iron_plate",
+            ],
+            out: ("rusty_factory:solar_generator", 1),
+        },
     },
     GuideEntry {
         category: Category::Energy,
@@ -439,6 +478,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:energy_bank",
             "rusty_factory:electric_crusher",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "rusty_factory:iron_plate", "rusty_factory:steel_gear", "rusty_factory:iron_plate",
+                "rusty_factory:copper_cable", "rusty_factory:machine_casing", "rusty_factory:copper_cable",
+                "rusty_factory:steel_ingot", "rusty_factory:electronic_circuit", "rusty_factory:steel_ingot",
+            ],
+            out: ("rusty_factory:wind_turbine", 1),
+        },
     },
     GuideEntry {
         category: Category::Energy,
@@ -468,6 +515,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:steam_boiler",
             "rusty_factory:steam_turbine",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "minecraft:copper_ingot", "rusty_factory:fluid_pipe", "minecraft:copper_ingot",
+                "rusty_factory:iron_plate", "rusty_factory:machine_casing", "rusty_factory:iron_plate",
+                "minecraft:furnace", "rusty_factory:copper_cable", "minecraft:furnace",
+            ],
+            out: ("rusty_factory:steam_boiler", 1),
+        },
     },
     GuideEntry {
         category: Category::Energy,
@@ -497,6 +552,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:cable_red",
             "rusty_factory:tesseract",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "rusty_factory:steel_ingot", "rusty_factory:advanced_circuit", "rusty_factory:steel_ingot",
+                "rusty_factory:cable_red", "rusty_factory:machine_casing", "rusty_factory:cable_red",
+                "rusty_factory:steel_ingot", "minecraft:nether_star", "rusty_factory:steel_ingot",
+            ],
+            out: ("rusty_factory:nuclear_reactor", 1),
+        },
     },
     // ── 3. REDES Y CABLES ────────────────────────────────────────────────────
     GuideEntry {
@@ -527,6 +590,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:cable_gold",
             "rusty_factory:cable_red",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "rusty_factory:rubber_sheet", "rusty_factory:rubber_sheet", "rusty_factory:rubber_sheet",
+                "minecraft:gold_ingot", "minecraft:redstone", "minecraft:gold_ingot",
+                "rusty_factory:rubber_sheet", "rusty_factory:rubber_sheet", "rusty_factory:rubber_sheet",
+            ],
+            out: ("rusty_factory:cable_gold", 6),
+        },
     },
     GuideEntry {
         category: Category::Network,
@@ -556,6 +627,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:charging_pad",
             "rusty_factory:energy_bank",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "minecraft:ender_pearl", "rusty_factory:cable_gold", "minecraft:ender_pearl",
+                "rusty_factory:advanced_circuit", "rusty_factory:energy_bank", "rusty_factory:advanced_circuit",
+                "rusty_factory:steel_ingot", "rusty_factory:cable_gold", "rusty_factory:steel_ingot",
+            ],
+            out: ("rusty_factory:wireless_charger", 1),
+        },
     },
     // ── 4. PROCESAMIENTO ─────────────────────────────────────────────────────
     GuideEntry {
@@ -586,6 +665,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:electric_furnace",
             "minecraft:chest",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "minecraft:flint", "minecraft:piston", "minecraft:flint",
+                "rusty_factory:iron_plate", "rusty_factory:machine_casing", "rusty_factory:iron_plate",
+                "rusty_factory:copper_cable", "rusty_factory:electronic_circuit", "rusty_factory:copper_cable",
+            ],
+            out: ("rusty_factory:electric_crusher", 1),
+        },
     },
     GuideEntry {
         category: Category::Machines,
@@ -615,6 +702,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:industrial_assembler",
             "rusty_factory:energy_bank",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "minecraft:blast_furnace", "rusty_factory:electronic_circuit", "minecraft:blast_furnace",
+                "rusty_factory:steel_ingot", "rusty_factory:machine_casing", "rusty_factory:steel_ingot",
+                "rusty_factory:cable_gold", "rusty_factory:steel_gear", "rusty_factory:cable_gold",
+            ],
+            out: ("rusty_factory:alloy_smelter", 1),
+        },
     },
     GuideEntry {
         category: Category::Machines,
@@ -644,6 +739,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:hydroponic_chamber",
             "minecraft:chest",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "minecraft:glass", "minecraft:glowstone_dust", "minecraft:glass",
+                "rusty_factory:fluid_pipe", "rusty_factory:machine_casing", "rusty_factory:fluid_pipe",
+                "rusty_factory:copper_cable", "minecraft:dirt", "rusty_factory:copper_cable",
+            ],
+            out: ("rusty_factory:hydroponic_chamber", 1),
+        },
     },
     // ── 5. AUTOMATIZACIÓN ────────────────────────────────────────────────────
     GuideEntry {
@@ -674,6 +777,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:conveyor_belt_mk2",
             "rusty_factory:conveyor_belt_mk3",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "", "", "",
+                "rusty_factory:rubber_sheet", "rusty_factory:rubber_sheet", "rusty_factory:rubber_sheet",
+                "minecraft:iron_ingot", "rusty_factory:copper_cable", "minecraft:iron_ingot",
+            ],
+            out: ("rusty_factory:conveyor_belt", 6),
+        },
     },
     GuideEntry {
         category: Category::Automation,
@@ -703,6 +814,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:fluid_tank",
             "rusty_factory:fluid_pipe_mk2",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "minecraft:iron_ingot", "minecraft:glass", "minecraft:iron_ingot",
+                "", "", "",
+                "minecraft:iron_ingot", "minecraft:glass", "minecraft:iron_ingot",
+            ],
+            out: ("rusty_factory:item_pipe", 6),
+        },
     },
     GuideEntry {
         category: Category::Automation,
@@ -732,6 +851,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:item_pipe_mk2",
             "minecraft:chest",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "rusty_factory:steel_gear", "minecraft:diamond_pickaxe", "rusty_factory:steel_gear",
+                "rusty_factory:electronic_circuit", "rusty_factory:machine_casing", "rusty_factory:electronic_circuit",
+                "rusty_factory:copper_cable", "rusty_factory:item_pipe", "rusty_factory:copper_cable",
+            ],
+            out: ("rusty_factory:quarry", 1),
+        },
     },
     // ── 6. SISTEMA SILO ──────────────────────────────────────────────────────
     GuideEntry {
@@ -762,6 +889,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:silo_crafting_terminal",
             "rusty_factory:item_pipe_mk2",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "rusty_factory:steel_ingot", "rusty_factory:electronic_circuit", "rusty_factory:steel_ingot",
+                "minecraft:ender_pearl", "rusty_factory:cable_gold", "minecraft:ender_pearl",
+                "rusty_factory:steel_ingot", "rusty_factory:industrial_silo", "rusty_factory:steel_ingot",
+            ],
+            out: ("rusty_factory:silo_controller", 1),
+        },
     },
     // ── 7. EQUIPO Y MÓDULOS ──────────────────────────────────────────────────
     GuideEntry {
@@ -792,6 +927,14 @@ const ENTRIES: &[GuideEntry] = &[
             "rusty_factory:cable_copper",
             "rusty_factory:coal_generator",
         ],
+        recipe: RecipeGrid {
+            grid: [
+                "rusty_factory:steel_ingot", "minecraft:diamond_pickaxe", "rusty_factory:steel_ingot",
+                "rusty_factory:steel_gear", "rusty_factory:energy_battery_mk2", "rusty_factory:steel_gear",
+                "rusty_factory:advanced_circuit", "rusty_factory:steel_ingot", "rusty_factory:advanced_circuit",
+            ],
+            out: ("rusty_factory:mining_drill_mk3", 1),
+        },
     },
 ];
 
@@ -806,6 +949,7 @@ struct BookUiState {
     scale: f32,
     auto_rotate: bool,
     dragging_scene: bool,
+    show_recipe: bool,
 }
 
 impl Default for BookUiState {
@@ -818,6 +962,7 @@ impl Default for BookUiState {
             scale: 18.0,
             auto_rotate: true,
             dragging_scene: false,
+            show_recipe: false,
         }
     }
 }
@@ -952,11 +1097,19 @@ pub fn render(host: &dyn ClientHost, screen: &ScreenView, draw: &mut dyn DrawCon
     let [ox, oy] = book_origin(screen.rect);
     let mouse = screen.mouse;
 
-    let (cat, selected_entry, yaw, pitch, scale, auto_rotate) = with_state(|st| {
+    let (cat, selected_entry, yaw, pitch, scale, auto_rotate, show_recipe) = with_state(|st| {
         if st.auto_rotate && !st.dragging_scene {
             st.yaw = (st.yaw + 0.35) % 360.0;
         }
-        (st.category, st.selected_entry, st.yaw, st.pitch, st.scale, st.auto_rotate)
+        (
+            st.category,
+            st.selected_entry,
+            st.yaw,
+            st.pitch,
+            st.scale,
+            st.auto_rotate,
+            st.show_recipe,
+        )
     });
 
     // Left Category Tabs (sticking out on the left side of the book)
@@ -1051,41 +1204,124 @@ pub fn render(host: &dyn ClientHost, screen: &ScreenView, draw: &mut dyn DrawCon
             }
         }
 
-        // ── RIGHT PAGE: Interactive 3D Ponder Scene ──
-        draw.text(entry.scene_title, [ox + 194.0, oy + 15.0], 0xFF2B_1D12, false);
+        // ── RIGHT PAGE: Interactive 3D Ponder Scene OR 3x3 Recipe ──
+        let tab_3d = [ox + 194.0, oy + 12.0, 44.0, 14.0];
+        let tab_rec = [ox + 241.0, oy + 12.0, 50.0, 14.0];
+        draw_btn(
+            draw,
+            tab_3d,
+            "Vista 3D",
+            if !show_recipe { 0xFF2B_6E46 } else { 0xFF7A_654E },
+            0xFFFF_FFFF,
+        );
+        draw_btn(
+            draw,
+            tab_rec,
+            "Receta",
+            if show_recipe { 0xFFB8_7333 } else { 0xFF7A_654E },
+            0xFFFF_FFFF,
+        );
+
         let swh = scene_rect_wh(ox, oy);
-        draw.fill(swh, 0xFF16_1B24);
-        draw.fill([swh[0] + 1.0, swh[1] + 1.0, swh[2] - 2.0, swh[3] - 2.0], 0xFF1E_2633);
+        if !show_recipe {
+            draw.fill(swh, 0xFF16_1B24);
+            draw.fill([swh[0] + 1.0, swh[1] + 1.0, swh[2] - 2.0, swh[3] - 2.0], 0xFF1E_2633);
 
-        let (scene, center) = build_scene(host, entry.scene);
-        let view = SceneView::new(center, yaw, pitch, scale);
-        let _ = draw.draw_scene(scene_rect(ox, oy), &scene, view);
+            let (scene, center) = build_scene(host, entry.scene);
+            let view = SceneView::new(center, yaw, pitch, scale);
+            let _ = draw.draw_scene(scene_rect(ox, oy), &scene, view);
 
-        // Scene hint overlay
-        draw.text(
-            "Arrastrá para rotar · Rueda zoom",
-            [swh[0] + 6.0, swh[1] + swh[3] - 11.0],
-            0xAA9A_B0C8,
-            false,
-        );
+            draw.text(
+                entry.scene_title,
+                [swh[0] + 6.0, swh[1] + 5.0],
+                0xDDE8_F0F8,
+                false,
+            );
+            draw.text(
+                "Arrastrá para rotar · Rueda zoom",
+                [swh[0] + 6.0, swh[1] + swh[3] - 11.0],
+                0xAA9A_B0C8,
+                false,
+            );
 
-        // Camera control buttons
-        let auto_r = [ox + 196.0, oy + 160.0, 52.0, 14.0];
-        let reset_r = [ox + 252.0, oy + 160.0, 48.0, 14.0];
-        draw_btn(
-            draw,
-            auto_r,
-            if auto_rotate { "↻ Auto: ON" } else { "↻ Auto: OFF" },
-            if auto_rotate { 0xFF2B_6E46 } else { 0xFF5A_4E40 },
-            0xFFFF_FFFF,
-        );
-        draw_btn(
-            draw,
-            reset_r,
-            "↺ Reset",
-            if in_rect(mouse, reset_r) { 0xFF6B_5B4A } else { 0xFF5A_4E40 },
-            0xFFFF_FFFF,
-        );
+            // Camera control buttons
+            let auto_r = [ox + 196.0, oy + 160.0, 52.0, 14.0];
+            let reset_r = [ox + 252.0, oy + 160.0, 48.0, 14.0];
+            draw_btn(
+                draw,
+                auto_r,
+                if auto_rotate { "↻ Auto: ON" } else { "↻ Auto: OFF" },
+                if auto_rotate { 0xFF2B_6E46 } else { 0xFF5A_4E40 },
+                0xFFFF_FFFF,
+            );
+            draw_btn(
+                draw,
+                reset_r,
+                "↺ Reset",
+                if in_rect(mouse, reset_r) { 0xFF6B_5B4A } else { 0xFF5A_4E40 },
+                0xFFFF_FFFF,
+            );
+        } else {
+            // 3x3 Crafting Recipe Grid
+            draw.fill(swh, 0xFFE6_D7BC);
+            draw.fill([swh[0] + 1.0, swh[1] + 1.0, swh[2] - 2.0, swh[3] - 2.0], 0xFFEC_DFC8);
+            draw.text("Mesa de Crafteo (3x3)", [swh[0] + 8.0, swh[1] + 8.0], 0xFF3A_2A1D, false);
+
+            let gx0 = swh[0] + 12.0;
+            let gy0 = swh[1] + 28.0;
+            let mut hovered_item: Option<&str> = None;
+
+            for r in 0..3 {
+                for c in 0..3 {
+                    let sx = gx0 + c as f32 * 22.0;
+                    let sy = gy0 + r as f32 * 22.0;
+                    let sr = [sx, sy, 20.0, 20.0];
+                    let hov = in_rect(mouse, sr);
+                    draw.fill(sr, 0xFF3A_3028);
+                    draw.fill([sx + 1.0, sy + 1.0, 18.0, 18.0], if hov { 0xFFB8_A890 } else { 0xFF8B_8B8B });
+                    let ing = entry.recipe.grid[r * 3 + c];
+                    if !ing.is_empty() {
+                        draw_item_id(host, draw, ing, [sx + 2.0, sy + 2.0], 16.0);
+                        if hov {
+                            hovered_item = Some(ing);
+                        }
+                    }
+                }
+            }
+
+            // Arrow + Output slot
+            draw.text("➔", [gx0 + 73.0, gy0 + 27.0], 0xFF4A_3522, false);
+            let out_r = [gx0 + 94.0, gy0 + 20.0, 24.0, 24.0];
+            let out_hov = in_rect(mouse, out_r);
+            draw.fill(out_r, 0xFF3A_3028);
+            draw.fill(
+                [out_r[0] + 1.5, out_r[1] + 1.5, 21.0, 21.0],
+                if out_hov { 0xFFD9_C088 } else { 0xFFA6_9478 },
+            );
+            draw_item_id(host, draw, entry.recipe.out.0, [out_r[0] + 4.0, out_r[1] + 4.0], 16.0);
+            if entry.recipe.out.1 > 1 {
+                draw.text(
+                    &format!("x{}", entry.recipe.out.1),
+                    [out_r[0] + 12.0, out_r[1] + 14.0],
+                    0xFFFF_FFFF,
+                    true,
+                );
+            }
+            if out_hov {
+                hovered_item = Some(entry.recipe.out.0);
+            }
+
+            draw.text(
+                "Pasá el mouse por los ítems",
+                [swh[0] + 8.0, swh[1] + swh[3] - 14.0],
+                0xFF6B_5844,
+                false,
+            );
+            if let Some(iid) = hovered_item {
+                let pretty = iid.split(':').nth(1).unwrap_or(iid).replace('_', " ");
+                let _ = draw.gui_tooltip(&[Text::literal(pretty)], mouse);
+            }
+        }
 
         // Component Legend icons under controls
         draw.text("Bloques:", [ox + 196.0, oy + 180.0], 0xFF4A_3522, false);
@@ -1192,8 +1428,17 @@ pub fn mouse_pressed(host: &dyn ClientHost, screen: &ScreenView, button: i32) ->
     let entry_idx = selected_entry.filter(|idx| cat_entries.contains(idx));
 
     if let Some(idx) = entry_idx {
+        // [Vista 3D] / [Receta] tabs
+        if in_rect(m, [ox + 194.0, oy + 12.0, 44.0, 14.0]) {
+            with_state(|st| st.show_recipe = false);
+            return true;
+        }
+        if in_rect(m, [ox + 241.0, oy + 12.0, 50.0, 14.0]) {
+            with_state(|st| st.show_recipe = true);
+            return true;
+        }
         // 3D viewport drag start
-        if button == 0 && in_rect(m, scene_rect_wh(ox, oy)) {
+        if button == 0 && !with_state(|st| st.show_recipe) && in_rect(m, scene_rect_wh(ox, oy)) {
             with_state(|st| {
                 st.dragging_scene = true;
                 st.auto_rotate = false;

@@ -11,10 +11,12 @@ const STATE_TAG: &str = "rusty_machine";
 const BTN_TOGGLE_POWER: i32 = 0;
 const BTN_MODE_OR_SIZE: i32 = 1;
 const BTN_QUARRY_RESET: i32 = 2;
+const BTN_QUARRY_FILTER: i32 = 3;
 
 const POWER_BTN_RECT: [f32; 4] = [136.0, 18.0, 34.0, 14.0];
 const MODE_BTN_RECT: [f32; 4] = [136.0, 62.0, 34.0, 14.0];
 const RESET_BTN_RECT: [f32; 4] = [98.0, 18.0, 34.0, 14.0];
+const FILTER_BTN_RECT: [f32; 4] = [98.0, 62.0, 34.0, 14.0];
 
 #[allow(dead_code)]
 fn state_key() -> String {
@@ -1375,6 +1377,21 @@ fn tick_conveyor(
 /// Simulates the Automated Industrial Quarry (`rusty_factory:quarry`):
 /// Excavates blocks in a `5x5`, `7x7`, or `9x9` area behind the Quarry down to Bedrock,
 /// moves the 3D gantry & laser to the mined block, and outputs drops into its buffer or pipes/chests!
+fn is_quarry_trash(item_id: &str) -> bool {
+    matches!(
+        item_id,
+        "minecraft:cobblestone"
+            | "minecraft:cobbled_deepslate"
+            | "minecraft:dirt"
+            | "minecraft:gravel"
+            | "minecraft:netherrack"
+            | "minecraft:tuff"
+            | "minecraft:andesite"
+            | "minecraft:diorite"
+            | "minecraft:granite"
+    )
+}
+
 fn tick_quarry(
     host: &mut dyn ServerHost,
     pos: [i32; 3],
@@ -1445,8 +1462,10 @@ fn tick_quarry(
                             hc::set_block_by_id(host, sp, "minecraft:air");
                             state.quarry_mined += 1;
                             state.last_target = sp;
-                            let produced = hc::make_stack(host, &drop_item, base_count).expect("valid item");
-                            store_or_route_output(host, pos, entity, state.auto_io, produced);
+                            if !(state.belt_filter_blacklist && is_quarry_trash(&drop_item)) {
+                                let produced = hc::make_stack(host, &drop_item, base_count).expect("valid item");
+                                store_or_route_output(host, pos, entity, state.auto_io, produced);
+                            }
                             store_state(entity, state);
                             host.block_entity_sync(pos);
                             cleared_surface = true;
@@ -1485,9 +1504,10 @@ fn tick_quarry(
                 } else {
                     0
                 };
-                let produced = hc::make_stack(host, &drop_item, base_count + bonus).expect("valid item");
-
-                store_or_route_output(host, pos, entity, state.auto_io, produced);
+                if !(state.belt_filter_blacklist && is_quarry_trash(&drop_item)) {
+                    let produced = hc::make_stack(host, &drop_item, base_count + bonus).expect("valid item");
+                    store_or_route_output(host, pos, entity, state.auto_io, produced);
+                }
                 store_state(entity, state);
                 host.block_entity_sync(pos);
                 break;
@@ -3221,6 +3241,15 @@ pub(crate) fn tick(host: &mut dyn ServerHost, pos: [i32; 3], entity: &mut ModBlo
             _ => unreachable!(),
         };
         update_lit_state(host, pos, status == StepStatus::Working);
+        if kind == MachineKind::Quarry
+            && status == StepStatus::Working
+            && ((hc::game_time(host) + (pos[0] as i64 * 11)) % 15 == 0)
+        {
+            let px = pos[0] as f64 + 0.5;
+            let py = pos[1] as f64 + 1.05;
+            let pz = pos[2] as f64 + 0.5;
+            hc::run_command(host, &format!("particle minecraft:electric_spark {px} {py} {pz} 0.25 0.15 0.25 0.02 3"));
+        }
         let needed = rules::effective_work_ticks(kind, speed_upgrades).max(1);
         let pct = ((state.progress * 100) / needed).clamp(0, 100);
         let cur_y = if kind == MachineKind::Quarry {
@@ -3234,7 +3263,7 @@ pub(crate) fn tick(host: &mut dyn ServerHost, pos: [i32; 3], entity: &mut ModBlo
             kind.max_energy(),
             pct,
             rate,
-            i32::from(state.enabled),
+            i32::from(state.enabled) | if state.belt_filter_blacklist { 2 } else { 0 },
             i32::from(state.auto_io),
             state.quarry_radius.clamp(2, 4),
             cur_y,
@@ -5794,6 +5823,9 @@ fn menu_button_for_kind(kind: MachineKind, entity: &mut ModBlockEntityView<'_>, 
             state.quarry_y_offset = 0;
             state.quarry_cursor = 0;
         }
+        BTN_QUARRY_FILTER if kind == MachineKind::Quarry => {
+            state.belt_filter_blacklist = !state.belt_filter_blacklist;
+        }
         20 if matches!(kind, MachineKind::SiloController | MachineKind::SiloCraftingTerminal) => {
             state.quarry_cursor = (state.quarry_cursor - 1).max(0);
         }
@@ -6137,7 +6169,8 @@ pub(crate) fn screen_draw(
     let max_energy = get(2).max(1);
     let progress_pct = get(3).clamp(0, 100);
     let rate = get(4);
-    let enabled = get(5) != 0;
+    let enabled = (get(5) & 1) != 0;
+    let quarry_trash_filter = (get(5) & 2) != 0;
     let auto_io = get(6) != 0;
     let quarry_radius = get(7).clamp(2, 4);
     let quarry_y = get(8);
@@ -6536,6 +6569,14 @@ pub(crate) fn screen_draw(
         draw_button(host, draw, origin, MODE_BTN_RECT, &size_label, 0xFF3B_5B92);
         if kind == MachineKind::Quarry {
             draw_button(host, draw, origin, RESET_BTN_RECT, "TOP", 0xFF6C_584C);
+            draw_button(
+                host,
+                draw,
+                origin,
+                FILTER_BTN_RECT,
+                if quarry_trash_filter { "SinBas" } else { "Todo" },
+                if quarry_trash_filter { 0xFF2B_8A3E } else { 0xFF5C_677D },
+            );
         }
     } else if !matches!(
         kind,
@@ -6623,6 +6664,8 @@ pub(crate) fn screen_click(
         *button = Some(BTN_MODE_OR_SIZE);
     } else if in_rect(at, RESET_BTN_RECT) && kind == MachineKind::Quarry {
         *button = Some(BTN_QUARRY_RESET);
+    } else if in_rect(at, FILTER_BTN_RECT) && kind == MachineKind::Quarry {
+        *button = Some(BTN_QUARRY_FILTER);
     }
     out_btn
 }
@@ -6772,6 +6815,13 @@ pub(crate) fn screen_tooltip(
         }
     } else if in_rect(at, RESET_BTN_RECT) && kind == MachineKind::Quarry {
         lines.push("§eReiniciar profundidad de la Quarry a la capa superior".into());
+    } else if in_rect(at, FILTER_BTN_RECT) && kind == MachineKind::Quarry {
+        let trash_filter = (get(5) & 2) != 0;
+        lines.push(if trash_filter {
+            "§aFiltro Sin Basura: §eACTIVO §7(descarta piedra, tierra, grava, netherrack)".into()
+        } else {
+            "§bFiltro Sin Basura: §cINACTIVO §7(recoge todos los bloques)".into()
+        });
     }
 }
 
@@ -6788,6 +6838,7 @@ pub(crate) fn perform(
         return Flow::Continue;
     }
     for item in [
+        "rusty_factory:guide_book 1",
         "rusty_factory:wrench 1",
         "rusty_factory:treetap 1",
         "rusty_factory:mining_drill 1",

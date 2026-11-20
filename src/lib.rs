@@ -8,6 +8,21 @@ use mod_api::*;
 #[derive(Default)]
 pub struct RustyFactory;
 
+static STARTER_GUIDE_GIVEN: AttachmentType<bool> = AttachmentType {
+    namespace: "rusty_factory",
+    name: "starter_guide_given",
+    default: || false,
+    codec: Some(AttachmentCodec {
+        encode: |v| Ok([("given".into(), Tag::Byte(i8::from(*v)))].into()),
+        decode: |c| match c.get(&"given".into()) {
+            Some(Tag::Byte(b)) => Ok(*b != 0),
+            _ => Err(AttachmentError::Decode),
+        },
+    }),
+    copy_on_death: true,
+    sync: false,
+};
+
 pub struct RustyMachinePart;
 
 #[mod_api::horizon_part]
@@ -191,6 +206,19 @@ impl Hooks for RustyFactory {
     fn render_level_stage(&self, host: &dyn ClientHost, event: &mut RenderLevelStageEvent<'_>) {
         if event.stage == RenderLevelStage::AfterLevel {
             glue::world_primitives(host, event.view, event.draw);
+        }
+    }
+
+    fn player_logged_in(&self, host: &mut dyn ServerHost, event: &mut PlayerLoggedInEvent<'_>) {
+        let Some(player) = host.player(event.player) else {
+            return;
+        };
+        let holder = Holder::Entity(player.entity());
+        if !STARTER_GUIDE_GIVEN.get(host, holder).unwrap_or(false) {
+            if let Some(stack) = host_compat::make_stack(host, "rusty_factory:guide_book", 1) {
+                let _ = player.give_or_drop(host, stack);
+                let _ = STARTER_GUIDE_GIVEN.set(host, holder, true);
+            }
         }
     }
 
