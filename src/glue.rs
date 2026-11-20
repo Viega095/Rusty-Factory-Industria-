@@ -16,6 +16,7 @@ const POWER_BTN_RECT: [f32; 4] = [136.0, 18.0, 34.0, 14.0];
 const MODE_BTN_RECT: [f32; 4] = [136.0, 62.0, 34.0, 14.0];
 const RESET_BTN_RECT: [f32; 4] = [98.0, 18.0, 34.0, 14.0];
 
+#[allow(dead_code)]
 fn state_key() -> String {
     STATE_TAG.to_owned()
 }
@@ -249,7 +250,7 @@ fn is_item_container_block(block_id: &str) -> bool {
 
 /// Grows a full Rubber Tree (`rubber_log`, `rubber_sap_log` with golden sap cavities, and `rubber_leaves`) at `pos`.
 fn grow_rubber_tree(host: &mut dyn ServerHost, pos: [i32; 3]) {
-    let dim = host.dimension();
+    let _dim = host.dimension();
     let seed = hc::game_time(host) ^ ((pos[0] as i64).wrapping_mul(31) ^ (pos[2] as i64));
     for (p, block_id, opt_prop) in rules::rubber_tree_blocks(pos, seed) {
         let cur = hc::block_id_at(host, p);
@@ -768,7 +769,7 @@ fn insert_into_splitter(host: &mut dyn ServerHost, pos: [i32; 3], stack: ItemSta
                     pos[1] as f64 + 0.30,
                     pos[2] as f64 + 0.5 + off[2] as f64 * 0.65,
                 ];
-                let vel = [off[0] as f64 * 0.12, 0.06, off[2] as f64 * 0.12];
+                let _vel = [off[0] as f64 * 0.12, 0.06, off[2] as f64 * 0.12];
                 hc::spawn_item(host, stack.clone(), drop_pos);
                 None
             } else {
@@ -1045,7 +1046,7 @@ fn tick_item_pipe(
                 pos[1] as f64 + 0.35 + opp[1] as f64 * 0.4,
                 pos[2] as f64 + 0.5 + opp[2] as f64 * 0.6,
             ];
-            let vel = [opp[0] as f64 * 0.12, 0.06, opp[2] as f64 * 0.12];
+            let _vel = [opp[0] as f64 * 0.12, 0.06, opp[2] as f64 * 0.12];
             hc::spawn_item(host, stack, drop_pos);
             state.belt_item.clear();
             state.belt_count = 0;
@@ -1271,7 +1272,7 @@ fn tick_conveyor(
                         pos[1] as f64 + 0.30,
                         pos[2] as f64 + 0.5 + soff[2] as f64 * 0.68,
                     ];
-                    let vel = [soff[0] as f64 * 0.12, 0.06, soff[2] as f64 * 0.12];
+                    let _vel = [soff[0] as f64 * 0.12, 0.06, soff[2] as f64 * 0.12];
                     hc::spawn_item(host, stack.clone(), drop_pos);
                     deflected = true;
                     break;
@@ -1338,7 +1339,7 @@ fn tick_conveyor(
             pos[1] as f64 + if shape == "up" { 1.12 } else { 0.32 },
             pos[2] as f64 + 0.5 + front_off[2] as f64 * 0.68,
         ];
-        let vel = [
+        let _vel = [
             front_off[0] as f64 * 0.10,
             0.06,
             front_off[2] as f64 * 0.10,
@@ -1425,7 +1426,7 @@ fn tick_quarry(
             .unwrap_or_else(|| "north".to_owned());
         let side = state.quarry_side_len();
         let layer_area = side * side;
-        let dim = host.dimension();
+        let _dim = host.dimension();
         let (min_x, max_x, min_z, max_z) =
             rules::quarry_area_bounds(pos, &facing, state.quarry_radius);
 
@@ -1560,7 +1561,7 @@ fn tick_harvester(
             .unwrap_or_else(|| "north".to_owned());
         let side = state.quarry_side_len();
         let layer_area = side * side;
-        let dim = host.dimension();
+        let _dim = host.dimension();
 
         for _ in 0..8 {
             let target_pos = rules::harvester_target_pos(pos, &facing, state);
@@ -1636,7 +1637,7 @@ fn tick_extractor(
     }
 
     if state.progress == 0 {
-        let dim = host.dimension();
+        let _dim = host.dimension();
         let filter_item = entity.items[rules::SLOT_INPUT]
             .as_ref()
             .map(|s| hc::item_id(host, &s));
@@ -1761,7 +1762,7 @@ fn tick_breaker(
 
     if state.progress >= needed {
         state.progress = 0;
-        let dim = host.dimension();
+        let _dim = host.dimension();
         hc::set_block_by_id(host, target_pos, "minecraft:air");
         state.quarry_mined += 1;
         let produced = hc::make_stack(host, &drop_item, base_count + fortune_upgrades.min(4)).expect("valid item");
@@ -2001,7 +2002,7 @@ pub(crate) fn tick(host: &mut dyn ServerHost, pos: [i32; 3], entity: &mut ModBlo
 
     if kind == MachineKind::ItemSplitter {
         if state.enabled && state.auto_io && (hc::game_time(host) % 5 == 0) {
-            let dim = host.dimension();
+            let _dim = host.dimension();
             let facing = hc::block_property_at(host, pos, "facing")
                 .unwrap_or_else(|| "north".to_owned());
             let (_, back_off) = rules::conveyor_offsets(&facing);
@@ -4278,7 +4279,7 @@ pub(crate) fn destroy_block(host: &mut dyn ServerHost, pos: [i32; 3]) {
     } else {
         ([1, 0, 0], [0, 1, 0])
     };
-    let dim = host.dimension();
+    let _dim = host.dimension();
     
     DRILL_BREAKING.store(true, std::sync::atomic::Ordering::Relaxed);
     let [cx, cy, cz] = pos;
@@ -4504,7 +4505,7 @@ pub(crate) fn use_item(host: &mut dyn ServerHost, stack: Option<&ItemStack>, _pl
             }
             return claimed;
         }
-        let dim = host.dimension();
+        let _dim = host.dimension();
         {
             if let Some(who) = host.players().acting_player() {
                 let rot = who.entity().rotation(host).unwrap_or([0.0, 0.0]);
@@ -4724,7 +4725,7 @@ pub(crate) fn right_click(host: &mut dyn ServerHost, click: &BlockClick<'_>) -> 
                         target_blk.as_str(),
                         "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" | "minecraft:water"
                     ) {
-                        let dim = host.dimension();
+                        let _dim = host.dimension();
                         if hc::set_block_by_id(host, target, held_id) {
                             let forward_facing = cardinal_facing_from_yaw(hc::acting_yaw_pitch(host).0);
                             let raw_facing = opposite_facing(forward_facing);
@@ -5469,7 +5470,7 @@ pub(crate) fn right_click(host: &mut dyn ServerHost, click: &BlockClick<'_>) -> 
             hc::run_command(host, "playsound minecraft:entity.guardian.attack player @s ~ ~ ~ 1.2 1.6");
             let [cx, cy, cz] = pos;
             let dir = [-face[0], -face[1], -face[2]];
-            let dim = host.dimension();
+            let _dim = host.dimension();
             {
                 for dist in 0..range {
                     let p = [cx + dir[0] * dist, cy + dir[1] * dist, cz + dir[2] * dist];
@@ -5737,7 +5738,7 @@ pub(crate) fn right_click(host: &mut dyn ServerHost, click: &BlockClick<'_>) -> 
     }
 
     if rules::is_item_pipe(&block_id) {
-        let dim = host.dimension();
+        let _dim = host.dimension();
         let targets = rules::find_connected_item_targets(
             pos,
             |p| rules::is_item_pipe(&hc::block_id_at(host, p)),
@@ -5810,6 +5811,7 @@ fn menu_button_for_kind(kind: MachineKind, entity: &mut ModBlockEntityView<'_>, 
     store_state(entity, &state);
 }
 
+#[allow(dead_code)]
 pub(crate) fn menu_button(entity: &mut ModBlockEntityView<'_>, id: i32) {
     if let Some(kind) = MachineKind::from_block_id(&entity.id()) {
         menu_button_for_kind(kind, entity, id);
@@ -5989,7 +5991,7 @@ fn fill_template(key: &str, args: &[String]) -> String {
 }
 
 fn draw_button(
-    host: &dyn Host,
+    _host: &dyn Host,
     draw: &mut dyn DrawContext,
     origin: [f32; 2],
     rect: [f32; 4],

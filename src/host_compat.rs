@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::runtime::MachineState;
 use mod_api::*;
 

@@ -754,14 +754,6 @@ impl MachineKind {
 }
 
 
-fn default_true() -> bool {
-    true
-}
-
-fn default_quarry_radius() -> i32 {
-    2 // 5x5 area (2*2 + 1)
-}
-
 pub const FLUID_TANK_MAX_MB: i32 = 8000;
 
 pub fn fluid_code(kind: &str) -> i32 {

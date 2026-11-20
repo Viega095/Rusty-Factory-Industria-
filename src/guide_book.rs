@@ -1089,11 +1089,25 @@ pub fn render(host: &dyn ClientHost, screen: &ScreenView, draw: &mut dyn DrawCon
 
         // Component Legend icons under controls
         draw.text("Bloques:", [ox + 196.0, oy + 180.0], 0xFF4A_3522, false);
+        let mut hovered_block: Option<&str> = None;
         for (li, &blk) in entry.legend.iter().enumerate() {
             let lx = ox + 242.0 + li as f32 * 24.0;
             let ly = oy + 176.0;
-            draw.fill([lx, ly, 18.0, 18.0], 0xFFE2_D2B5);
+            let lr = [lx, ly, 18.0, 18.0];
+            let hov = in_rect(mouse, lr);
+            draw.fill(lr, if hov { 0xFFD4_BA92 } else { 0xFFE2_D2B5 });
             draw_item_id(host, draw, blk, [lx + 1.0, ly + 1.0], 16.0);
+            if hov {
+                hovered_block = Some(blk);
+            }
+        }
+        if let Some(blk) = hovered_block {
+            let pretty = blk
+                .split(':')
+                .nth(1)
+                .unwrap_or(blk)
+                .replace('_', " ");
+            let _ = draw.gui_tooltip(&[Text::literal(pretty)], mouse);
         }
 
         // Bottom Navigation
