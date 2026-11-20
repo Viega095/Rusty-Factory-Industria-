@@ -213,10 +213,10 @@ impl Hooks for RustyFactory {
         let Some(player) = host.player(event.player) else {
             return;
         };
-        let holder = Holder::Entity(player.entity());
+        let holder = Holder::Entity(player.entity().id());
         if !STARTER_GUIDE_GIVEN.get(host, holder).unwrap_or(false) {
             if let Some(stack) = host_compat::make_stack(host, "rusty_factory:guide_book", 1) {
-                let _ = player.give_or_drop(host, stack);
+                let _ = player.give_stack(host, stack);
                 let _ = STARTER_GUIDE_GIVEN.set(host, holder, true);
             }
         }
