@@ -1,6 +1,7 @@
 pub mod runtime;
 mod host_compat;
 mod glue;
+mod guide_book;
 
 use mod_api::*;
 
@@ -151,13 +152,24 @@ impl Hooks for RustyFactory {
     ) -> Flow {
         match host {
             HostSide::Server(server) => {
+                if event.click.stack.item().id(server) == "rusty_factory:guide_book" {
+                    *event.cancellation_result = InteractionResult::Success;
+                    return Flow::Cancel;
+                }
                 if glue::use_item(server, Some(event.click.stack), event.click.player) {
                     *event.cancellation_result = InteractionResult::Success;
                     return Flow::Cancel;
                 }
                 Flow::Continue
             }
-            HostSide::Client(_) => Flow::Continue,
+            HostSide::Client(client) => {
+                if event.click.stack.item().id(client) == "rusty_factory:guide_book" {
+                    guide_book::open_book(client);
+                    *event.cancellation_result = InteractionResult::Success;
+                    return Flow::Cancel;
+                }
+                Flow::Continue
+            }
         }
     }
 
@@ -180,5 +192,57 @@ impl Hooks for RustyFactory {
         if event.stage == RenderLevelStage::AfterLevel {
             glue::world_primitives(host, event.view, event.draw);
         }
+    }
+
+    fn client_tick_post(&self, host: &mut dyn ClientHost, _event: &mut ClientTickPostEvent) {
+        guide_book::tick_close(host);
+    }
+
+    fn screen_render_post(&self, host: &dyn ClientHost, event: &mut ScreenRenderPostEvent<'_>) {
+        guide_book::render(host, event.screen, event.draw);
+    }
+
+    fn screen_mouse_button_pressed_pre(
+        &self,
+        host: &dyn ClientHost,
+        event: &mut ScreenMouseButtonPressedPreEvent<'_>,
+    ) -> Flow {
+        if guide_book::mouse_pressed(host, event.screen, event.button) {
+            return Flow::Cancel;
+        }
+        Flow::Continue
+    }
+
+    fn screen_mouse_button_released_pre(
+        &self,
+        host: &dyn ClientHost,
+        _event: &mut ScreenMouseButtonReleasedPreEvent<'_>,
+    ) -> Flow {
+        if guide_book::mouse_released(host) {
+            return Flow::Cancel;
+        }
+        Flow::Continue
+    }
+
+    fn screen_mouse_dragged_pre(
+        &self,
+        host: &dyn ClientHost,
+        event: &mut ScreenMouseDraggedPreEvent<'_>,
+    ) -> Flow {
+        if guide_book::mouse_dragged(host, event.delta) {
+            return Flow::Cancel;
+        }
+        Flow::Continue
+    }
+
+    fn screen_mouse_scrolled_pre(
+        &self,
+        host: &dyn ClientHost,
+        event: &mut ScreenMouseScrolledPreEvent<'_>,
+    ) -> Flow {
+        if guide_book::mouse_scrolled(host, event.screen, event.scroll[1]) {
+            return Flow::Cancel;
+        }
+        Flow::Continue
     }
 }

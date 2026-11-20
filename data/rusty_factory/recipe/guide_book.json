@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "equipment",
+  "ingredients": [
+    "minecraft:book",
+    "minecraft:copper_ingot"
+  ],
+  "result": {
+    "id": "rusty_factory:guide_book",
+    "count": 1
+  }
+}

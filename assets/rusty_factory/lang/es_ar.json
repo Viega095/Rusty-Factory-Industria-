@@ -147,5 +147,6 @@
   "item.rusty_factory.wireless_silo_tablet": "Control Remoto de Silos",
   "item.rusty_factory.quantum_backpack": "Mochila Cuántica Dimensional",
   "block.rusty_factory.wireless_charger": "Cargador Inalámbrico de Área (Tier 3)",
-  "block.rusty_factory.teleporter_pad": "Plataforma Teletransportadora (Tier 3)"
+  "block.rusty_factory.teleporter_pad": "Plataforma Teletransportadora (Tier 3)",
+  "item.rusty_factory.guide_book": "Manual de Rusty Factory"
 }

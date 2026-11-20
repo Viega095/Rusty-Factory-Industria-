@@ -2,6 +2,7 @@
   "title": "Rusty Factory: Armaduras y Herramientas",
   "icon": "rusty_factory:omni_tool_mk3",
   "items": [
+    "rusty_factory:guide_book",
     "rusty_factory:wrench",
     "rusty_factory:treetap",
     "rusty_factory:energy_scanner",
